@@ -1,0 +1,167 @@
+# Dynamic Device Renaming in Intune - Enhanced Version v2.0
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://github.com/PowerShell/PowerShell)
+[![Version](https://img.shields.io/badge/Version-2.0-green.svg)](https://github.com/PowerShell/PowerShell)
+
+An enhanced PowerShell script for intelligent device renaming in Microsoft Intune environments using Group Tags and Microsoft Graph API with **multiple authentication methods** and **comprehensive RBAC support**.
+
+## 🆕 What's New in v2.0
+
+- ✅ **Username/Password Authentication** - Direct user credential authentication
+- ✅ **Device Code Flow** - MFA-friendly authentication with browser verification  
+- ✅ **Interactive Browser Authentication** - Modern authentication experience
+- ✅ **Built-in RBAC Guidance** - Clear information about required Azure AD roles
+- ✅ **MFA Support** - Automatic fallback to MFA-compatible methods
+- ✅ **Enhanced Error Handling** - Permission-specific error messages and solutions
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Azure App Registration with Graph API permissions
+- Microsoft Intune environment
+- Windows Autopilot enrolled devices
+- PowerShell 5.1 or later
+- **Appropriate RBAC roles** (see detailed requirements below)
+
+### Authentication Methods
+
+#### 1. Client Credentials (Automated) 🔑
+```powershell
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "tenant-id" -ClientId "client-id" -ClientSecret "secret"
+```
+
+#### 2. Username/Password 👤
+```powershell
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "tenant-id" -ClientId "client-id" -AuthMethod "UsernamePassword" -Username "admin@domain.com"
+```
+
+#### 3. Device Code Flow (MFA-Friendly) 📱
+```powershell
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "tenant-id" -ClientId "client-id" -AuthMethod "DeviceCode"
+```
+
+#### 4. Interactive Browser 🌐
+```powershell
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "tenant-id" -ClientId "client-id" -AuthMethod "Interactive"
+```
+
+#### 5. Interactive Mode (Guided Setup) ✨
+```powershell
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -Interactive
+```
+
+## 🔐 Required RBAC Roles
+
+### For Client Credentials
+- **No user roles required** ✅ (uses application permissions)
+
+### For Username/Password Authentication
+**User must have ONE of the following Azure AD roles:**
+
+| Role | Recommended | Description |
+|------|-------------|-------------|
+| **Intune Administrator** | ⭐ **Yes** | Full Intune device management access |
+| **Global Administrator** | ⚠️ Use with caution | Full tenant access |
+| **Cloud Device Administrator** | ✅ Good option | Azure AD device management |
+| **Azure AD Joined Device Local Administrator** | ❌ Limited | Device-specific access only |
+
+## 📋 Required Graph API Permissions
+
+### Application Permissions (Client Credentials)
+- `Device.Read.All`
+- `DeviceManagementServiceConfig.Read.All`
+
+### Delegated Permissions (Username/Password, Device Code, Interactive)
+- `Device.Read.All`
+- `DeviceManagementServiceConfig.Read.All`
+- `DeviceManagementManagedDevices.Read.All`
+- `User.Read`
+
+## 🎯 Key Features
+
+- ✅ **4 Authentication Methods**: Client credentials, username/password, device code, interactive browser
+- ✅ **MFA Support**: Automatic fallback to MFA-compatible methods
+- ✅ **RBAC Integration**: Built-in role requirement information and validation
+- ✅ **Enhanced UI**: Colorful console output with clear progress indicators
+- ✅ **Debug Mode**: Safe testing without making actual changes
+- ✅ **Comprehensive Logging**: Detailed logs for troubleshooting and compliance
+- ✅ **Smart Name Calculation**: Intelligent handling of Group Tag and serial combinations
+- ✅ **Error Recovery**: Robust error handling with specific guidance
+
+## 📁 Files Included
+
+- `DeviceRename-GroupTAG-Enhanced-v2.ps1` - Enhanced PowerShell script v2.0
+- `Dynamic-Device-Renaming-Documentation-v2.md` - Comprehensive documentation
+- `README-v2.md` - This quick start guide
+- `LICENSE` - MIT License with attribution
+
+## 🔧 Authentication Method Selection Guide
+
+| Scenario | Recommended Method | Reason |
+|----------|-------------------|---------|
+| Automated deployment | Client Credentials | No user interaction needed |
+| MFA-enabled account | Device Code Flow | MFA compatible |
+| Testing/Development | Interactive Mode | Guided setup |
+| Secure environment | Device Code Flow | Can authenticate from secure device |
+| Service account | Client Credentials | Designed for service scenarios |
+
+## 📖 Documentation
+
+For detailed setup instructions, RBAC role requirements, troubleshooting, and technical implementation details, see the [comprehensive documentation](Dynamic-Device-Renaming-Documentation-v2.md).
+
+## 🏷️ Example Naming
+
+| Group Tag | Serial Number | Result | Length |
+|-----------|---------------|--------|--------|
+| `EXEC` | `ABC123DEF456` | `EXEC-ABC123DEF456` | 15 chars |
+| `DEV` | `XYZ789GHI012JKL` | `DEV-789GHI012JKL` | 15 chars |
+| `SALES` | `MNO345PQR678` | `SALES-O345PQR678` | 14 chars |
+
+## 🛠️ Quick Troubleshooting
+
+### Authentication Issues
+- **"Failed to obtain access token"** → Check credentials and RBAC roles
+- **"MFA is required"** → Script auto-falls back to Device Code Flow
+- **"Forbidden/403"** → Verify RBAC role assignments
+
+### Permission Issues
+- **"Access denied"** → Check Graph API permissions and admin consent
+- **"Invalid scope"** → Verify correct permission types (Application vs Delegated)
+
+### Device Issues
+- **"No Autopilot record found"** → Verify device is enrolled in Autopilot
+- **"GroupTag is empty"** → Assign Group Tag in Microsoft Endpoint Manager
+
+## 🧪 Testing
+
+Always test in debug mode first:
+
+```powershell
+# Test without making changes
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -Interactive -DebugMode
+```
+
+## 🤝 Attribution
+
+- **Original Concept**: [AliAlame - CYBERSYSTEM](https://www.cybersystem.ca)
+- **Enhanced Version v2.0**: Philipp Schmidt
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+1. Check the [comprehensive documentation](Dynamic-Device-Renaming-Documentation-v2.md)
+2. Run in debug mode: `-DebugMode`
+3. Review log files in `C:\ProgramData\IntuneDeviceRenamer\logs\`
+4. Verify RBAC role assignments
+5. Check Graph API permissions and admin consent
+
+---
+
+**Version**: V2.0  
+**Last Updated**: July 15, 2025  
+**PowerShell Compatibility**: 5.1+ (ISE Compatible ✅)
+

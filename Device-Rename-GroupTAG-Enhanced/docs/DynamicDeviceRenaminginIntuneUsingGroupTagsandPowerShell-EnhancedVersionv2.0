@@ -1,0 +1,925 @@
+# Dynamic Device Renaming in Intune Using Group Tags and PowerShell - Enhanced Version v2.0
+
+**Author:** Philipp Schmidt  
+**Version:** V2.0  
+**Date:** July 15, 2025  
+**Original Concept:** AliAlame - CYBERSYSTEM  
+**License:** MIT License  
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [What's New in v2.0](#whats-new-in-v20)
+3. [Authentication Methods](#authentication-methods)
+4. [RBAC Role Requirements](#rbac-role-requirements)
+5. [Prerequisites](#prerequisites)
+6. [Installation and Setup](#installation-and-setup)
+7. [Usage Examples](#usage-examples)
+8. [Script Features](#script-features)
+9. [Technical Implementation](#technical-implementation)
+10. [Troubleshooting](#troubleshooting)
+11. [License and Attribution](#license-and-attribution)
+
+---
+
+## Overview
+
+This enhanced PowerShell script provides an intelligent solution for managing device names in Microsoft Intune environments at scale. Based on the original concept by AliAlame from CYBERSYSTEM, this enhanced version v2.0 addresses the limitations of traditional Autopilot deployment profiles by leveraging Group Tags and Microsoft Graph API for dynamic device renaming.
+
+The script automatically renames AAD-joined Intune devices to a standardized format: `GroupTag-SerialTail` (≤15 characters), ensuring compliance with NetBIOS naming conventions while maintaining meaningful and organized device identification.
+
+### Key Benefits
+
+- **Multiple Authentication Methods**: Client credentials, username/password, device code flow, and interactive browser
+- **MFA Support**: Device code flow and interactive authentication support Multi-Factor Authentication
+- **Scalability**: Eliminates the 350 Autopilot profile limit
+- **Flexibility**: Uses Group Tags to define device personas or functions
+- **Automation**: Post-deployment renaming without manual intervention
+- **Compliance**: Ensures NetBIOS 15-character limit adherence
+- **RBAC Guidance**: Clear information about required Azure AD roles
+- **Enhanced Security**: Multiple secure authentication options
+
+## What's New in v2.0
+
+### 🔐 Enhanced Authentication Options
+
+- **Username/Password Authentication**: Direct user credential authentication
+- **Device Code Flow**: MFA-friendly authentication with browser verification
+- **Interactive Browser**: Modern authentication experience
+- **Improved Client Credentials**: Enhanced error handling and validation
+
+### 🎯 RBAC Role Integration
+
+- **Built-in RBAC Information**: Script displays required roles and permissions
+- **Role Validation**: Clear error messages for permission issues
+- **Multiple Role Options**: Support for different administrative roles
+
+### 🛡️ Security Improvements
+
+- **Secure Credential Handling**: Enhanced password and secret management
+- **MFA Detection**: Automatic fallback to MFA-compatible methods
+- **Permission Validation**: Better error handling for access issues
+
+### 🎨 User Experience Enhancements
+
+- **Interactive Mode**: Guided authentication method selection
+- **Colorful Output**: Enhanced visual feedback with role-specific colors
+- **Better Error Messages**: More informative error handling and guidance
+
+
+## Authentication Methods
+
+The script supports four different authentication methods to accommodate various security requirements and deployment scenarios:
+
+### 1. Client Credentials (App Registration) 🔑
+
+**Best for**: Automated/unattended scenarios, service accounts, scheduled tasks
+
+**How it works**: Uses Azure App Registration with client secret for application-level authentication.
+
+**Advantages**:
+- No user interaction required
+- Suitable for automation
+- Consistent authentication
+- No MFA complications
+
+**Requirements**:
+- Azure App Registration
+- Client Secret (or Certificate)
+- Application permissions in Graph API
+
+**Usage**:
+```powershell
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "tenant-id" -ClientId "client-id" -ClientSecret "secret"
+```
+
+### 2. Username/Password Authentication 👤
+
+**Best for**: Interactive scenarios, testing, manual execution
+
+**How it works**: Uses user credentials with Resource Owner Password Credentials (ROPC) flow.
+
+**Advantages**:
+- Direct user authentication
+- Familiar login experience
+- Uses existing user permissions
+- No app registration setup needed
+
+**Limitations**:
+- Not compatible with MFA (will auto-fallback to Device Code)
+- Requires ROPC to be enabled in tenant
+- Less secure than modern auth methods
+
+**Requirements**:
+- User account with appropriate RBAC roles
+- ROPC enabled in Azure AD (if not, will fallback to Device Code)
+- Delegated permissions in Graph API
+
+**Usage**:
+```powershell
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "tenant-id" -ClientId "client-id" -AuthMethod "UsernamePassword" -Username "admin@domain.com"
+```
+
+### 3. Device Code Flow 📱
+
+**Best for**: MFA-enabled accounts, secure environments, remote execution
+
+**How it works**: Generates a device code that user enters in a web browser on any device.
+
+**Advantages**:
+- MFA compatible
+- Can authenticate from different device
+- Secure authentication flow
+- Works in restricted environments
+
+**Process**:
+1. Script displays a URL and code
+2. User opens browser and navigates to URL
+3. User enters the code and authenticates
+4. Script receives authentication token
+
+**Requirements**:
+- User account with appropriate RBAC roles
+- Access to web browser (can be on different device)
+- Delegated permissions in Graph API
+
+**Usage**:
+```powershell
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "tenant-id" -ClientId "client-id" -AuthMethod "DeviceCode"
+```
+
+### 4. Interactive Browser Authentication 🌐
+
+**Best for**: Modern authentication experience, development/testing
+
+**How it works**: Opens browser window for interactive authentication.
+
+**Advantages**:
+- Modern authentication experience
+- MFA compatible
+- Familiar login interface
+- Supports all authentication methods (password, MFA, SSO)
+
+**Requirements**:
+- User account with appropriate RBAC roles
+- Local browser access
+- Delegated permissions in Graph API
+
+**Usage**:
+```powershell
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "tenant-id" -ClientId "client-id" -AuthMethod "Interactive"
+```
+
+### Authentication Method Selection Guide
+
+| Scenario | Recommended Method | Reason |
+|----------|-------------------|---------|
+| Automated deployment | Client Credentials | No user interaction needed |
+| MFA-enabled account | Device Code Flow | MFA compatible |
+| Testing/Development | Username/Password or Interactive | Easy to use |
+| Secure environment | Device Code Flow | Can authenticate from secure device |
+| Service account | Client Credentials | Designed for service scenarios |
+| Remote execution | Device Code Flow | Browser can be on different device |
+
+
+## RBAC Role Requirements
+
+Understanding the required Azure AD roles is crucial for successful script execution. The requirements differ based on the authentication method used.
+
+### For Client Credentials (App Registration) 🔑
+
+**User Role Requirements**: **NONE** ✅
+
+When using Client Credentials authentication, no specific user roles are required because the authentication is performed at the application level using application permissions.
+
+**Required Setup**:
+- Azure App Registration with appropriate API permissions
+- Admin consent granted for application permissions
+- Client Secret or Certificate configured
+
+### For Username/Password Authentication 👤
+
+**Required Azure AD Roles** (user must have ONE of the following):
+
+#### 1. Intune Administrator (Recommended) ⭐
+
+**Description**: Provides full access to Microsoft Intune device management capabilities.
+
+**Permissions Include**:
+- Read and manage all Intune device configurations
+- Access to Autopilot device information
+- Device enrollment and management
+- Policy assignment and configuration
+
+**Scope**: Microsoft Intune services only
+
+**Why Recommended**: 
+- Principle of least privilege
+- Focused on device management tasks
+- Sufficient permissions for script operation
+
+#### 2. Global Administrator 🔐
+
+**Description**: Full administrative access to all Azure AD and Microsoft 365 services.
+
+**Permissions Include**:
+- All Intune Administrator permissions
+- Full tenant administration capabilities
+- Access to all Microsoft 365 services
+- User and group management
+
+**Scope**: Entire Microsoft 365 tenant
+
+**Caution**: Use sparingly due to broad permissions
+
+#### 3. Cloud Device Administrator 💻
+
+**Description**: Manages device objects in Azure Active Directory.
+
+**Permissions Include**:
+- Read and manage Azure AD device objects
+- Device registration and management
+- Access to device properties and configurations
+- BitLocker key management
+
+**Scope**: Azure AD device management
+
+**Note**: May have limited Intune-specific permissions
+
+#### 4. Azure AD Joined Device Local Administrator 🖥️
+
+**Description**: Local administrator rights on specific Azure AD joined devices.
+
+**Permissions Include**:
+- Local administrative access to assigned devices
+- Device-specific management capabilities
+- Limited to explicitly granted devices
+
+**Scope**: Specific devices only
+
+**Limitation**: May not have sufficient Graph API permissions
+
+### Role Assignment Verification
+
+To verify a user's role assignments:
+
+```powershell
+# Connect to Azure AD PowerShell
+Connect-AzureAD
+
+# Check user's directory roles
+$user = Get-AzureADUser -ObjectId "user@domain.com"
+$roles = Get-AzureADDirectoryRole | ForEach-Object {
+    $role = $_
+    $members = Get-AzureADDirectoryRoleMember -ObjectId $role.ObjectId
+    if ($members.ObjectId -contains $user.ObjectId) {
+        $role.DisplayName
+    }
+}
+$roles
+```
+
+### Graph API Permissions Required
+
+The script requires different Graph API permissions based on authentication method:
+
+#### Application Permissions (Client Credentials)
+
+```json
+{
+  "requiredResourceAccess": [
+    {
+      "resourceAppId": "00000003-0000-0000-c000-000000000000",
+      "resourceAccess": [
+        {
+          "id": "7438b122-aefc-4978-80ed-43db9fcc7715",
+          "type": "Role"
+        },
+        {
+          "id": "5ac13192-7ace-4fcf-b828-1a26f28068ee",
+          "type": "Role"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Permissions**:
+- `Device.Read.All` (7438b122-aefc-4978-80ed-43db9fcc7715)
+- `DeviceManagementServiceConfig.Read.All` (5ac13192-7ace-4fcf-b828-1a26f28068ee)
+
+#### Delegated Permissions (Username/Password, Device Code, Interactive)
+
+```json
+{
+  "requiredResourceAccess": [
+    {
+      "resourceAppId": "00000003-0000-0000-c000-000000000000",
+      "resourceAccess": [
+        {
+          "id": "7438b122-aefc-4978-80ed-43db9fcc7715",
+          "type": "Scope"
+        },
+        {
+          "id": "5ac13192-7ace-4fcf-b828-1a26f28068ee",
+          "type": "Scope"
+        },
+        {
+          "id": "314874da-47d6-4978-88dc-cf0d37f0bb82",
+          "type": "Scope"
+        },
+        {
+          "id": "e1fe6dd8-ba31-4d61-89e7-88639da4683d",
+          "type": "Scope"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Permissions**:
+- `Device.Read.All` (7438b122-aefc-4978-80ed-43db9fcc7715)
+- `DeviceManagementServiceConfig.Read.All` (5ac13192-7ace-4fcf-b828-1a26f28068ee)
+- `DeviceManagementManagedDevices.Read.All` (314874da-47d6-4978-88dc-cf0d37f0bb82)
+- `User.Read` (e1fe6dd8-ba31-4d61-89e7-88639da4683d)
+
+### Additional Considerations
+
+#### Multi-Factor Authentication (MFA)
+
+- **Username/Password**: Not compatible with MFA (script will auto-fallback to Device Code)
+- **Device Code Flow**: Fully MFA compatible
+- **Interactive Browser**: Fully MFA compatible
+- **Client Credentials**: Not affected by MFA policies
+
+#### Conditional Access Policies
+
+Conditional Access policies may affect authentication:
+
+- **Device-based policies**: May block authentication from unmanaged devices
+- **Location-based policies**: May require authentication from specific locations
+- **Application-based policies**: May require specific client applications
+
+#### Account Status Requirements
+
+- Account must be **enabled** and not blocked
+- Account must have appropriate **licenses** (Intune, Azure AD P1/P2 if required)
+- Account must not be subject to **sign-in restrictions**
+- Password must not be **expired** or require change
+
+### Troubleshooting RBAC Issues
+
+#### Common Error Messages and Solutions
+
+| Error Message | Likely Cause | Solution |
+|---------------|--------------|----------|
+| "Forbidden" or "403" | Insufficient permissions | Verify RBAC role assignment |
+| "Unauthorized" or "401" | Authentication failure | Check credentials and MFA |
+| "Access denied" | Missing Graph permissions | Verify API permissions and consent |
+| "Invalid scope" | Wrong permission type | Check application vs delegated permissions |
+
+#### RBAC Validation Script
+
+```powershell
+# Test Graph API access with current credentials
+$headers = @{ Authorization = "Bearer $accessToken" }
+try {
+    $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/beta/deviceManagement/windowsAutopilotDeviceIdentities" -Headers $headers -Method GET
+    Write-Host "✅ RBAC permissions validated successfully" -ForegroundColor Green
+} catch {
+    Write-Host "❌ RBAC validation failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+```
+
+
+## Prerequisites
+
+### Azure Environment Requirements
+
+1. **Azure Active Directory**: Properly configured AAD environment
+2. **Microsoft Intune**: Active Intune subscription and configuration
+3. **Autopilot Enrollment**: Devices must be enrolled through Windows Autopilot
+4. **Administrative Access**: Appropriate RBAC roles as outlined above
+
+### Azure App Registration Setup
+
+#### Step 1: Create App Registration
+
+1. Navigate to **Azure Portal** → **Azure Active Directory** → **App registrations**
+2. Click **New registration**
+3. Provide a meaningful name (e.g., "IntuneDeviceRenamer")
+4. Select **Accounts in this organizational directory only**
+5. **Redirect URI**: Leave blank for Client Credentials, or set to `http://localhost` for other methods
+6. Click **Register**
+
+#### Step 2: Configure Authentication (for Username/Password methods)
+
+1. Go to **Authentication** in your app registration
+2. Under **Advanced settings**, enable **Allow public client flows**
+3. This enables the Resource Owner Password Credentials (ROPC) flow
+
+#### Step 3: Configure API Permissions
+
+Choose permissions based on your authentication method:
+
+**For Client Credentials**:
+1. Click **Add a permission** → **Microsoft Graph** → **Application permissions**
+2. Add:
+   - `Device.Read.All`
+   - `DeviceManagementServiceConfig.Read.All`
+3. Click **Grant admin consent for [your organization]**
+
+**For Username/Password, Device Code, Interactive**:
+1. Click **Add a permission** → **Microsoft Graph** → **Delegated permissions**
+2. Add:
+   - `Device.Read.All`
+   - `DeviceManagementServiceConfig.Read.All`
+   - `DeviceManagementManagedDevices.Read.All`
+   - `User.Read`
+3. Click **Grant admin consent for [your organization]**
+
+#### Step 4: Generate Client Secret (for Client Credentials)
+
+1. Go to **Certificates & secrets**
+2. Click **New client secret**
+3. Provide description and select expiration
+4. **Important**: Copy and securely store:
+   - **Client ID** (from Overview page)
+   - **Tenant ID** (from Overview page)
+   - **Client Secret** (from Certificates & secrets page)
+
+### PowerShell Environment
+
+- **PowerShell Version**: 5.1 or later (PowerShell 7+ recommended)
+- **Execution Policy**: Set to allow script execution
+- **Network Access**: Outbound HTTPS access to Microsoft Graph endpoints
+- **Administrative Rights**: Local administrator privileges on target devices
+
+## Installation and Setup
+
+### Step 1: Download the Script
+
+Download the enhanced PowerShell script `DeviceRename-GroupTAG-Enhanced-v2.ps1` to your desired location.
+
+### Step 2: Set Execution Policy (if needed)
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+### Step 3: Test Authentication
+
+Before deploying, test the authentication method you plan to use:
+
+```powershell
+# Test in debug mode first
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -Interactive -DebugMode
+```
+
+### Step 4: Deploy via Intune
+
+1. **Create PowerShell Script Policy**:
+   - Go to **Microsoft Endpoint Manager admin center**
+   - Navigate to **Devices** → **Scripts**
+   - Click **Add** → **Windows 10 and later**
+
+2. **Configure Script Settings**:
+   - **Name**: Dynamic Device Renaming v2.0
+   - **Description**: Enhanced device renaming with multiple auth methods
+   - **Script location**: Upload your script file
+   - **Run this script using the logged on credentials**: No (for Client Credentials)
+   - **Enforce script signature check**: No (unless signed)
+   - **Run script in 64 bit PowerShell Host**: Yes
+
+3. **Configure Parameters** (if using parameter-based deployment):
+   ```powershell
+   -TenantId "your-tenant-id" -ClientId "your-client-id" -ClientSecret "your-secret"
+   ```
+
+## Usage Examples
+
+### Example 1: Client Credentials (Automated)
+
+```powershell
+# Basic client credentials authentication
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "12345678-1234-1234-1234-123456789012" -ClientId "87654321-4321-4321-4321-210987654321" -ClientSecret "your-secret-here"
+```
+
+### Example 2: Username/Password Authentication
+
+```powershell
+# Username/password with interactive password prompt
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "12345678-1234-1234-1234-123456789012" -ClientId "87654321-4321-4321-4321-210987654321" -AuthMethod "UsernamePassword" -Username "admin@contoso.com"
+
+# Username/password with secure string password
+$securePassword = ConvertTo-SecureString "YourPassword" -AsPlainText -Force
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "12345678-1234-1234-1234-123456789012" -ClientId "87654321-4321-4321-4321-210987654321" -AuthMethod "UsernamePassword" -Username "admin@contoso.com" -Password $securePassword
+```
+
+### Example 3: Device Code Flow (MFA-Friendly)
+
+```powershell
+# Device code authentication
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "12345678-1234-1234-1234-123456789012" -ClientId "87654321-4321-4321-4321-210987654321" -AuthMethod "DeviceCode"
+```
+
+**Expected Output**:
+```
+=== DEVICE CODE AUTHENTICATION ===
+Please follow these steps:
+1. Open a web browser and go to: https://microsoft.com/devicelogin
+2. Enter this code: ABC123DEF
+3. Sign in with an account that has the required RBAC roles
+Waiting for authentication...
+```
+
+### Example 4: Interactive Browser Authentication
+
+```powershell
+# Interactive browser authentication
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -TenantId "12345678-1234-1234-1234-123456789012" -ClientId "87654321-4321-4321-4321-210987654321" -AuthMethod "Interactive"
+```
+
+### Example 5: Interactive Mode with Method Selection
+
+```powershell
+# Let the script guide you through authentication method selection
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -Interactive
+```
+
+**Expected Output**:
+```
+=== Authentication Method Selection ===
+Available authentication methods:
+1. Client Credentials (App Registration)
+2. Username/Password
+3. Device Code Flow (MFA-friendly)
+4. Interactive Browser
+Select authentication method (1-4): 3
+```
+
+### Example 6: Debug Mode Testing
+
+```powershell
+# Test any authentication method without making changes
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -Interactive -DebugMode
+```
+
+### Example 7: Intune Deployment with Parameters
+
+For Intune deployment, you can embed parameters directly in the script or use a wrapper script:
+
+```powershell
+# Wrapper script for Intune deployment
+param()
+
+# Set your tenant-specific values
+$TenantId = "your-tenant-id"
+$ClientId = "your-client-id"
+$ClientSecret = "your-client-secret"
+
+# Execute the main script
+& ".\DeviceRename-GroupTAG-Enhanced-v2.ps1" -TenantId $TenantId -ClientId $ClientId -ClientSecret $ClientSecret
+```
+
+### Authentication Method Decision Tree
+
+```
+Start
+├── Automated/Unattended? 
+│   ├── Yes → Use Client Credentials
+│   └── No → Continue
+├── User has MFA enabled?
+│   ├── Yes → Use Device Code Flow or Interactive
+│   └── No → Continue
+├── Need browser access?
+│   ├── No → Use Device Code Flow
+│   └── Yes → Use Interactive or Username/Password
+└── Testing/Development?
+    ├── Yes → Use Interactive mode
+    └── No → Use Username/Password
+```
+
+
+## Script Features
+
+### Enhanced Authentication System
+
+- **Multiple Auth Methods**: Client credentials, username/password, device code, interactive browser
+- **MFA Support**: Automatic fallback to MFA-compatible methods when needed
+- **Secure Credential Handling**: Proper SecureString usage and memory cleanup
+- **Authentication Validation**: Built-in testing and validation of credentials
+
+### Advanced User Interface
+
+- **Colorful Console Output**: Role-specific color coding for different message types
+- **Interactive Mode**: Guided authentication method selection and configuration
+- **RBAC Information Display**: Built-in help for role requirements and permissions
+- **Progress Indicators**: Clear feedback on script execution progress
+
+### Robust Error Handling
+
+- **Permission-Specific Errors**: Detailed error messages for RBAC and permission issues
+- **Authentication Fallbacks**: Automatic fallback from username/password to device code for MFA
+- **Network Error Handling**: Retry logic and clear error messages for connectivity issues
+- **Validation Checks**: Pre-execution validation of credentials and permissions
+
+### Security Enhancements
+
+- **Credential Protection**: Secure handling of passwords and secrets
+- **Memory Cleanup**: Automatic clearing of sensitive data from memory
+- **Permission Validation**: Verification of required Graph API permissions
+- **Audit Trail**: Comprehensive logging for security and compliance
+
+### Deployment Flexibility
+
+- **Multiple Deployment Methods**: Support for various deployment scenarios
+- **Parameter Flexibility**: Support for both interactive and automated parameter passing
+- **Debug Mode**: Safe testing without making actual changes
+- **Intune Integration**: Optimized for Microsoft Intune deployment
+
+## Technical Implementation
+
+### Authentication Flow Details
+
+#### Client Credentials Flow
+```
+1. Script → Azure AD Token Endpoint
+2. POST with client_id, client_secret, grant_type=client_credentials
+3. Azure AD validates app registration and secret
+4. Returns access_token with application permissions
+5. Script uses token for Graph API calls
+```
+
+#### Username/Password Flow (ROPC)
+```
+1. Script → Azure AD Token Endpoint
+2. POST with client_id, username, password, grant_type=password
+3. Azure AD validates user credentials
+4. If MFA required → Automatic fallback to Device Code Flow
+5. Returns access_token with delegated permissions
+6. Script uses token for Graph API calls
+```
+
+#### Device Code Flow
+```
+1. Script → Azure AD Device Code Endpoint
+2. POST with client_id and scope
+3. Azure AD returns device_code and user_code
+4. User navigates to verification_uri and enters user_code
+5. Script polls token endpoint until user completes authentication
+6. Returns access_token with delegated permissions
+7. Script uses token for Graph API calls
+```
+
+### Graph API Integration
+
+The script uses the following Microsoft Graph endpoints:
+
+- **Authentication**: `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token`
+- **Device Code**: `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode`
+- **Autopilot Devices**: `https://graph.microsoft.com/beta/deviceManagement/windowsAutopilotDeviceIdentities`
+
+### Name Calculation Algorithm
+
+```powershell
+# Pseudocode for name calculation
+function Calculate-DeviceName($GroupTag, $SerialNumber) {
+    $CleanSerial = $SerialNumber -replace '[^0-9A-Za-z]', ''
+    $MaxLength = 15
+    $BaseLength = $GroupTag.Length + 1  # +1 for hyphen
+    $AvailableLength = $MaxLength - $BaseLength
+    
+    if ($AvailableLength <= 0) {
+        throw "GroupTag too long"
+    }
+    
+    $SerialTail = if ($CleanSerial.Length <= $AvailableLength) {
+        $CleanSerial
+    } else {
+        $CleanSerial.Substring($CleanSerial.Length - $AvailableLength)
+    }
+    
+    return "$GroupTag-$SerialTail"
+}
+```
+
+## Troubleshooting
+
+### Authentication Issues
+
+#### Problem: "Failed to obtain access token"
+
+**For Client Credentials**:
+1. Verify Client ID, Tenant ID, and Client Secret are correct
+2. Check that the Azure App Registration exists and is enabled
+3. Ensure the client secret hasn't expired
+4. Verify application permissions are granted and admin consent is provided
+
+**For Username/Password**:
+1. Verify username and password are correct
+2. Check that the user account is enabled and not locked
+3. Ensure the user has the required RBAC roles
+4. Verify ROPC is enabled in the tenant (or use Device Code Flow)
+
+**For Device Code Flow**:
+1. Ensure the user completes authentication within the time limit
+2. Verify the user has the required RBAC roles
+3. Check that the device code hasn't expired
+4. Ensure the user is signing in with the correct account
+
+#### Problem: "MFA is required" or "AADSTS50076"
+
+**Solution**: The script will automatically fall back to Device Code Flow when MFA is detected.
+
+**Manual Override**:
+```powershell
+# Force Device Code Flow for MFA accounts
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -AuthMethod "DeviceCode" -TenantId "tenant-id" -ClientId "client-id"
+```
+
+### Permission Issues
+
+#### Problem: "Forbidden" or "403 Access Denied"
+
+**Diagnosis Steps**:
+1. Verify the user/app has the required RBAC roles
+2. Check Graph API permissions are correctly configured
+3. Ensure admin consent has been granted
+4. Verify the permissions are the correct type (Application vs Delegated)
+
+**RBAC Verification**:
+```powershell
+# Check user's Azure AD roles
+Connect-AzureAD
+$user = Get-AzureADUser -ObjectId "user@domain.com"
+Get-AzureADDirectoryRole | ForEach-Object {
+    $members = Get-AzureADDirectoryRoleMember -ObjectId $_.ObjectId
+    if ($members.ObjectId -contains $user.ObjectId) {
+        Write-Host "User has role: $($_.DisplayName)"
+    }
+}
+```
+
+#### Problem: "Invalid scope" or "AADSTS70011"
+
+**Cause**: Incorrect Graph API permissions or scope configuration
+
+**Solution**:
+1. Verify the correct permissions are configured in the app registration
+2. Check that the scope parameter matches the authentication method
+3. Ensure admin consent has been granted for the permissions
+
+### Device and Naming Issues
+
+#### Problem: "No Autopilot record found for serial"
+
+**Solutions**:
+1. Verify the device is enrolled in Windows Autopilot
+2. Check that the serial number is correct and matches exactly
+3. Ensure the device has completed initial Autopilot enrollment
+4. Confirm the device appears in Microsoft Endpoint Manager
+
+#### Problem: "GroupTag is empty"
+
+**Solutions**:
+1. Assign a Group Tag to the device in Microsoft Endpoint Manager
+2. Navigate to **Devices** → **Windows** → **Windows enrollment** → **Devices**
+3. Select the device and assign an appropriate Group Tag
+4. Ensure the Group Tag is meaningful and concise
+
+#### Problem: "GroupTag too long for NetBIOS limit"
+
+**Solutions**:
+1. Use shorter Group Tags (recommended: 3-8 characters)
+2. Consider abbreviations or codes for department/function names
+3. Remember that the total device name must be ≤15 characters
+
+### Network and Connectivity Issues
+
+#### Problem: Network connectivity failures
+
+**Diagnosis**:
+```powershell
+# Test connectivity to required endpoints
+$endpoints = @(
+    "https://graph.microsoft.com",
+    "https://login.microsoftonline.com"
+)
+
+foreach ($endpoint in $endpoints) {
+    try {
+        $response = Invoke-WebRequest -Uri $endpoint -UseBasicParsing -TimeoutSec 10
+        Write-Host "✅ $endpoint - OK" -ForegroundColor Green
+    } catch {
+        Write-Host "❌ $endpoint - FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+```
+
+**Solutions**:
+1. Check firewall and proxy settings
+2. Verify outbound HTTPS (443) access is allowed
+3. Configure proxy settings if required
+4. Check DNS resolution for Microsoft endpoints
+
+### Debug Mode Usage
+
+Always test in debug mode first:
+
+```powershell
+# Test without making changes
+.\DeviceRename-GroupTAG-Enhanced-v2.ps1 -Interactive -DebugMode
+```
+
+Debug mode provides:
+- Detailed execution flow
+- API request/response information
+- Name calculation verification
+- Simulated operations without actual changes
+
+### Log File Analysis
+
+**Log Location**: `C:\ProgramData\IntuneDeviceRenamer\logs\`
+
+**Key Log Patterns**:
+- `[SUCCESS]` - Operation completed successfully
+- `[ERROR]` - Operation failed, check details
+- `[WARNING]` - Potential issue or fallback occurred
+- `[DEBUG]` - Detailed information for troubleshooting
+
+## License and Attribution
+
+### MIT License
+
+This enhanced version is released under the MIT License, maintaining compatibility with the original implementation.
+
+```
+MIT License
+
+Copyright (c) 2025 Philipp Schmidt
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Attribution
+
+- **Original Concept**: AliAlame - CYBERSYSTEM
+  - Website: https://www.cybersystem.ca
+  - Original Blog Post: [Dynamic Device Renaming in Intune Using Group Tags and PowerShell](https://www.cybersystem.ca/blog/-dynamic-device-renaming-in-intune-using-group-tags-and-powershell)
+  - GitHub Repository: https://github.com/CYEBRSYSTEM-AliAlame/Intune
+
+- **Enhanced Version v2.0**: Philipp Schmidt
+  - Enhancements include: multiple authentication methods, RBAC integration, MFA support, enhanced UI, comprehensive error handling, and detailed documentation
+
+### Usage Rights
+
+You are free to:
+- Use this script in commercial and non-commercial environments
+- Modify and adapt the script for your specific needs
+- Distribute the script and modifications
+- Include the script in larger automation frameworks
+
+### Requirements
+
+When redistributing or modifying this script, please:
+- Maintain the original attribution to AliAlame for the base concept
+- Include appropriate attribution for the enhanced version
+- Preserve the MIT License terms
+- Document any significant modifications
+
+---
+
+**Document Version**: V2.0  
+**Last Updated**: July 15, 2025  
+**Author**: Philipp Schmidt  
+**Original Concept**: AliAlame - CYBERSYSTEM
+
+### Support and Contributing
+
+For issues, improvements, or contributions, please ensure you:
+1. Test thoroughly in debug mode first
+2. Include relevant log files and error messages
+3. Specify the authentication method and RBAC roles used
+4. Document any customizations or environmental factors
+
