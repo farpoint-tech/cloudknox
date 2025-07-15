@@ -1,0 +1,1660 @@
+#Requires -Version 5.1
+<#
+=============================================================================================
+Name:           Enterprise Office 365 External Sharing Audit & Compliance Report
+Version:        5.0 Enterprise Edition
+Author:         CloudKnox
+Website:        https://cloudknox.me
+License:        Enterprise Security License
+
+SCRIPT OVERVIEW & PURPOSE:
+==========================
+This enterprise-grade PowerShell script provides comprehensive auditing and monitoring of 
+external sharing activities across your Microsoft 365 environment. It addresses critical 
+security and compliance requirements by tracking when sensitive data is shared outside 
+your organization.
+
+WHAT THIS SCRIPT AUDITS & REPORTS:
+==================================
+• External file and folder sharing via SharePoint Online and OneDrive
+• Anonymous link creation (anyone with link can access)
+• Guest user invitations and permissions granted
+• Sharing invitation events and recipient details
+• Secure link sharing activities
+• Risk assessment of shared content based on file types and sharing methods
+• User behavior patterns and potential security violations
+• Compliance violations and policy breaches
+
+WHY YOU NEED THIS SOLUTION:
+============================
+✓ SECURITY COMPLIANCE: Meet regulatory requirements (GDPR, HIPAA, SOX, etc.)
+✓ DATA PROTECTION: Identify and prevent unauthorized data exposure
+✓ RISK MITIGATION: Detect suspicious sharing patterns and insider threats
+✓ AUDIT TRAIL: Maintain detailed logs for forensic analysis and compliance reporting
+✓ GOVERNANCE: Enforce organizational data sharing policies
+✓ INCIDENT RESPONSE: Rapid identification of potential data breaches
+
+AZURE AD APP REGISTRATION PERMISSIONS REQUIRED:
+===============================================
+The following Microsoft Graph and Exchange Online permissions are required for automated execution:
+
+Microsoft Graph API Permissions (Application Permissions):
+• AuditLog.Read.All - Read audit log data
+• Reports.Read.All - Read usage reports
+• Directory.Read.All - Read directory data
+• Sites.Read.All - Read SharePoint sites and content
+• Files.Read.All - Read files in all site collections
+
+Exchange Online API Permissions (Application Permissions):
+• Exchange.ManageAsApp - Full access to Exchange Online
+• ActivityFeed.Read - Read activity feed
+• Compliance.ManageAsApp - Manage compliance features
+
+Azure AD Roles Required:
+• Global Reader (minimum)
+• Security Reader (recommended)
+• Compliance Administrator (for full functionality)
+
+AUTOMATED EXECUTION SETUP:
+==========================
+For production deployment with Windows Task Scheduler:
+
+1. AZURE AD APP REGISTRATION:
+   - Register application in Azure AD
+   - Configure required API permissions (listed above)
+   - Grant admin consent for all permissions
+   - Generate client secret or upload certificate
+   - Note: Client secrets expire - use certificates for long-term automation
+
+2. WINDOWS TASK SCHEDULER CONFIGURATION:
+   - Create new task with "Run with highest privileges"
+   - Set trigger for daily execution (recommended: 6:00 AM)
+   - Configure action: powershell.exe -ExecutionPolicy Bypass -File "ScriptPath"
+   - Set task to run whether user is logged on or not
+   - Configure for appropriate Windows version
+
+3. SECURITY HARDENING:
+   - Store credentials in Azure Key Vault (production)
+   - Use certificate-based authentication when possible
+   - Implement least-privilege access principles
+   - Regular credential rotation (90-day cycle recommended)
+   - Monitor script execution logs for anomalies
+
+CONFIGURATION PARAMETERS:
+=========================
+Update these variables with your environment-specific values before deployment.
+For production environments, integrate with Azure Key Vault or secure credential storage.
+============================================================================================
+#>
+
+# ============================================================================
+# CONFIGURATION VARIABLES - UPDATE THESE VALUES
+# ============================================================================
+param(
+    [Parameter(Mandatory = $false)]
+    [string]$TenantId = "YOUR_TENANT_ID_HERE",
+    
+    [Parameter(Mandatory = $false)]
+    [string]$ClientId = "YOUR_APP_REGISTRATION_CLIENT_ID_HERE",
+    
+    [Parameter(Mandatory = $false)]
+    [string]$ClientSecret = "YOUR_CLIENT_SECRET_HERE",
+    
+    [Parameter(Mandatory = $false)]
+    [string]$CertificateThumbprint = "",  # Use for certificate-based auth (recommended)
+    
+    [Parameter(Mandatory = $false)]
+    [string]$KeyVaultName = "",  # Azure Key Vault name for secure credential storage
+    
+    [Parameter(Mandatory = $false)]
+    [string]$ConfigPath = ".\ExternalSharingConfig.json",
+    
+    [Parameter(Mandatory = $false)]
+    [int]$DaysToAudit = 1,
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$SendEmail,
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$UseKeyVault,
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$DetailedLogging
+)
+
+# ============================================================================
+# ENTERPRISE CONFIGURATION STRUCTURE
+# ============================================================================
+$defaultConfig = @{
+    "AzureApp" = @{
+        "TenantId" = $TenantId
+        "ClientId" = $ClientId
+        "ClientSecret" = ""  # Will be retrieved from Key Vault in production
+        "CertificateThumbprint" = $CertificateThumbprint
+        "KeyVaultName" = $KeyVaultName
+        "UseKeyVault" = $UseKeyVault.IsPresent
+    }
+    "EmailSettings" = @{
+        "Enabled" = $false
+        "UseGraphAPI" = $true  # Use Microsoft Graph for email (secure)
+        "GraphTenantId" = $TenantId
+        "GraphClientId" = ""  # Separate app registration for email
+        "GraphClientSecret" = ""  # Stored in Key Vault
+        "FromAddress" = "security-reports@yourdomain.com"
+        "ToAddresses" = @("security-team@yourdomain.com", "compliance@yourdomain.com")
+        "Subject" = "External Sharing Security Report - {Date}"
+        "Template" = "SecurityReport"
+    }
+    "SecuritySettings" = @{
+        "HighRiskFileTypes" = @(".docx", ".xlsx", ".pdf", ".pptx", ".zip", ".rar")
+        "SensitiveKeywords" = @("confidential", "secret", "internal", "restricted", "private")
+        "MaxAllowedAnonymousShares" = 10
+        "AlertThresholds" = @{
+            "HighRiskShares" = 5
+            "AnonymousLinks" = 3
+            "ExternalUsers" = 20
+        }
+    }
+    "ReportSettings" = @{
+        "OutputPath" = "C:\Reports\ExternalSharing"
+        "RetentionDays" = 90
+        "IncludeSharePoint" = $true
+        "IncludeOneDrive" = $true
+        "IncludeTeams" = $true
+        "GenerateExecutiveSummary" = $true
+        "ComplianceReporting" = $true
+    }
+    "Logging" = @{
+        "LogPath" = "C:\Logs\ExternalSharing"
+        "LogLevel" = "Info"
+        "MaxLogSizeMB" = 50
+        "EnableSyslog" = $false
+        "SyslogServer" = ""
+        "EnableAuditLog" = $true
+    }
+}
+
+# Global variables
+$script:LogPath = ""
+$script:Config = $null
+$script:StartTime = Get-Date
+$script:ExecutionId = [System.Guid]::NewGuid().ToString()
+
+#region Security & Credential Management
+function Get-SecureCredential {
+    param(
+        [string]$KeyVaultName,
+        [string]$SecretName,
+        [string]$FallbackValue
+    )
+    
+    if ($KeyVaultName -and $UseKeyVault) {
+        try {
+            # Attempt to retrieve from Azure Key Vault
+            Import-Module Az.KeyVault -Force
+            $secret = Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name $SecretName -AsPlainText
+            if ($secret) {
+                Write-Log "Successfully retrieved '$SecretName' from Key Vault" -Level Info
+                return $secret
+            }
+        }
+        catch {
+            Write-Log "Failed to retrieve '$SecretName' from Key Vault: $($_.Exception.Message)" -Level Warning
+        }
+    }
+    
+    if ($FallbackValue -and $FallbackValue -ne "YOUR_CLIENT_SECRET_HERE") {
+        Write-Log "Using fallback credential for '$SecretName'" -Level Warning
+        return $FallbackValue
+    }
+    
+    throw "No secure credential found for '$SecretName'. Configure Key Vault or provide fallback value."
+}
+
+function Initialize-SecureAuthentication {
+    param($AzureAppConfig)
+    
+    Write-Log "Initializing secure authentication..." -Level Info
+    
+    # Retrieve credentials securely
+    if ($AzureAppConfig.UseKeyVault -and $AzureAppConfig.KeyVaultName) {
+        try {
+            # Connect to Azure for Key Vault access
+            Connect-AzAccount -Identity -ErrorAction Stop
+            
+            $AzureAppConfig.ClientSecret = Get-SecureCredential -KeyVaultName $AzureAppConfig.KeyVaultName -SecretName "ExternalSharingClientSecret" -FallbackValue $ClientSecret
+            
+            Write-Log "Secure authentication configured with Key Vault" -Level Info
+        }
+        catch {
+            Write-Log "Key Vault authentication failed, falling back to provided credentials" -Level Warning
+            if ($ClientSecret -eq "YOUR_CLIENT_SECRET_HERE") {
+                throw "No valid credentials available. Configure Key Vault or provide client secret."
+            }
+            $AzureAppConfig.ClientSecret = $ClientSecret
+        }
+    }
+    else {
+        if ($ClientSecret -eq "YOUR_CLIENT_SECRET_HERE") {
+            throw "Client secret not configured. Update the script parameters or use Key Vault."
+        }
+        $AzureAppConfig.ClientSecret = $ClientSecret
+        Write-Log "Using provided client secret (not recommended for production)" -Level Warning
+    }
+}
+#endregion
+
+#region Enhanced Logging Framework
+function Write-Log {
+    param(
+        [string]$Message,
+        [ValidateSet("Debug", "Info", "Warning", "Error", "Critical")]
+        [string]$Level = "Info",
+        [string]$Component = "Main"
+    )
+    
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+    $logEntry = "[$timestamp] [$Level] [$Component] [ID:$($script:ExecutionId.Substring(0,8))] $Message"
+    
+    # Console output with enhanced colors
+    switch ($Level) {
+        "Debug" { if ($DetailedLogging -or $VerbosePreference -eq "Continue") { Write-Host $logEntry -ForegroundColor Gray } }
+        "Info" { Write-Host $logEntry -ForegroundColor Green }
+        "Warning" { Write-Host $logEntry -ForegroundColor Yellow }
+        "Error" { Write-Host $logEntry -ForegroundColor Red }
+        "Critical" { Write-Host $logEntry -ForegroundColor Magenta }
+    }
+    
+    # File output with rotation
+    if ($script:LogPath) {
+        Add-Content -Path $script:LogPath -Value $logEntry
+        
+        # Check log file size and rotate if necessary
+        $logFile = Get-Item $script:LogPath -ErrorAction SilentlyContinue
+        if ($logFile -and $logFile.Length -gt ($script:Config.Logging.MaxLogSizeMB * 1MB)) {
+            $archivePath = $script:LogPath -replace "\.log$", "_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+            Move-Item $script:LogPath $archivePath
+            Write-Host "Log rotated to: $archivePath" -ForegroundColor Cyan
+        }
+    }
+    
+    # Security event logging
+    if ($Level -in @("Error", "Critical")) {
+        Write-EventLog -LogName "Application" -Source "CloudKnox External Sharing" -EventId 1001 -EntryType Error -Message $logEntry -ErrorAction SilentlyContinue
+    }
+}
+
+function Initialize-Logging {
+    param($LogSettings)
+    
+    $logDir = $LogSettings.LogPath
+    if (-not (Test-Path $logDir)) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    }
+    
+    $logFileName = "ExternalSharingAudit_$(Get-Date -Format 'yyyyMMdd').log"
+    $script:LogPath = Join-Path $logDir $logFileName
+    
+    # Create custom event log source
+    try {
+        if (-not [System.Diagnostics.EventLog]::SourceExists("CloudKnox External Sharing")) {
+            New-EventLog -LogName "Application" -Source "CloudKnox External Sharing"
+        }
+    }
+    catch {
+        Write-Warning "Could not create event log source (requires administrator privileges)"
+    }
+    
+    Write-Log "=== Cloud Knox External Sharing Audit Started ===" -Level Info -Component "System"
+    Write-Log "Script Version: 5.0 Enterprise Edition" -Level Info -Component "System"
+    Write-Log "Execution ID: $script:ExecutionId" -Level Info -Component "System"
+    Write-Log "Log Path: $script:LogPath" -Level Info -Component "System"
+    Write-Log "Audit Period: $DaysToAudit days" -Level Info -Component "System"
+}
+#endregion
+
+#region Enhanced Configuration Management
+function New-ConfigFile {
+    param([string]$Path)
+    
+    Write-Log "Creating enterprise configuration file at: $Path" -Level Info -Component "Config"
+    $defaultConfig | ConvertTo-Json -Depth 10 | Set-Content -Path $Path
+    
+    Write-Log "Configuration file created successfully" -Level Info -Component "Config"
+    Write-Log "SECURITY NOTICE: Update authentication credentials before production use" -Level Critical -Component "Security"
+    
+    return $defaultConfig
+}
+
+function Get-Configuration {
+    param([string]$Path)
+    
+    if (-not (Test-Path $Path)) {
+        Write-Log "Configuration file not found. Creating enterprise default configuration." -Level Warning -Component "Config"
+        return New-ConfigFile -Path $Path
+    }
+    
+    try {
+        $config = Get-Content $Path | ConvertFrom-Json
+        
+        # Merge with current parameters
+        $config.AzureApp.TenantId = $TenantId
+        $config.AzureApp.ClientId = $ClientId
+        $config.AzureApp.CertificateThumbprint = $CertificateThumbprint
+        $config.AzureApp.KeyVaultName = $KeyVaultName
+        $config.AzureApp.UseKeyVault = $UseKeyVault.IsPresent
+        
+        Write-Log "Enterprise configuration loaded successfully from: $Path" -Level Info -Component "Config"
+        return $config
+    }
+    catch {
+        Write-Log "Error loading configuration: $($_.Exception.Message)" -Level Error -Component "Config"
+        throw "Failed to load configuration file"
+    }
+}
+
+function Test-Configuration {
+    param($Config)
+    
+    $errors = @()
+    $warnings = @()
+    
+    # Validate Azure App settings
+    if (-not $Config.AzureApp.TenantId -or $Config.AzureApp.TenantId -eq "YOUR_TENANT_ID_HERE") { 
+        $errors += "TenantId is required and must be configured" 
+    }
+    if (-not $Config.AzureApp.ClientId -or $Config.AzureApp.ClientId -eq "YOUR_APP_REGISTRATION_CLIENT_ID_HERE") { 
+        $errors += "ClientId is required and must be configured" 
+    }
+    
+    # Validate authentication method
+    $hasSecret = $Config.AzureApp.ClientSecret -and $Config.AzureApp.ClientSecret -ne "YOUR_CLIENT_SECRET_HERE"
+    $hasCert = $Config.AzureApp.CertificateThumbprint
+    $hasKeyVault = $Config.AzureApp.UseKeyVault -and $Config.AzureApp.KeyVaultName
+    
+    if (-not ($hasSecret -or $hasCert -or $hasKeyVault)) {
+        $errors += "Authentication method required: ClientSecret, Certificate, or Key Vault configuration"
+    }
+    
+    # Security validations
+    if ($hasSecret -and -not $hasKeyVault) {
+        $warnings += "Client secret in configuration file is not secure for production. Use Key Vault or certificate authentication."
+    }
+    
+    # Validate email settings if enabled
+    if ($Config.EmailSettings.Enabled) {
+        if (-not $Config.EmailSettings.UseGraphAPI) {
+            $warnings += "Email settings configured without Graph API. This is less secure."
+        }
+        if ($Config.EmailSettings.ToAddresses.Count -eq 0) { 
+            $errors += "At least one recipient email address is required for notifications" 
+        }
+    }
+    
+    # Report validation results
+    if ($warnings.Count -gt 0) {
+        Write-Log "Configuration validation warnings:" -Level Warning -Component "Config"
+        foreach ($warning in $warnings) {
+            Write-Log "  ⚠ $warning" -Level Warning -Component "Config"
+        }
+    }
+    
+    if ($errors.Count -gt 0) {
+        Write-Log "Configuration validation failed:" -Level Error -Component "Config"
+        foreach ($error in $errors) {
+            Write-Log "  ✗ $error" -Level Error -Component "Config"
+        }
+        throw "Configuration validation failed. Please review and correct the configuration."
+    }
+    
+    Write-Log "Enterprise configuration validation passed ✓" -Level Info -Component "Config"
+}
+#endregion
+
+#region Secure Exchange Online Connection
+function Connect-ExchangeOnlineApp {
+    param($AzureAppConfig)
+    
+    Write-Log "Establishing secure connection to Exchange Online..." -Level Info -Component "Authentication"
+    
+    try {
+        # Validate Exchange Online PowerShell module
+        $module = Get-Module ExchangeOnlineManagement -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+        if (-not $module) {
+            Write-Log "Installing Exchange Online PowerShell module..." -Level Info -Component "Authentication"
+            Install-Module ExchangeOnlineManagement -Repository PSGallery -AllowClobber -Force -Scope CurrentUser
+        }
+        elseif ($module.Version -lt [Version]"3.0.0") {
+            Write-Log "Updating Exchange Online PowerShell module to latest version..." -Level Info -Component "Authentication"
+            Update-Module ExchangeOnlineManagement -Force
+        }
+        
+        # Initialize secure authentication
+        Initialize-SecureAuthentication -AzureAppConfig $AzureAppConfig
+        
+        # Connect using preferred authentication method
+        if ($AzureAppConfig.CertificateThumbprint) {
+            Write-Log "Connecting with certificate-based authentication (recommended)..." -Level Info -Component "Authentication"
+            Connect-ExchangeOnline -AppId $AzureAppConfig.ClientId -CertificateThumbprint $AzureAppConfig.CertificateThumbprint -Organization $AzureAppConfig.TenantId -ShowBanner:$false -ShowProgress:$false
+            Write-Log "Certificate-based authentication successful ✓" -Level Info -Component "Authentication"
+        }
+        else {
+            Write-Log "Connecting with client secret authentication..." -Level Warning -Component "Authentication"
+            $secureSecret = ConvertTo-SecureString $AzureAppConfig.ClientSecret -AsPlainText -Force
+            $credential = New-Object System.Management.Automation.PSCredential($AzureAppConfig.ClientId, $secureSecret)
+            Connect-ExchangeOnline -AppId $AzureAppConfig.ClientId -Credential $credential -Organization $AzureAppConfig.TenantId -ShowBanner:$false -ShowProgress:$false
+            Write-Log "Client secret authentication successful ✓" -Level Info -Component "Authentication"
+        }
+        
+        # Verify connection and permissions
+        try {
+            $testCommand = Get-OrganizationConfig -ErrorAction Stop
+            Write-Log "Exchange Online connection verified successfully" -Level Info -Component "Authentication"
+        }
+        catch {
+            Write-Log "Exchange Online connection test failed: $($_.Exception.Message)" -Level Error -Component "Authentication"
+            throw "Insufficient permissions or connection failure"
+        }
+        
+        return $true
+    }
+    catch {
+        Write-Log "Failed to connect to Exchange Online: $($_.Exception.Message)" -Level Error -Component "Authentication"
+        return $false
+    }
+}
+#endregion
+
+#region Advanced Audit Log Processing
+function Get-ExternalSharingEvents {
+    param(
+        [DateTime]$StartDate,
+        [DateTime]$EndDate,
+        [hashtable]$ReportSettings,
+        [hashtable]$SecuritySettings
+    )
+    
+    Write-Log "Retrieving external sharing events from $StartDate to $EndDate..." -Level Info -Component "AuditRetrieval"
+    
+    $operations = @(
+        "SharingInvitationCreated",
+        "AnonymousLinkCreated", 
+        "AddedToSecureLink",
+        "SharingRevoked",
+        "SharingPolicyChanged",
+        "SecureLinkCreated",
+        "SecureLinkUpdated"
+    )
+    
+    $results = @()
+    $totalProcessed = 0
+    $highRiskCount = 0
+    
+    try {
+        # Process in optimized time chunks
+        $currentStart = $StartDate
+        $intervalHours = 6  # Smaller chunks for better reliability
+        
+        while ($currentStart -lt $EndDate) {
+            $currentEnd = $currentStart.AddHours($intervalHours)
+            if ($currentEnd -gt $EndDate) { $currentEnd = $EndDate }
+            
+            Write-Log "Processing audit logs: $currentStart to $currentEnd" -Level Debug -Component "AuditRetrieval"
+            
+            try {
+                # Retrieve audit logs with retry logic
+                $auditResults = Invoke-RetryCommand -Command {
+                    Search-UnifiedAuditLog -StartDate $currentStart -EndDate $currentEnd -Operations $operations -ResultSize 5000 -SessionId "CloudKnoxExternalSharing_$script:ExecutionId" -SessionCommand ReturnLargeSet
+                } -MaxAttempts 3 -DelaySeconds 5
+                
+                foreach ($result in $auditResults) {
+                    $auditData = $result.AuditData | ConvertFrom-Json
+                    
+                    # Apply workload filters
+                    if (-not $ReportSettings.IncludeSharePoint -and $auditData.Workload -eq "SharePoint") { continue }
+                    if (-not $ReportSettings.IncludeOneDrive -and $auditData.Workload -eq "OneDrive") { continue }
+                    if (-not $ReportSettings.IncludeTeams -and $auditData.Workload -eq "MicrosoftTeams") { continue }
+                    
+                    # Process and enrich sharing event
+                    $sharingEvent = New-EnhancedSharingEvent -AuditData $auditData -Operation $result.Operations -SecuritySettings $SecuritySettings
+                    if ($sharingEvent) {
+                        $results += $sharingEvent
+                        $totalProcessed++
+                        
+                        if ($sharingEvent.RiskLevel -eq "Critical" -or $sharingEvent.RiskLevel -eq "High") {
+                            $highRiskCount++
+                        }
+                        
+                        # Real-time alerting for critical events
+                        if ($sharingEvent.RiskLevel -eq "Critical") {
+                            Write-Log "CRITICAL SECURITY EVENT: $($sharingEvent.Operation) by $($sharingEvent.SharedBy) - $($sharingEvent.ResourceName)" -Level Critical -Component "SecurityAlert"
+                        }
+                    }
+                }
+            }
+            catch {
+                Write-Log "Error retrieving audit logs for period $currentStart to $currentEnd`: $($_.Exception.Message)" -Level Error -Component "AuditRetrieval"
+                # Continue with next time period
+            }
+            
+            $currentStart = $currentEnd
+            $progressPercent = [Math]::Round((($currentStart - $StartDate).TotalHours / ($EndDate - $StartDate).TotalHours * 100), 1)
+            Write-Progress -Activity "Processing External Sharing Audit Logs" -Status "Processed: $totalProcessed events | High Risk: $highRiskCount" -PercentComplete $progressPercent
+        }
+        
+        Write-Log "Audit log retrieval completed: $totalProcessed events processed, $highRiskCount high-risk events identified" -Level Info -Component "AuditRetrieval"
+        return $results
+    }
+    catch {
+        Write-Log "Critical error in audit log processing: $($_.Exception.Message)" -Level Error -Component "AuditRetrieval"
+        throw
+    }
+}
+
+function New-EnhancedSharingEvent {
+    param($AuditData, $Operation, $SecuritySettings)
+    
+    try {
+        # Determine sharing recipient and method
+        $sharedWith = Get-SharingRecipient -AuditData $AuditData -Operation $Operation
+        if (-not $sharedWith.IsExternal) { return $null }  # Skip internal sharing
+        
+        # Extract resource information
+        $resourceInfo = Get-ResourceInformation -AuditData $AuditData
+        
+        # Perform comprehensive risk assessment
+        $riskAssessment = Get-ComprehensiveRiskAssessment -AuditData $AuditData -Operation $Operation -ResourceInfo $resourceInfo -SecuritySettings $SecuritySettings
+        
+        # Detect sensitive content
+        $sensitiveContent = Test-SensitiveContent -ResourceInfo $resourceInfo -SecuritySettings $SecuritySettings
+        
+        # Create enhanced sharing event object
+        return [PSCustomObject]@{
+            EventId = [System.Guid]::NewGuid().ToString()
+            Timestamp = [DateTime]$AuditData.CreationTime
+            Operation = $Operation
+            SharedBy = $AuditData.UserId
+            SharedByUPN = $AuditData.UserId
+            SharedWith = $sharedWith.Recipient
+            RecipientType = $sharedWith.Type
+            RecipientDomain = $sharedWith.Domain
+            ResourceType = $resourceInfo.Type
+            ResourceName = $resourceInfo.Name
+            ResourcePath = $resourceInfo.Path
+            ResourceSize = $resourceInfo.Size
+            SiteUrl = $AuditData.SiteUrl
+            Workload = $AuditData.Workload
+            RiskLevel = $riskAssessment.Level
+            RiskReasons = $riskAssessment.Reasons -join "; "
+            SensitiveContent = $sensitiveContent.IsDetected
+            SensitiveKeywords = $sensitiveContent.Keywords -join "; "
+            UserAgent = $AuditData.UserAgent
+            ClientIP = $AuditData.ClientIP
+            SourceFileName = $AuditData.SourceFileName
+            TargetUserOrGroupName = $AuditData.TargetUserOrGroupName
+            EventSource = $AuditData.EventSource
+            ComplianceFlags = Get-ComplianceFlags -AuditData $AuditData -Operation $Operation
+            GeoLocation = Get-GeoLocation -ClientIP $AuditData.ClientIP
+        }
+    }
+    catch {
+        Write-Log "Error processing sharing event: $($_.Exception.Message)" -Level Warning -Component "EventProcessing"
+        return $null
+    }
+}
+
+function Get-SharingRecipient {
+    param($AuditData, $Operation)
+    
+    $result = @{
+        Recipient = ""
+        Type = ""
+        Domain = ""
+        IsExternal = $false
+    }
+    
+    switch ($Operation) {
+        "AnonymousLinkCreated" {
+            $result.Recipient = "Anyone with the link"
+            $result.Type = "Anonymous"
+            $result.IsExternal = $true
+        }
+        default {
+            if ($AuditData.TargetUserOrGroupType -eq "Guest") {
+                $result.Recipient = $AuditData.TargetUserOrGroupName
+                $result.Type = "Guest"
+                $result.IsExternal = $true
+                
+                if ($result.Recipient -match "@(.+)$") {
+                    $result.Domain = $matches[1]
+                }
+            }
+        }
+    }
+    
+    return $result
+}
+
+function Get-ResourceInformation {
+    param($AuditData)
+    
+    $resourcePath = $AuditData.ObjectId
+    $resourceName = if ($resourcePath) { Split-Path $resourcePath -Leaf } else { "Unknown" }
+    
+    return @{
+        Type = $AuditData.ItemType
+        Name = $resourceName
+        Path = $resourcePath
+        Size = $AuditData.ItemSize
+        Extension = if ($resourceName -match "\.([^.]+)$") { $matches[1].ToLower() } else { "" }
+    }
+}
+
+function Get-ComprehensiveRiskAssessment {
+    param($AuditData, $Operation, $ResourceInfo, $SecuritySettings)
+    
+    $riskLevel = "Low"
+    $reasons = @()
+    
+    # Anonymous sharing is always high risk
+    if ($Operation -eq "AnonymousLinkCreated") {
+        $riskLevel = "High"
+        $reasons += "Anonymous link created"
+    }
+    
+    # Check file type risk
+    if ($ResourceInfo.Extension -and $SecuritySettings.HighRiskFileTypes -contains ".$($ResourceInfo.Extension)") {
+        if ($riskLevel -eq "Low") { $riskLevel = "Medium" }
+        $reasons += "High-risk file type: .$($ResourceInfo.Extension)"
+    }
+    
+    # Check for potential data exfiltration patterns
+    if ($AuditData.UserId -match "admin|service|system" -and $Operation -eq "AnonymousLinkCreated") {
+        $riskLevel = "Critical"
+        $reasons += "Administrative account creating anonymous links"
+    }
+    
+    # Check for unusual time patterns (outside business hours)
+    $eventTime = [DateTime]$AuditData.CreationTime
+    if ($eventTime.Hour -lt 6 -or $eventTime.Hour -gt 22 -or $eventTime.DayOfWeek -in @([DayOfWeek]::Saturday, [DayOfWeek]::Sunday)) {
+        if ($riskLevel -in @("Low", "Medium")) { $riskLevel = "Medium" }
+        $reasons += "Sharing outside business hours"
+    }
+    
+    # Check for bulk sharing patterns
+    # This would require additional context not available in single event
+    
+    return @{
+        Level = $riskLevel
+        Reasons = $reasons
+    }
+}
+
+function Test-SensitiveContent {
+    param($ResourceInfo, $SecuritySettings)
+    
+    $detectedKeywords = @()
+    $isDetected = $false
+    
+    # Check filename for sensitive keywords
+    foreach ($keyword in $SecuritySettings.SensitiveKeywords) {
+        if ($ResourceInfo.Name -match $keyword) {
+            $detectedKeywords += $keyword
+            $isDetected = $true
+        }
+    }
+    
+    # Check path for sensitive indicators
+    if ($ResourceInfo.Path -match "(confidential|secret|private|internal|restricted)") {
+        $isDetected = $true
+        $detectedKeywords += "Sensitive path detected"
+    }
+    
+    return @{
+        IsDetected = $isDetected
+        Keywords = $detectedKeywords
+    }
+}
+
+function Get-ComplianceFlags {
+    param($AuditData, $Operation)
+    
+    $flags = @()
+    
+    # GDPR compliance flags
+    if ($AuditData.TargetUserOrGroupName -match "@(.*\.)?(eu|de|fr|it|es|nl|be|dk|se|fi|at|pt|ie|lu|cy|mt|bg|ro|hr|si|sk|cz|hu|pl|lt|lv|ee)$") {
+        $flags += "GDPR_APPLICABLE"
+    }
+    
+    # HIPAA compliance flags
+    if ($AuditData.ObjectId -match "(patient|medical|health|phi|hipaa)" -or $AuditData.SiteUrl -match "(health|medical|patient)") {
+        $flags += "HIPAA_SENSITIVE"
+    }
+    
+    # SOX compliance flags
+    if ($AuditData.ObjectId -match "(financial|sox|audit|accounting|revenue)" -or $AuditData.SiteUrl -match "(finance|accounting)") {
+        $flags += "SOX_RELEVANT"
+    }
+    
+    # PCI compliance flags
+    if ($AuditData.ObjectId -match "(payment|credit|card|pci|cardholder)") {
+        $flags += "PCI_SENSITIVE"
+    }
+    
+    return $flags -join ","
+}
+
+function Get-GeoLocation {
+    param($ClientIP)
+    
+    if (-not $ClientIP -or $ClientIP -eq "::1" -or $ClientIP -eq "127.0.0.1") {
+        return "Internal/Unknown"
+    }
+    
+    # Basic geo-location (in production, integrate with proper geo-IP service)
+    try {
+        $response = Invoke-RestMethod -Uri "http://ip-api.com/json/$ClientIP" -TimeoutSec 5 -ErrorAction SilentlyContinue
+        if ($response -and $response.status -eq "success") {
+            return "$($response.country), $($response.regionName)"
+        }
+    }
+    catch {
+        # Fail silently for geo-location
+    }
+    
+    return "Unknown"
+}
+
+function Invoke-RetryCommand {
+    param(
+        [ScriptBlock]$Command,
+        [int]$MaxAttempts = 3,
+        [int]$DelaySeconds = 5
+    )
+    
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            return & $Command
+        }
+        catch {
+            if ($attempt -eq $MaxAttempts) {
+                throw
+            }
+            Write-Log "Command failed (attempt $attempt/$MaxAttempts): $($_.Exception.Message). Retrying in $DelaySeconds seconds..." -Level Warning -Component "RetryLogic"
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+}
+#endregion
+
+#region Advanced Report Generation
+function Export-EnterpriseReport {
+    param($SharingEvents, $OutputPath, $ReportSettings, $SecuritySettings)
+    
+    if (-not (Test-Path $OutputPath)) {
+        New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
+    }
+    
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $reportFiles = @{}
+    
+    try {
+        # Generate detailed CSV report
+        $csvPath = Join-Path $OutputPath "ExternalSharingDetailedReport_$timestamp.csv"
+        $SharingEvents | Select-Object * | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+        $reportFiles.DetailedReport = $csvPath
+        
+        # Generate executive summary
+        if ($ReportSettings.GenerateExecutiveSummary) {
+            $executiveSummary = New-ExecutiveSummary -SharingEvents $SharingEvents -SecuritySettings $SecuritySettings
+            $summaryPath = Join-Path $OutputPath "ExecutiveSummary_$timestamp.json"
+            $executiveSummary | ConvertTo-Json -Depth 10 | Set-Content -Path $summaryPath -Encoding UTF8
+            $reportFiles.ExecutiveSummary = $summaryPath
+            
+            # Generate HTML executive report
+            $htmlPath = Join-Path $OutputPath "ExecutiveReport_$timestamp.html"
+            $htmlReport = New-HTMLExecutiveReport -Summary $executiveSummary -SharingEvents $SharingEvents
+            $htmlReport | Set-Content -Path $htmlPath -Encoding UTF8
+            $reportFiles.HTMLReport = $htmlPath
+        }
+        
+        # Generate compliance report
+        if ($ReportSettings.ComplianceReporting) {
+            $complianceReport = New-ComplianceReport -SharingEvents $SharingEvents
+            $compliancePath = Join-Path $OutputPath "ComplianceReport_$timestamp.csv"
+            $complianceReport | Export-Csv -Path $compliancePath -NoTypeInformation -Encoding UTF8
+            $reportFiles.ComplianceReport = $compliancePath
+        }
+        
+        # Generate security alerts report for high-risk events
+        $highRiskEvents = $SharingEvents | Where-Object { $_.RiskLevel -in @("High", "Critical") }
+        if ($highRiskEvents) {
+            $securityPath = Join-Path $OutputPath "SecurityAlerts_$timestamp.csv"
+            $highRiskEvents | Export-Csv -Path $securityPath -NoTypeInformation -Encoding UTF8
+            $reportFiles.SecurityAlerts = $securityPath
+        }
+        
+        Write-Log "Enterprise reports generated successfully:" -Level Info -Component "ReportGeneration"
+        foreach ($reportType in $reportFiles.Keys) {
+            Write-Log "  $reportType`: $(Split-Path $reportFiles[$reportType] -Leaf)" -Level Info -Component "ReportGeneration"
+        }
+        
+        return @{
+            ReportFiles = $reportFiles
+            EventCount = $SharingEvents.Count
+            HighRiskCount = ($SharingEvents | Where-Object { $_.RiskLevel -in @("High", "Critical") }).Count
+            ExecutiveSummary = $executiveSummary
+        }
+    }
+    catch {
+        Write-Log "Error generating enterprise reports: $($_.Exception.Message)" -Level Error -Component "ReportGeneration"
+        throw
+    }
+}
+
+function New-ExecutiveSummary {
+    param($SharingEvents, $SecuritySettings)
+    
+    $totalEvents = $SharingEvents.Count
+    $criticalEvents = ($SharingEvents | Where-Object { $_.RiskLevel -eq "Critical" }).Count
+    $highRiskEvents = ($SharingEvents | Where-Object { $_.RiskLevel -eq "High" }).Count
+    $mediumRiskEvents = ($SharingEvents | Where-Object { $_.RiskLevel -eq "Medium" }).Count
+    $anonymousShares = ($SharingEvents | Where-Object { $_.Operation -eq "AnonymousLinkCreated" }).Count
+    
+    $uniqueExternalDomains = $SharingEvents | Where-Object { $_.RecipientDomain } | 
+                            Group-Object RecipientDomain | Measure-Object | Select-Object -ExpandProperty Count
+    
+    $topSharers = $SharingEvents | Group-Object SharedBy | Sort-Object Count -Descending | 
+                  Select-Object -First 10 | ForEach-Object { 
+                      @{
+                          User = $_.Name
+                          ShareCount = $_.Count
+                          HighRiskShares = ($_.Group | Where-Object { $_.RiskLevel -in @("High", "Critical") }).Count
+                      }
+                  }
+    
+    $complianceBreaches = $SharingEvents | Where-Object { $_.ComplianceFlags } | 
+                         Group-Object ComplianceFlags | ForEach-Object { 
+                             @{
+                                 ComplianceType = $_.Name
+                                 EventCount = $_.Count
+                             }
+                         }
+    
+    return @{
+        GeneratedAt = Get-Date
+        ReportPeriod = @{
+            StartDate = ($SharingEvents | Measure-Object Timestamp -Minimum).Minimum
+            EndDate = ($SharingEvents | Measure-Object Timestamp -Maximum).Maximum
+        }
+        ExecutiveMetrics = @{
+            TotalExternalSharingEvents = $totalEvents
+            CriticalSecurityEvents = $criticalEvents
+            HighRiskEvents = $highRiskEvents
+            MediumRiskEvents = $mediumRiskEvents
+            AnonymousLinksCreated = $anonymousShares
+            UniqueExternalDomains = $uniqueExternalDomains
+            SensitiveContentShared = ($SharingEvents | Where-Object { $_.SensitiveContent -eq $true }).Count
+        }
+        SecurityAlert = @{
+            RequiresImmediateAttention = $criticalEvents -gt 0
+            ExceedsAnonymousThreshold = $anonymousShares -gt $SecuritySettings.AlertThresholds.AnonymousLinks
+            ExceedsHighRiskThreshold = $highRiskEvents -gt $SecuritySettings.AlertThresholds.HighRiskShares
+        }
+        TopRiskUsers = $topSharers
+        ComplianceImpact = $complianceBreaches
+        WorkloadDistribution = $SharingEvents | Group-Object Workload | ForEach-Object { @{$_.Name = $_.Count} }
+        TimeDistribution = $SharingEvents | Group-Object { $_.Timestamp.Hour } | Sort-Object Name | ForEach-Object { @{Hour = $_.Name; Count = $_.Count} }
+        RecommendedActions = Get-SecurityRecommendations -SharingEvents $SharingEvents -SecuritySettings $SecuritySettings
+    }
+}
+
+function Get-SecurityRecommendations {
+    param($SharingEvents, $SecuritySettings)
+    
+    $recommendations = @()
+    
+    $anonymousShares = ($SharingEvents | Where-Object { $_.Operation -eq "AnonymousLinkCreated" }).Count
+    if ($anonymousShares -gt $SecuritySettings.AlertThresholds.AnonymousLinks) {
+        $recommendations += "URGENT: Review anonymous sharing policy - $anonymousShares anonymous links created"
+    }
+    
+    $criticalEvents = ($SharingEvents | Where-Object { $_.RiskLevel -eq "Critical" }).Count
+    if ($criticalEvents -gt 0) {
+        $recommendations += "CRITICAL: Investigate $criticalEvents critical security events immediately"
+    }
+    
+    $sensitiveShares = ($SharingEvents | Where-Object { $_.SensitiveContent -eq $true }).Count
+    if ($sensitiveShares -gt 0) {
+        $recommendations += "Review $sensitiveShares instances of sensitive content sharing"
+    }
+    
+    $afterHoursShares = $SharingEvents | Where-Object { 
+        $_.Timestamp.Hour -lt 6 -or $_.Timestamp.Hour -gt 22 -or 
+        $_.Timestamp.DayOfWeek -in @([DayOfWeek]::Saturday, [DayOfWeek]::Sunday) 
+    }
+    if ($afterHoursShares.Count -gt 5) {
+        $recommendations += "Monitor after-hours sharing activity - $($afterHoursShares.Count) events detected"
+    }
+    
+    $bulkSharers = $SharingEvents | Group-Object SharedBy | Where-Object { $_.Count -gt 10 }
+    if ($bulkSharers.Count -gt 0) {
+        $recommendations += "Review users with high sharing activity: $($bulkSharers.Name -join ', ')"
+    }
+    
+    return $recommendations
+}
+
+function New-HTMLExecutiveReport {
+    param($Summary, $SharingEvents)
+    
+    $criticalEventsTable = ""
+    $criticalEvents = $SharingEvents | Where-Object { $_.RiskLevel -eq "Critical" } | Select-Object -First 10
+    if ($criticalEvents) {
+        $criticalEventsTable = $criticalEvents | ConvertTo-Html -Fragment -Property Timestamp,SharedBy,SharedWith,ResourceName,RiskReasons
+    }
+    
+    return @"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>External Sharing Security Report - $(Get-Date -Format 'yyyy-MM-dd')</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; text-align: center; margin-bottom: 30px; }
+        .header h1 { margin: 0; font-size: 2.5em; font-weight: 300; }
+        .header .subtitle { margin: 10px 0 0 0; font-size: 1.1em; opacity: 0.9; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .metric-card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; transition: transform 0.2s; }
+        .metric-card:hover { transform: translateY(-5px); }
+        .metric-value { font-size: 2.5em; font-weight: bold; margin-bottom: 10px; }
+        .metric-label { font-size: 1.1em; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+        .critical { color: #e74c3c; }
+        .high { color: #f39c12; }
+        .medium { color: #f1c40f; }
+        .low { color: #27ae60; }
+        .section { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 30px; }
+        .section h2 { margin-top: 0; color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        .alert-box { background: #fee; border-left: 5px solid #e74c3c; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .alert-box.warning { background: #fff8e1; border-left-color: #f39c12; }
+        .alert-box.info { background: #e3f2fd; border-left-color: #2196f3; }
+        .recommendations { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px; }
+        .recommendations ul { margin: 0; padding-left: 20px; }
+        .recommendations li { margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f8f9fa; font-weight: 600; color: #2c3e50; }
+        .footer { text-align: center; margin-top: 40px; padding: 20px; color: #666; }
+        .powered-by { font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>External Sharing Security Report</h1>
+            <div class="subtitle">Generated on $(Get-Date -Format 'MMMM dd, yyyy HH:mm') UTC</div>
+        </div>
+        
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-value">$($Summary.ExecutiveMetrics.TotalExternalSharingEvents)</div>
+                <div class="metric-label">Total Events</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value critical">$($Summary.ExecutiveMetrics.CriticalSecurityEvents)</div>
+                <div class="metric-label">Critical Events</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value high">$($Summary.ExecutiveMetrics.HighRiskEvents)</div>
+                <div class="metric-label">High Risk Events</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value medium">$($Summary.ExecutiveMetrics.AnonymousLinksCreated)</div>
+                <div class="metric-label">Anonymous Links</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">$($Summary.ExecutiveMetrics.UniqueExternalDomains)</div>
+                <div class="metric-label">External Domains</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">$($Summary.ExecutiveMetrics.SensitiveContentShared)</div>
+                <div class="metric-label">Sensitive Content</div>
+            </div>
+        </div>
+        
+        $(if ($Summary.SecurityAlert.RequiresImmediateAttention) { 
+            '<div class="alert-box"><strong>SECURITY ALERT:</strong> Critical security events detected that require immediate attention.</div>'
+        })
+        
+        $(if ($Summary.SecurityAlert.ExceedsAnonymousThreshold) {
+            '<div class="alert-box warning"><strong>WARNING:</strong> Anonymous sharing activity exceeds recommended thresholds.</div>'
+        })
+        
+        <div class="section">
+            <h2>Security Recommendations</h2>
+            <div class="recommendations">
+                <ul>
+                    $(foreach ($rec in $Summary.RecommendedActions) { "<li>$rec</li>" })
+                </ul>
+            </div>
+        </div>
+        
+        $(if ($criticalEventsTable) {
+            "<div class='section'><h2>Critical Security Events</h2>$criticalEventsTable</div>"
+        })
+        
+        <div class="section">
+            <h2>Top Risk Users</h2>
+            <table>
+                <thead>
+                    <tr><th>User</th><th>Total Shares</th><th>High Risk Shares</th></tr>
+                </thead>
+                <tbody>
+                    $(foreach ($user in $Summary.TopRiskUsers) {
+                        "<tr><td>$($user.User)</td><td>$($user.ShareCount)</td><td class='high'>$($user.HighRiskShares)</td></tr>"
+                    })
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="footer">
+            <div class="powered-by">
+                <strong>Powered by Cloud Knox Security Solutions</strong><br>
+                Enterprise External Sharing Audit System v5.0
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"@
+}
+
+function New-ComplianceReport {
+    param($SharingEvents)
+    
+    return $SharingEvents | Where-Object { $_.ComplianceFlags } | 
+           Select-Object Timestamp,SharedBy,SharedWith,ResourceName,ResourceType,ComplianceFlags,RiskLevel,SiteUrl
+}
+#endregion
+
+#region Secure Email Notifications with Microsoft Graph
+function Send-SecureEmailNotification {
+    param($ReportResult, $EmailSettings)
+    
+    if (-not $EmailSettings.Enabled) {
+        Write-Log "Email notifications are disabled" -Level Info -Component "EmailNotification"
+        return
+    }
+    
+    Write-Log "Sending secure email notification via Microsoft Graph..." -Level Info -Component "EmailNotification"
+    
+    try {
+        if ($EmailSettings.UseGraphAPI) {
+            Send-GraphEmailNotification -ReportResult $ReportResult -EmailSettings $EmailSettings
+        }
+        else {
+            Write-Log "SMTP email method is deprecated for security reasons. Please configure Graph API." -Level Warning -Component "EmailNotification"
+        }
+    }
+    catch {
+        Write-Log "Failed to send email notification: $($_.Exception.Message)" -Level Error -Component "EmailNotification"
+    }
+}
+
+function Send-GraphEmailNotification {
+    param($ReportResult, $EmailSettings)
+    
+    try {
+        # Install Microsoft Graph module if not present
+        if (-not (Get-Module Microsoft.Graph.Mail -ListAvailable)) {
+            Write-Log "Installing Microsoft Graph PowerShell module..." -Level Info -Component "EmailNotification"
+            Install-Module Microsoft.Graph.Mail -Repository PSGallery -AllowClobber -Force -Scope CurrentUser
+        }
+        
+        # Get secure credentials for Graph API
+        $graphSecret = Get-SecureCredential -KeyVaultName $EmailSettings.GraphKeyVaultName -SecretName "GraphEmailSecret" -FallbackValue $EmailSettings.GraphClientSecret
+        
+        # Connect to Microsoft Graph
+        $secureGraphSecret = ConvertTo-SecureString $graphSecret -AsPlainText -Force
+        $graphCredential = New-Object System.Management.Automation.PSCredential($EmailSettings.GraphClientId, $secureGraphSecret)
+        
+        Connect-MgGraph -ClientSecretCredential $graphCredential -TenantId $EmailSettings.GraphTenantId -NoWelcome
+        
+        # Generate email content
+        $subject = $EmailSettings.Subject -replace "{Date}", (Get-Date -Format "yyyy-MM-dd")
+        $htmlBody = New-SecurityEmailBody -ReportResult $ReportResult
+        
+        # Prepare attachments
+        $attachments = @()
+        if ($ReportResult.ReportFiles.DetailedReport) {
+            $attachmentContent = [System.IO.File]::ReadAllBytes($ReportResult.ReportFiles.DetailedReport)
+            $attachmentBase64 = [System.Convert]::ToBase64String($attachmentContent)
+            
+            $attachments += @{
+                "@odata.type" = "#microsoft.graph.fileAttachment"
+                name = Split-Path $ReportResult.ReportFiles.DetailedReport -Leaf
+                contentBytes = $attachmentBase64
+            }
+        }
+        
+        # Send email to each recipient
+        foreach ($recipient in $EmailSettings.ToAddresses) {
+            $emailMessage = @{
+                message = @{
+                    subject = $subject
+                    body = @{
+                        contentType = "HTML"
+                        content = $htmlBody
+                    }
+                    toRecipients = @(
+                        @{
+                            emailAddress = @{
+                                address = $recipient
+                            }
+                        }
+                    )
+                    attachments = $attachments
+                }
+            }
+            
+            Send-MgUserMail -UserId $EmailSettings.FromAddress -BodyParameter $emailMessage
+        }
+        
+        Write-Log "Secure email notification sent successfully via Microsoft Graph" -Level Info -Component "EmailNotification"
+    }
+    catch {
+        Write-Log "Failed to send Graph email notification: $($_.Exception.Message)" -Level Error -Component "EmailNotification"
+        throw
+    }
+    finally {
+        try {
+            Disconnect-MgGraph -ErrorAction SilentlyContinue
+        }
+        catch { }
+    }
+}
+
+function New-SecurityEmailBody {
+    param($ReportResult)
+    
+    $summary = $ReportResult.ExecutiveSummary
+    $executionTime = (Get-Date) - $script:StartTime
+    $criticalCount = $summary.ExecutiveMetrics.CriticalSecurityEvents
+    $highRiskCount = $summary.ExecutiveMetrics.HighRiskEvents
+    
+    $alertLevel = if ($criticalCount -gt 0) { "CRITICAL" } 
+                  elseif ($highRiskCount -gt 5) { "HIGH" } 
+                  elseif ($highRiskCount -gt 0) { "MEDIUM" } 
+                  else { "LOW" }
+    
+    $alertColor = switch ($alertLevel) {
+        "CRITICAL" { "#e74c3c" }
+        "HIGH" { "#f39c12" }
+        "MEDIUM" { "#f1c40f" }
+        default { "#27ae60" }
+    }
+    
+    return @"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>External Sharing Security Report</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f8f9fa; }
+        .container { max-width: 800px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
+        .header h1 { margin: 0; font-size: 2em; font-weight: 300; }
+        .alert-banner { background: $alertColor; color: white; padding: 15px; text-align: center; font-weight: bold; font-size: 1.1em; }
+        .content { padding: 30px; }
+        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }
+        .metric { background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; border-left: 4px solid #3498db; }
+        .metric-value { font-size: 2em; font-weight: bold; color: #2c3e50; }
+        .metric-label { color: #666; margin-top: 5px; text-transform: uppercase; font-size: 0.9em; letter-spacing: 1px; }
+        .critical { color: #e74c3c; }
+        .high { color: #f39c12; }
+        .section { margin: 30px 0; }
+        .section h3 { color: #2c3e50; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }
+        .recommendations { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 15px; }
+        .recommendations ul { margin: 0; padding-left: 20px; }
+        .footer { background: #ecf0f1; padding: 20px; text-align: center; color: #666; font-size: 0.9em; }
+        .logo { font-weight: bold; color: #2c3e50; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔒 External Sharing Security Report</h1>
+            <p>Generated on $(Get-Date -Format 'MMMM dd, yyyy HH:mm') UTC</p>
+        </div>
+        
+        <div class="alert-banner">
+            🚨 SECURITY ALERT LEVEL: $alertLevel
+        </div>
+        
+        <div class="content">
+            <div class="section">
+                <h3>📊 Executive Summary</h3>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="metric-value">$($summary.ExecutiveMetrics.TotalExternalSharingEvents)</div>
+                        <div class="metric-label">Total Events</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value critical">$($summary.ExecutiveMetrics.CriticalSecurityEvents)</div>
+                        <div class="metric-label">Critical Events</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value high">$($summary.ExecutiveMetrics.HighRiskEvents)</div>
+                        <div class="metric-label">High Risk Events</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">$($summary.ExecutiveMetrics.AnonymousLinksCreated)</div>
+                        <div class="metric-label">Anonymous Links</div>
+                    </div>
+                </div>
+            </div>
+            
+            $(if ($summary.RecommendedActions.Count -gt 0) {
+                "<div class='section'><h3>⚠️ Immediate Actions Required</h3><div class='recommendations'><ul>"
+                foreach ($action in $summary.RecommendedActions) {
+                    "<li>$action</li>"
+                }
+                "</ul></div></div>"
+            })
+            
+            <div class="section">
+                <h3>📈 Key Metrics</h3>
+                <ul>
+                    <li><strong>Unique External Domains:</strong> $($summary.ExecutiveMetrics.UniqueExternalDomains)</li>
+                    <li><strong>Sensitive Content Shared:</strong> $($summary.ExecutiveMetrics.SensitiveContentShared)</li>
+                    <li><strong>Report Execution Time:</strong> $($executionTime.ToString("hh\:mm\:ss"))</li>
+                    <li><strong>Report Period:</strong> $($summary.ReportPeriod.StartDate.ToString("yyyy-MM-dd")) to $($summary.ReportPeriod.EndDate.ToString("yyyy-MM-dd"))</li>
+                </ul>
+            </div>
+            
+            <div class="section">
+                <h3>📁 Report Files</h3>
+                <p>Detailed reports are attached to this email:</p>
+                <ul>
+                    $(foreach ($reportType in $ReportResult.ReportFiles.Keys) {
+                        "<li><strong>$reportType`:</strong> $(Split-Path $ReportResult.ReportFiles[$reportType] -Leaf)</li>"
+                    })
+                </ul>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <div class="logo">🛡️ CloudKnox</div>
+            <div>Enterprise External Sharing Audit System v5.0</div>
+            <div>Protecting your organization's data, one share at a time.</div>
+        </div>
+    </div>
+</body>
+</html>
+"@
+}
+#endregion
+
+#region Cleanup and Maintenance
+function Remove-OldReports {
+    param($OutputPath, $RetentionDays)
+    
+    if (-not (Test-Path $OutputPath)) { return }
+    
+    Write-Log "Performing maintenance: removing reports older than $RetentionDays days" -Level Info -Component "Maintenance"
+    
+    $cutoffDate = (Get-Date).AddDays(-$RetentionDays)
+    $oldFiles = Get-ChildItem -Path $OutputPath -Filter "*ExternalSharing*" | Where-Object { $_.CreationTime -lt $cutoffDate }
+    
+                $removedCount = 0
+    foreach ($file in $oldFiles) {
+        try {
+            Remove-Item $file.FullName -Force
+            $removedCount++
+            Write-Log "Removed old report: $($file.Name)" -Level Debug -Component "Maintenance"
+        }
+        catch {
+            Write-Log "Failed to remove old report $($file.Name): $($_.Exception.Message)" -Level Warning -Component "Maintenance"
+        }
+    }
+    
+    if ($removedCount -gt 0) {
+        Write-Log "Maintenance completed: $removedCount old reports removed" -Level Info -Component "Maintenance"
+    }
+}
+
+function Remove-OldLogs {
+    param($LogPath, $RetentionDays)
+    
+    if (-not (Test-Path $LogPath)) { return }
+    
+    $logDir = Split-Path $LogPath -Parent
+    $cutoffDate = (Get-Date).AddDays(-$RetentionDays)
+    $oldLogs = Get-ChildItem -Path $logDir -Filter "*.log" | Where-Object { $_.CreationTime -lt $cutoffDate }
+    
+    $removedCount = 0
+    foreach ($log in $oldLogs) {
+        try {
+            Remove-Item $log.FullName -Force
+            $removedCount++
+        }
+        catch {
+            Write-Log "Failed to remove old log $($log.Name): $($_.Exception.Message)" -Level Warning -Component "Maintenance"
+        }
+    }
+    
+    if ($removedCount -gt 0) {
+        Write-Log "Log maintenance completed: $removedCount old logs removed" -Level Info -Component "Maintenance"
+    }
+}
+
+function Disconnect-Services {
+    Write-Log "Disconnecting from cloud services..." -Level Info -Component "Cleanup"
+    
+    try {
+        # Disconnect Exchange Online
+        Disconnect-ExchangeOnline -Confirm:$false -InformationAction SilentlyContinue -ErrorAction SilentlyContinue
+        Write-Log "Disconnected from Exchange Online" -Level Info -Component "Cleanup"
+    }
+    catch {
+        Write-Log "Error disconnecting from Exchange Online: $($_.Exception.Message)" -Level Warning -Component "Cleanup"
+    }
+    
+    try {
+        # Disconnect Microsoft Graph
+        Disconnect-MgGraph -ErrorAction SilentlyContinue
+        Write-Log "Disconnected from Microsoft Graph" -Level Info -Component "Cleanup"
+    }
+    catch {
+        Write-Log "Error disconnecting from Microsoft Graph: $($_.Exception.Message)" -Level Warning -Component "Cleanup"
+    }
+    
+    try {
+        # Disconnect Azure (if connected)
+        Disconnect-AzAccount -ErrorAction SilentlyContinue
+        Write-Log "Disconnected from Azure" -Level Info -Component "Cleanup"
+    }
+    catch {
+        Write-Log "Error disconnecting from Azure: $($_.Exception.Message)" -Level Warning -Component "Cleanup"
+    }
+}
+#endregion
+
+#region Performance Monitoring
+function Start-PerformanceMonitoring {
+    $script:PerformanceCounters = @{
+        StartTime = Get-Date
+        MemoryUsage = [System.GC]::GetTotalMemory($false)
+        ProcessorTime = (Get-Process -Id $PID).TotalProcessorTime
+    }
+    
+    Write-Log "Performance monitoring started" -Level Debug -Component "Performance"
+}
+
+function Stop-PerformanceMonitoring {
+    if (-not $script:PerformanceCounters) { return }
+    
+    $endTime = Get-Date
+    $executionTime = $endTime - $script:PerformanceCounters.StartTime
+    $memoryUsage = [System.GC]::GetTotalMemory($false)
+    $memoryDelta = $memoryUsage - $script:PerformanceCounters.MemoryUsage
+    
+    Write-Log "Performance Summary:" -Level Info -Component "Performance"
+    Write-Log "  Execution Time: $($executionTime.ToString('hh\:mm\:ss'))" -Level Info -Component "Performance"
+    Write-Log "  Memory Usage: $([Math]::Round($memoryUsage / 1MB, 2)) MB" -Level Info -Component "Performance"
+    Write-Log "  Memory Delta: $([Math]::Round($memoryDelta / 1MB, 2)) MB" -Level Info -Component "Performance"
+}
+#endregion
+
+#region Security Validation
+function Test-SecurityConfiguration {
+    param($Config)
+    
+    Write-Log "Performing security configuration validation..." -Level Info -Component "Security"
+    
+    $securityIssues = @()
+    
+    # Check for hardcoded credentials
+    if ($Config.AzureApp.ClientSecret -and $Config.AzureApp.ClientSecret -ne "YOUR_CLIENT_SECRET_HERE" -and -not $Config.AzureApp.UseKeyVault) {
+        $securityIssues += "Client secret stored in configuration file (security risk)"
+    }
+    
+    # Check for secure authentication methods
+    if (-not $Config.AzureApp.CertificateThumbprint -and -not $Config.AzureApp.UseKeyVault) {
+        $securityIssues += "Certificate-based authentication not configured (recommended for production)"
+    }
+    
+    # Check log file permissions
+    if ($script:LogPath -and (Test-Path $script:LogPath)) {
+        $logAcl = Get-Acl $script:LogPath
+        $hasPublicAccess = $logAcl.Access | Where-Object { $_.IdentityReference -match "Everyone|Users" -and $_.FileSystemRights -match "Write|FullControl" }
+        if ($hasPublicAccess) {
+            $securityIssues += "Log file has overly permissive access rights"
+        }
+    }
+    
+    # Check output directory permissions
+    if ($Config.ReportSettings.OutputPath -and (Test-Path $Config.ReportSettings.OutputPath)) {
+        $outputAcl = Get-Acl $Config.ReportSettings.OutputPath
+        $hasPublicAccess = $outputAcl.Access | Where-Object { $_.IdentityReference -match "Everyone|Users" -and $_.FileSystemRights -match "Write|FullControl" }
+        if ($hasPublicAccess) {
+            $securityIssues += "Output directory has overly permissive access rights"
+        }
+    }
+    
+    if ($securityIssues.Count -gt 0) {
+        Write-Log "Security validation warnings:" -Level Warning -Component "Security"
+        foreach ($issue in $securityIssues) {
+            Write-Log "  ⚠ $issue" -Level Warning -Component "Security"
+        }
+    }
+    else {
+        Write-Log "Security validation passed ✓" -Level Info -Component "Security"
+    }
+}
+#endregion
+
+#region Main Execution Function
+function Main {
+    try {
+        # Start performance monitoring
+        Start-PerformanceMonitoring
+        
+        # Validate required parameters
+        if ($TenantId -eq "YOUR_TENANT_ID_HERE" -or $ClientId -eq "YOUR_APP_REGISTRATION_CLIENT_ID_HERE") {
+            throw "Please configure the required Azure AD parameters (TenantId, ClientId) before running the script"
+        }
+        
+        # Load and validate configuration
+        $script:Config = Get-Configuration -Path $ConfigPath
+        Test-Configuration -Config $script:Config
+        Test-SecurityConfiguration -Config $script:Config
+        
+        # Initialize enterprise logging
+        Initialize-Logging -LogSettings $script:Config.Logging
+        
+        # Calculate audit period
+        $endDate = Get-Date
+        $startDate = $endDate.AddDays(-$DaysToAudit)
+        
+        Write-Log "=== CLOUDKNOX EXTERNAL SHARING AUDIT INITIATED ===" -Level Info -Component "Main"
+        Write-Log "Audit Period: $DaysToAudit days ($startDate to $endDate)" -Level Info -Component "Main"
+        Write-Log "Tenant ID: $($script:Config.AzureApp.TenantId)" -Level Info -Component "Main"
+        Write-Log "Client ID: $($script:Config.AzureApp.ClientId)" -Level Info -Component "Main"
+        
+        # Establish secure connection to Exchange Online
+        if (-not (Connect-ExchangeOnlineApp -AzureAppConfig $script:Config.AzureApp)) {
+            throw "Failed to establish secure connection to Exchange Online"
+        }
+        
+        # Retrieve external sharing events
+        Write-Log "Initiating comprehensive external sharing audit..." -Level Info -Component "Main"
+        $sharingEvents = Get-ExternalSharingEvents -StartDate $startDate -EndDate $endDate -ReportSettings $script:Config.ReportSettings -SecuritySettings $script:Config.SecuritySettings
+        
+        if ($sharingEvents.Count -eq 0) {
+            Write-Log "No external sharing events found for the specified period" -Level Info -Component "Main"
+        }
+        else {
+            Write-Log "Processing $($sharingEvents.Count) external sharing events..." -Level Info -Component "Main"
+        }
+        
+        # Generate comprehensive enterprise reports
+        Write-Log "Generating enterprise security reports..." -Level Info -Component "Main"
+        $reportResult = Export-EnterpriseReport -SharingEvents $sharingEvents -OutputPath $script:Config.ReportSettings.OutputPath -ReportSettings $script:Config.ReportSettings -SecuritySettings $script:Config.SecuritySettings
+        
+        # Send secure email notifications
+        if ($SendEmail -or $script:Config.EmailSettings.Enabled) {
+            Write-Log "Sending secure email notifications..." -Level Info -Component "Main"
+            Send-SecureEmailNotification -ReportResult $reportResult -EmailSettings $script:Config.EmailSettings
+        }
+        
+        # Perform maintenance tasks
+        Write-Log "Performing maintenance tasks..." -Level Info -Component "Main"
+        Remove-OldReports -OutputPath $script:Config.ReportSettings.OutputPath -RetentionDays $script:Config.ReportSettings.RetentionDays
+        Remove-OldLogs -LogPath $script:LogPath -RetentionDays $script:Config.ReportSettings.RetentionDays
+        
+        # Generate execution summary
+        $executionSummary = @{
+            ExecutionId = $script:ExecutionId
+            StartTime = $script:StartTime
+            EndTime = Get-Date
+            Duration = (Get-Date) - $script:StartTime
+            EventsProcessed = $sharingEvents.Count
+            HighRiskEvents = ($sharingEvents | Where-Object { $_.RiskLevel -in @("High", "Critical") }).Count
+            CriticalEvents = ($sharingEvents | Where-Object { $_.RiskLevel -eq "Critical" }).Count
+            ReportsGenerated = $reportResult.ReportFiles.Count
+            Status = "Success"
+        }
+        
+        Write-Log "=== AUDIT COMPLETED SUCCESSFULLY ===" -Level Info -Component "Main"
+        Write-Log "Events Processed: $($executionSummary.EventsProcessed)" -Level Info -Component "Main"
+        Write-Log "High Risk Events: $($executionSummary.HighRiskEvents)" -Level Info -Component "Main"
+        Write-Log "Critical Events: $($executionSummary.CriticalEvents)" -Level Info -Component "Main"
+        Write-Log "Reports Generated: $($executionSummary.ReportsGenerated)" -Level Info -Component "Main"
+        Write-Log "Execution Time: $($executionSummary.Duration.ToString('hh\:mm\:ss'))" -Level Info -Component "Main"
+        
+        # Log critical security alerts
+        if ($executionSummary.CriticalEvents -gt 0) {
+            Write-Log "⚠️ CRITICAL SECURITY ALERT: $($executionSummary.CriticalEvents) critical events require immediate attention" -Level Critical -Component "SecurityAlert"
+        }
+        
+        return $executionSummary
+    }
+    catch {
+        $errorMessage = "Script execution failed: $($_.Exception.Message)"
+        Write-Log $errorMessage -Level Error -Component "Main"
+        Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Error -Component "Main"
+        
+        # Log to Windows Event Log for monitoring
+        Write-EventLog -LogName "Application" -Source "CloudKnox External Sharing" -EventId 1002 -EntryType Error -Message $errorMessage -ErrorAction SilentlyContinue
+        
+        throw
+    }
+    finally {
+        # Cleanup and disconnect services
+        Disconnect-Services
+        
+        # Stop performance monitoring
+        Stop-PerformanceMonitoring
+        
+        # Final log entry
+        Write-Log "=== CLOUDKNOX EXTERNAL SHARING AUDIT SESSION ENDED ===" -Level Info -Component "Main"
+        Write-Log "Session ID: $script:ExecutionId" -Level Info -Component "Main"
+        
+        # Clear sensitive variables
+        $script:Config = $null
+        $ClientSecret = $null
+        if (Get-Variable -Name "secureSecret" -ErrorAction SilentlyContinue) {
+            Remove-Variable -Name "secureSecret" -Force
+        }
+    }
+}
+#endregion
+
+#region Script Entry Point
+# Validate PowerShell version
+if ($PSVersionTable.PSVersion.Major -lt 5) {
+    throw "This script requires PowerShell 5.1 or later. Current version: $($PSVersionTable.PSVersion)"
+}
+
+# Validate execution policy
+$executionPolicy = Get-ExecutionPolicy
+if ($executionPolicy -eq "Restricted") {
+    throw "PowerShell execution policy is set to Restricted. Please set to RemoteSigned or Unrestricted to run this script."
+}
+
+# Check for administrator privileges (recommended for production)
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+if (-not $isAdmin) {
+    Write-Warning "Script is not running with administrator privileges. Some features may not work correctly."
+}
+
+# Execute main function only if script is run directly (not dot-sourced)
+if ($MyInvocation.InvocationName -ne '.') {
+    try {
+        $result = Main
+        
+        # Return success exit code
+        exit 0
+    }
+    catch {
+        # Return error exit code for scheduled task monitoring
+        exit 1
+    }
+}
+#endregion
+
+# ============================================================================
+# END OF SCRIPT
+# ============================================================================
+
+<#
+DEPLOYMENT INSTRUCTIONS:
+=======================
+
+1. AZURE AD APP REGISTRATION:
+   - Create new app registration in Azure AD
+   - Configure required API permissions (see script header)
+   - Grant admin consent for all permissions
+   - Generate client secret or upload certificate
+   - Note Tenant ID and Client ID
+
+2. EXCHANGE ONLINE CONFIGURATION:
+   - Connect to Exchange Online PowerShell
+   - Run: New-ServicePrincipal -AppId "YOUR_CLIENT_ID"
+   - Run: Add-RoleGroupMember -Identity "View-Only Audit Logs" -Member "YOUR_CLIENT_ID"
+   - Run: Add-RoleGroupMember -Identity "Compliance Management" -Member "YOUR_CLIENT_ID"
+
+3. SCRIPT CONFIGURATION:
+   - Update the configuration parameters at the top of the script
+   - For production: Configure Azure Key Vault for secure credential storage
+   - Create configuration file: ExternalSharingConfig.json
+   - Test script execution manually first
+
+4. WINDOWS TASK SCHEDULER:
+   - Create new task with highest privileges
+   - Set daily trigger (recommended: 6:00 AM)
+   - Configure action: powershell.exe -ExecutionPolicy Bypass -File "ScriptPath"
+   - Set to run whether user is logged on or not
+
+5. SECURITY HARDENING:
+   - Use certificate-based authentication in production
+   - Store sensitive credentials in Azure Key Vault
+   - Configure appropriate file system permissions
+   - Enable audit logging and monitoring
+   - Implement credential rotation schedule
+
+6. MONITORING AND MAINTENANCE:
+   - Monitor script execution logs
+   - Review email notifications
+   - Check Windows Event Log for errors
+   - Regularly update PowerShell modules
+   - Review and update API permissions as needed
+
+For technical support and enterprise licensing:
+Contact: CloudKnox
+Website: https://cloudknox.me
+Email: support@cloudknox.me
+#>
