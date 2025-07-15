@@ -1,0 +1,204 @@
+{
+  "General": {
+    "DefaultGroupPrefix": "CORP",
+    "BatchSize": 10,
+    "DelayBetweenBatches": 2,
+    "MaxRetryAttempts": 3,
+    "RetryDelaySeconds": 5,
+    "LogLevel": "Info",
+    "ExportResults": true,
+    "CreateBackup": true,
+    "ISEOptimized": true,
+    "LogFilePath": "${TEMP}\\DDG-AutoCreator-Ultimate-${TIMESTAMP}.log",
+    "BackupPath": "${TEMP}\\DDG-Backup-Ultimate-${TIMESTAMP}.json"
+  },
+  "GroupNaming": {
+    "Templates": {
+      "Default": "{Prefix}-{OU}-Autopilot-DDG",
+      "Department": "{Prefix}-Dept-{OU}-DDG",
+      "Location": "{Prefix}-Site-{OU}-Devices",
+      "Custom": "{Prefix}-{OU}-{Type}-Group",
+      "Enterprise": "{Prefix}-Enterprise-{OU}-DDG"
+    },
+    "DefaultTemplate": "Default",
+    "MaxGroupNameLength": 256,
+    "AllowedCharacters": "^[a-zA-Z0-9-_\\s]+$",
+    "ReplacementChar": "-",
+    "EnableValidation": true
+  },
+  "MembershipRules": {
+    "Templates": {
+      "OrderID": "(device.devicePhysicalIds -any _ -eq \"[OrderID]:{OU}\")",
+      "GroupTag": "(device.devicePhysicalIds -any _ -eq \"[GroupTag]:{OU}\")",
+      "Custom": "(device.devicePhysicalIds -any _ -contains \"{OU}\")",
+      "ZTDId": "(device.devicePhysicalIds -any _ -eq \"[ZTDId]:{OU}\")"
+    },
+    "DefaultTemplate": "OrderID",
+    "ValidateRules": true
+  },
+  "Authentication": {
+    "Scopes": [
+      "Group.ReadWrite.All",
+      "Directory.Read.All",
+      "DeviceManagementManagedDevices.Read.All"
+    ],
+    "TenantId": "",
+    "ClientId": "",
+    "UseDeviceCode": false,
+    "UseInteractiveAuth": true,
+    "UseCredentials": false,
+    "SaveProfile": true,
+    "ProfileName": "DDG-Ultimate"
+  },
+  "Validation": {
+    "ValidateOUFormat": true,
+    "CheckDuplicates": true,
+    "ValidateCharacterLimits": true,
+    "RequiredOUPattern": "^[a-zA-Z0-9-_\\s/\\\\]+$",
+    "MaxOULength": 100,
+    "EnableAdvancedValidation": true,
+    "RepairData": true,
+    "StrictMode": false
+  },
+  "Reporting": {
+    "GenerateHTMLReport": true,
+    "GenerateCSVReport": true,
+    "GenerateJSONReport": false,
+    "IncludePreflightChecks": true,
+    "ShowMembershipPreview": true,
+    "ReportTemplate": "Ultimate",
+    "EnableDashboard": true,
+    "AutoOpenReport": true,
+    "ReportPath": "${TEMP}\\DDG-Report-Ultimate-${TIMESTAMP}.html"
+  },
+  "Features": {
+    "UpdateExistingGroups": false,
+    "CleanupMode": false,
+    "ShowProgressBar": true,
+    "ParallelProcessing": true,
+    "MaxParallelJobs": 5,
+    "ThrottleLimit": 5,
+    "InteractiveMode": false,
+    "AuditMode": false,
+    "ScheduledMode": false,
+    "EnableRollback": true,
+    "WizardMode": false
+  },
+  "Teams": {
+    "EnableNotifications": false,
+    "WebhookUrl": "",
+    "NotifyOnStart": true,
+    "NotifyOnCompletion": true,
+    "NotifyOnErrors": true,
+    "NotifyOnWarnings": false,
+    "IncludeStatistics": true,
+    "IncludePerformanceMetrics": true,
+    "UseAdaptiveCards": true,
+    "ThreadedConversations": true
+  },
+  "InputFormats": {
+    "SupportedFormats": [
+      "TXT",
+      "CSV",
+      "JSON",
+      "XML",
+      "YAML"
+    ],
+    "AutoDetection": true,
+    "DefaultFormat": "TXT",
+    "CSVDelimiter": ",",
+    "CSVHeaders": {
+      "Name": "Name",
+      "DisplayName": "DisplayName",
+      "Description": "Description"
+    },
+    "JSONSchema": "Standard",
+    "ValidateFormat": true,
+    "TransformData": true
+  },
+  "Performance": {
+    "EnableCaching": true,
+    "CacheTimeout": 300,
+    "ConnectionTimeout": 30,
+    "RequestTimeout": 60,
+    "MaxConcurrentRequests": 10,
+    "EnableMetrics": true,
+    "MetricsInterval": 30
+  },
+  "Security": {
+    "EnableAuditLogging": true,
+    "AuditLogPath": "${TEMP}\\DDG-Audit-${TIMESTAMP}.log",
+    "EncryptSensitiveData": true,
+    "RequireConfirmation": true,
+    "EnableBackup": true,
+    "BackupRetention": 30
+  },
+  "UI": {
+    "ColorScheme": "Enterprise",
+    "ShowBanner": true,
+    "ShowProgress": true,
+    "UseGridView": true,
+    "EnableAnimations": false,
+    "VerboseOutput": false,
+    "QuietMode": false
+  },
+  "Environments": {
+    "Development": {
+      "General": {
+        "DefaultGroupPrefix": "DEV",
+        "LogLevel": "Debug",
+        "CreateBackup": true
+      },
+      "Features": {
+        "ParallelProcessing": false,
+        "InteractiveMode": true,
+        "AuditMode": true
+      },
+      "Teams": {
+        "EnableNotifications": false
+      }
+    },
+    "Testing": {
+      "General": {
+        "DefaultGroupPrefix": "TEST",
+        "LogLevel": "Info",
+        "CreateBackup": true
+      },
+      "Features": {
+        "ParallelProcessing": true,
+        "MaxParallelJobs": 3,
+        "AuditMode": true
+      },
+      "Teams": {
+        "EnableNotifications": true
+      }
+    },
+    "Production": {
+      "General": {
+        "DefaultGroupPrefix": "PROD",
+        "BatchSize": 15,
+        "LogLevel": "Warning",
+        "CreateBackup": true
+      },
+      "Features": {
+        "ParallelProcessing": true,
+        "MaxParallelJobs": 8,
+        "InteractiveMode": false,
+        "ScheduledMode": true,
+        "EnableRollback": true
+      },
+      "Teams": {
+        "EnableNotifications": true,
+        "NotifyOnStart": true,
+        "NotifyOnCompletion": true,
+        "NotifyOnErrors": true,
+        "IncludeStatistics": true
+      },
+      "Security": {
+        "RequireConfirmation": false,
+        "EnableAuditLogging": true
+      }
+    }
+  }
+}
+
