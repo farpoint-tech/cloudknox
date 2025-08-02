@@ -1,0 +1,101 @@
+# Korrigiertes Script mit besserer Fehlerbehandlung
+
+# Anmelden falls nötig
+Connect-MgGraph -Scopes "DeviceManagementServiceConfig.ReadWrite.All"
+
+# Gerät-ID
+$deviceId = "a5aac439-4a1a-4e81-9c08-23fe8191aaff"
+$groupTag = "userdriven"
+
+Write-Host "Teste verschiedene API-Aufrufe..." -ForegroundColor Yellow
+
+# Test 1: Einfacher Body
+try {
+    Write-Host "`nTest 1: Einfacher groupTag..."
+    $uri = "https://graph.microsoft.com/v1.0/deviceManagement/windowsAutopilotDeviceIdentities/$deviceId"
+    $body = '{"groupTag":"userdriven"}'
+    
+    Write-Host "URI: $uri"
+    Write-Host "Body: $body"
+    
+    $result = Invoke-MgGraphRequest -Method PATCH -Uri $uri -Body $body -ContentType "application/json"
+    Write-Host "ERFOLG Test 1!" -ForegroundColor Green
+}
+catch {
+    Write-Host "Fehler Test 1: $($_.Exception.Message)" -ForegroundColor Red
+    
+    # Bessere Fehlerausgabe
+    if ($_.Exception.Response.Content) {
+        $errorContent = $_.Exception.Response.Content.ReadAsStringAsync().Result
+        Write-Host "API Fehler: $errorContent" -ForegroundColor Yellow
+    }
+}
+
+# Test 2: Mit @odata.type
+try {
+    Write-Host "`nTest 2: Mit @odata.type..."
+    $body2 = @{
+        '@odata.type' = '#microsoft.graph.windowsAutopilotDeviceIdentity'
+        groupTag = 'userdriven'
+    } | ConvertTo-Json
+    
+    Write-Host "Body: $body2"
+    
+    $result = Invoke-MgGraphRequest -Method PATCH -Uri $uri -Body $body2 -ContentType "application/json"
+    Write-Host "ERFOLG Test 2!" -ForegroundColor Green
+}
+catch {
+    Write-Host "Fehler Test 2: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Test 3: Beta API
+try {
+    Write-Host "`nTest 3: Beta API..."
+    $uriBeta = "https://graph.microsoft.com/beta/deviceManagement/windowsAutopilotDeviceIdentities/$deviceId"
+    $body = '{"groupTag":"userdriven"}'
+    
+    $result = Invoke-MgGraphRequest -Method PATCH -Uri $uriBeta -Body $body -ContentType "application/json"
+    Write-Host "ERFOLG Test 3!" -ForegroundColor Green
+}
+catch {
+    Write-Host "Fehler Test 3: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Test 4: PUT statt PATCH
+try {
+    Write-Host "`nTest 4: PUT Methode..."
+    
+    # Erst aktuelles Gerät holen
+    $current = Invoke-MgGraphRequest -Method GET -Uri $uri
+    
+    # GroupTag hinzufügen
+    $current.groupTag = "userdriven"
+    $fullBody = $current | ConvertTo-Json -Depth 10
+    
+    Write-Host "Verwende PUT mit vollem Objekt..."
+    $result = Invoke-MgGraphRequest -Method PUT -Uri $uri -Body $fullBody -ContentType "application/json"
+    Write-Host "ERFOLG Test 4!" -ForegroundColor Green
+}
+catch {
+    Write-Host "Fehler Test 4: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Test 5: Spezielle Update-Endpoint
+try {
+    Write-Host "`nTest 5: Update-Endpoint..."
+    $updateUri = "https://graph.microsoft.com/beta/deviceManagement/windowsAutopilotDeviceIdentities/$deviceId/updateDeviceProperties"
+    $body = '{"groupTag":"userdriven"}'
+    
+    $result = Invoke-MgGraphRequest -Method POST -Uri $updateUri -Body $body -ContentType "application/json"
+    Write-Host "ERFOLG Test 5!" -ForegroundColor Green
+}
+catch {
+    Write-Host "Fehler Test 5: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+Write-Host "`nAlle Tests abgeschlossen."
+
+# Prüfen ob etwas funktioniert hat
+Write-Host "`nPrüfe aktuellen Status..."
+$check = Invoke-MgGraphRequest -Method GET -Uri $uri
+Write-Host "Aktueller GroupTag: '$($check.groupTag)'" -ForegroundColor Cyan
