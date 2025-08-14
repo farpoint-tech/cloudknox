@@ -182,3 +182,40 @@ Dieses Projekt verwendet [Semantic Versioning](https://semver.org/):
 
 **© 2024-2025 Farpoint Technologies. Alle Rechte vorbehalten.**
 
+
+## [2.1.0] - 2025-08-14 21:30:22 CET
+
+### Added
+- **Entra ID App Creator**: Neues PowerShell-Script für automatisierte App-Registrierung
+  - **Pfad**: `scripts/entra-id-app-creator/`
+  - **Script**: `Create-EntraIDApp.ps1`
+  - **Umfassende README**: Detaillierte Dokumentation mit Verwendungsbeispielen
+
+### Features
+- **Vollautomatische App-Erstellung**: Komplette Automatisierung des App-Registrierungsprozesses
+- **Interactive Configuration**: Benutzerfreundliche Schritt-für-Schritt-Anleitung
+- **API-Berechtigungen**: Vordefinierte und benutzerdefinierte Microsoft Graph-Berechtigungen
+- **Client Secret Management**: Automatische Generierung mit konfigurierbarer Gültigkeit
+- **Service Principal Creation**: Automatische Enterprise App-Erstellung
+- **Multi-Platform Auth Examples**: Fertige Authentifizierungsbeispiele für Azure CLI, PowerShell und Graph
+
+### Technical Details
+- **Unterstützte Berechtigungen**: 11 vordefinierte Microsoft Graph-Berechtigungen
+- **Benutzerdefinierte APIs**: Unterstützung für beliebige API-Berechtigungen
+- **Delegated & Application**: Beide Berechtigungstypen unterstützt
+- **Automatic Module Installation**: Microsoft Graph PowerShell SDK wird automatisch installiert
+- **Comprehensive Error Handling**: Robuste Fehlerbehandlung und Validierung
+
+### Documentation
+- **15+ Seiten Dokumentation**: Umfassende README mit allen Details
+- **Verwendungsbeispiele**: Praktische Code-Beispiele für verschiedene Szenarien
+- **Troubleshooting Guide**: Lösungen für häufige Probleme
+- **Security Best Practices**: Sicherheitshinweise und Best Practices
+- **Integration Examples**: Beispiele für CI/CD und Automatisierung
+
+### Updated
+- **Repository README**: Aktualisierung der Hauptdokumentation
+- **Script-Übersicht**: Hinzufügung des neuen Scripts zur Gesamtübersicht
+- **Ordnerstruktur**: Erweiterung um `scripts/entra-id-app-creator/`
+
+

@@ -14,6 +14,7 @@ cloudknox/
 │   ├── autopilot-group-tag-bulk-setter/       # Massenhafte Group Tag-Zuweisung
 │   ├── device-rename-grouptag-enhanced/       # Erweiterte Geräteumbenennung
 │   ├── enhanced-laps-diagnostic/              # LAPS-Diagnoseskript
+│   ├── entra-id-app-creator/                  # Entra ID App-Registrierung
 │   ├── intune-ddg-autocreator-ultimate/       # Dynamic Device Groups
 │   ├── oobe-autopilot-registration-minimal/   # OOBE Autopilot (Minimal)
 │   ├── oobe-autopilot-registration-full/      # OOBE Autopilot (Vollversion)
@@ -57,7 +58,18 @@ Umfassende Diagnoselösung für Local Administrator Password Solution (LAPS).
 - Automatisierte Reparatur
 - Monitoring und Alerting
 
-### 4. Intune DDG AutoCreator Ultimate
+### 4. Entra ID App Creator
+**Pfad:** `scripts/entra-id-app-creator/`
+
+Automatisierte Lösung für die Erstellung von App-Registrierungen und Enterprise Apps in Microsoft Entra ID.
+
+**Hauptfunktionen:**
+- Vollautomatische App-Erstellung
+- API-Berechtigungen-Konfiguration
+- Client Secret-Generierung
+- Service Principal-Erstellung
+
+### 5. Intune DDG AutoCreator Ultimate
 **Pfad:** `scripts/intune-ddg-autocreator-ultimate/`
 
 Ultimative Lösung für die automatische Erstellung von Dynamic Device Groups.
@@ -68,7 +80,7 @@ Ultimative Lösung für die automatische Erstellung von Dynamic Device Groups.
 - Teams-Integration
 - JSON-Konfiguration
 
-### 5. OOBE Autopilot Registration - Minimal Version
+### 6. OOBE Autopilot Registration - Minimal Version
 **Pfad:** `scripts/oobe-autopilot-registration-minimal/`
 
 Schlanke Lösung für die Autopilot-Registrierung während OOBE.
@@ -79,7 +91,7 @@ Schlanke Lösung für die Autopilot-Registrierung während OOBE.
 - Automatische Hardware-ID-Erfassung
 - Grundlegendes Logging
 
-### 6. OOBE Autopilot Registration - Vollversion
+### 7. OOBE Autopilot Registration - Vollversion
 **Pfad:** `scripts/oobe-autopilot-registration-full/`
 
 Vollständige Autopilot-Registrierungslösung mit erweiterten Funktionen.
@@ -90,7 +102,7 @@ Vollständige Autopilot-Registrierungslösung mit erweiterten Funktionen.
 - Detaillierte Protokollierung
 - E-Mail- und Teams-Benachrichtigungen
 
-### 7. Same DevOps Environment
+### 8. Same DevOps Environment
 **Pfad:** `scripts/same-devops-environment/`
 
 Standardisierung und Synchronisation von DevOps-Umgebungen.
