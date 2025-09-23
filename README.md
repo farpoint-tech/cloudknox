@@ -224,7 +224,7 @@ Alle Änderungen werden in der [CHANGELOG.md](CHANGELOG.md) dokumentiert.
 
 ### Hauptautor
 **Philipp Schmidt** - Farpoint Technologies
-- E-Mail: philipp@farpoint.tech
+- E-Mail: ps@farpoint.tech
 - LinkedIn: [Philipp Schmidt](https://linkedin.com/in/philipp-schmidt-farpoint)
 
 ### Mitwirkende
@@ -256,7 +256,7 @@ Dieses Repository und alle enthaltenen Scripts sind Eigentum von Farpoint Techno
 
 ### Notfall-Support
 Für kritische Probleme in Produktionsumgebungen:
-- **Hotline**: +49 (0) 123 456 789
+- **Hotline**: +49 (0) 000000000
 - **24/7 Support**: Nur für Premium-Kunden
 
 ## 🔗 Weiterführende Links
