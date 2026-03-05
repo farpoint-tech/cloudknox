@@ -7,6 +7,38 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-03-05 CET
+
+### Fixed / Improved
+- **AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1**: Kritischer Bug behoben – Pagination fehlte, Geräte >1000 wurden nicht verarbeitet
+  - `@odata.nextLink` wird jetzt vollständig durchlaufen (alle Seiten)
+  - `Write-Log`-Funktion hinzugefügt: persistentes Log mit Timestamp, Level-Farben (INFO/WARN/ERROR/SUCCESS)
+  - CSV-Export der Ergebnisse (SerialNumber, Model, GroupTag, Status, Timestamp, ErrorMessage)
+  - Neue Parameter: `-LogPath` und `-ExportCsv` (mit Auto-Defaults unter `.\Logs\`)
+
+- **Create-EntraIDApp.ps1**: Mehrere kritische und wichtige Punkte behoben
+  - CLI-Parameter ergänzt: `-TenantId`, `-AppName`, `-OwnerName`, `-SecretValidityYears`, `-SaveToFile`, `-OutputPath`
+  - Rollback implementiert: bei Fehler nach App-Erstellung wird App automatisch via `Remove-MgApplication` gelöscht
+  - Secret-Sicherheit verbessert: kein automatischer Klartext-Export; nur mit expliziter Bestätigung oder `-SaveToFile`
+  - Datei-Berechtigungen eingeschränkt (ACL auf CurrentUser) wenn Datei-Export aktiv
+  - Hilfsfunktion `Add-GraphPermissionToApp` extrahiert – eliminiert duplizierten Code für Application/Delegated
+
+- **sameDevOpsEnvironment.ps1**: Sprachkonsistenz hergestellt
+  - Alle Ausgaben und Kommentare auf Englisch vereinheitlicht
+  - Formatierungs-Inkonsistenzen (doppelte Leerzeilen, Einrückungen) bereinigt
+
+### Updated
+- **README.md** auf v2.3.0 aktualisiert:
+  - Parameter-Tabellen für Autopilot Group Tag Setter und Entra ID App Creator hinzugefügt
+  - Rollback-Verhalten für Entra ID App Creator dokumentiert
+  - Verbesserungsabschnitt: umgesetzte Punkte als ✅ markiert, offene Punkte aktualisiert
+- **log.md**: Implementierungsdetails dokumentiert
+
+### Technical Details
+- **Geänderte Scripts**: 3 PS1-Dateien
+- **Branch**: claude/audit-scripts-docs-ZXfWs
+- **Autor**: Claude Code (Anthropic) / Philipp Schmidt - Farpoint Technologies
+
 ## [2.2.0] - 2026-03-05 CET
 
 ### Added

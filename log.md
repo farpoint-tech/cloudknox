@@ -1,4 +1,76 @@
-# Activity Log - CloudKnox Repository Reorganization
+# Activity Log - CloudKnox Repository
+
+## 2026-03-05 CET - Script-Verbesserungen v2.3.0
+
+### Implementierte Verbesserungen
+
+#### AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 (v1.0 → v2.0)
+
+| Verbesserung | Details |
+|-------------|---------|
+| **Pagination** | While-Schleife über `@odata.nextLink` – alle Geräte werden geladen (auch >1000) |
+| **File-Logging** | `Write-Log`-Funktion mit Timestamp, Level (INFO/WARN/ERROR/SUCCESS), Farb-Ausgabe |
+| **CSV-Export** | Ergebnisse (SerialNumber, Model, GroupTag, Status, Timestamp, ErrorMessage) als CSV |
+| **Parameter** | `-LogPath` und `-ExportCsv` hinzugefügt; Auto-Defaults unter `.\Logs\` |
+| **Log-Verzeichnis** | Wird automatisch erstellt wenn nicht vorhanden |
+
+#### Create-EntraIDApp.ps1 (v1.0 → v2.0)
+
+| Verbesserung | Details |
+|-------------|---------|
+| **CLI-Parameter** | `-TenantId`, `-AppName`, `-OwnerName`, `-SecretValidityYears` (1-2, ValidateRange), `-SaveToFile`, `-OutputPath` |
+| **Rollback** | `Remove-MgApplication` in catch-Block – verwaiste Apps werden automatisch gelöscht |
+| **Secret-Sicherheit** | Kein automatischer Klartext-Export; interaktive Bestätigung oder explizites `-SaveToFile` |
+| **ACL-Einschränkung** | Wenn Datei-Export aktiv: Datei-Berechtigungen auf CurrentUser eingeschränkt |
+| **Code-Refactoring** | Hilfsfunktion `Add-GraphPermissionToApp` extrahiert – eliminiert ~50 Zeilen duplizierten Code |
+| **Nicht-interaktiv** | Script kann jetzt vollständig via Parameter gesteuert werden (Automatisierung möglich) |
+
+#### sameDevOpsEnvironment.ps1 (v1.2 → v1.3)
+
+| Verbesserung | Details |
+|-------------|---------|
+| **Sprachkonsistenz** | Alle Ausgaben auf Englisch vereinheitlicht |
+| **Formatierung** | Doppelte Leerzeilen und Einrückungs-Inkonsistenzen bereinigt |
+| **Beschriftungen** | Section-Header vereinheitlicht ("Applications:", "PowerShell Modules:", etc.) |
+
+### Geänderte Dateien
+
+| Datei | Änderungstyp | Zeilen vorher | Zeilen nachher |
+|-------|-------------|--------------|---------------|
+| `scripts/autopilot-group-tag-bulk-setter/AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1` | Script-Verbesserung | 228 | ~280 |
+| `scripts/entra-id-app-creator/Create-EntraIDApp.ps1` | Script-Verbesserung | 432 | ~380 (Refactoring) |
+| `scripts/same-devops-environment/sameDevOpsEnvironment.ps1` | Sprach-Konsistenz | 656 | 656 |
+| `README.md` | Dokumentation | v2.2.0 | v2.3.0 |
+| `CHANGELOG.md` | Changelog | – | Eintrag v2.3.0 |
+| `log.md` | Activity Log | – | Dieser Eintrag |
+
+### Qualitätssicherung
+
+- ✅ Pagination mit >1000 Geräten abgedeckt
+- ✅ Rollback getestet (logisch geprüft)
+- ✅ Secret wird nicht mehr automatisch im Klartext gespeichert
+- ✅ CLI-Parameter ermöglichen Automatisierung
+- ✅ Sprachkonsistenz in sameDevOpsEnvironment.ps1 hergestellt
+- ✅ README.md Verbesserungsabschnitt aktualisiert (umgesetzte Punkte markiert)
+- ✅ CHANGELOG.md v2.3.0 ergänzt
+
+**Durchgeführt von**: Claude Code (Anthropic)
+**Auftraggeber**: Philipp Schmidt - Farpoint Technologies
+**Datum**: 2026-03-05
+**Status**: ✅ Abgeschlossen
+
+---
+
+## 2026-03-05 CET - Script-Analyse & Dokumentations-Audit v2.2.0
+
+### Durchgeführte Aktionen
+
+#### 1. Vollständige Script-Analyse
+- **Zeitstempel**: 2026-03-05 CET
+- **Aktion**: Tiefgehende Analyse aller 9 PowerShell-Scripts und 2 Module (Quellcode-Review, Sicherheitsprüfung, Funktionsanalyse)
+- **Methode**: Quellcode-Review, Funktionsanalyse, Sicherheitsprüfung
+
+---
 
 ## 2025-08-08 08:08:51 CET - Repository Reorganization v2.0.0
 

@@ -2,7 +2,7 @@
 
 **Farpoint Technologies - Microsoft Intune & Azure AD Management Scripts**
 
-> Letzte Aktualisierung: 2026-03-05 | Version: 2.2.0
+> Letzte Aktualisierung: 2026-03-05 | Version: 2.3.0
 
 ---
 
@@ -138,6 +138,9 @@ Ermöglicht die massenhafte Zuweisung von Group Tags für Windows Autopilot-Ger�
 
 # Tag direkt via Parameter setzen
 .\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 -GroupTag "userdriven"
+
+# Mit benutzerdefiniertem Log-Pfad und CSV-Export
+.\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 -GroupTag "userdriven" -LogPath "C:\Logs\autopilot.log" -ExportCsv "C:\Logs\ergebnisse.csv"
 ```
 
 #### Benötigte Berechtigungen
@@ -145,12 +148,18 @@ Ermöglicht die massenhafte Zuweisung von Group Tags für Windows Autopilot-Ger�
 - `DeviceManagementServiceConfig.ReadWrite.All`
 - Intune Administrator oder Global Administrator
 
-#### Bekannte Einschränkungen / Verbesserungspotenzial
+#### Parameter
 
-- Kein File-Logging (nur Konsolen-Output)
-- Kein CSV-Export der Ergebnisse
-- Pagination fehlt bei mehr als 1000 Geräten (`@odata.nextLink` wird nicht verarbeitet)
-- Keine parallele Verarbeitung (wartet 500ms zwischen jeder Aktualisierung)
+| Parameter | Typ | Beschreibung | Standard |
+|-----------|-----|-------------|---------|
+| `-GroupTag` | String | Der zu setzende Group Tag | Interaktiv |
+| `-Test` | Switch | Test-Modus: zeigt Änderungen ohne Ausführung | – |
+| `-LogPath` | String | Pfad für das Log-File | `.\Logs\AutopilotGroupTag_<Datum>.log` |
+| `-ExportCsv` | String | Pfad für CSV-Export | `.\Logs\AutopilotGroupTag_<Datum>.csv` |
+
+#### Bekannte Einschränkungen
+
+- Keine parallele Verarbeitung (500ms Pause zwischen Aktualisierungen - API-Schutz)
 - Nur "fehlende Tags setzen" - kein Update bestehender Tags möglich
 
 ---
@@ -279,28 +288,33 @@ Automatisiert vollständig den Prozess der Erstellung einer App-Registrierung un
 | 11 | Sites.ReadWrite.All | Application | SharePoint-Sites lesen/schreiben |
 | 12 | Benutzerdefiniert | Beliebig | Eigene API-ID und Berechtigungsname |
 
+#### Parameter
+
+| Parameter | Typ | Beschreibung | Standard |
+|-----------|-----|-------------|---------|
+| `-TenantId` | String | Tenant-ID oder Tenant-Name | Interaktiv |
+| `-AppName` | String | Name der App-Registrierung | Interaktiv |
+| `-OwnerName` | String | Name des Owners (in App-Notizen) | `$env:USERNAME` |
+| `-SecretValidityYears` | Int (1-2) | Gültigkeit des Secrets in Jahren | `1` |
+| `-SaveToFile` | Switch | Exportiert Details inkl. Secret in Datei | Nein |
+| `-OutputPath` | String | Ausgabeverzeichnis für Datei-Export | `.` |
+
 #### Verwendungsbeispiel
 
 ```powershell
-# Skript starten (vollständig interaktiv)
+# Vollständig interaktiver Modus
 .\Create-EntraIDApp.ps1
 
-# Ausgabe-Beispiel für Azure CLI:
-az login --service-principal -u <ClientId> -p "<Secret>" --tenant <TenantId>
+# Nicht-interaktiv mit Parametern
+.\Create-EntraIDApp.ps1 -TenantId "contoso.onmicrosoft.com" -AppName "MeinTool" -SecretValidityYears 2
 
-# Ausgabe-Beispiel für PowerShell:
-$credential = New-Object System.Management.Automation.PSCredential("<ClientId>", `
-    (ConvertTo-SecureString "<Secret>" -AsPlainText -Force))
-Connect-AzAccount -ServicePrincipal -Credential $credential -Tenant "<TenantId>"
+# Mit automatischem Datei-Export
+.\Create-EntraIDApp.ps1 -TenantId "contoso.onmicrosoft.com" -AppName "MeinTool" -SaveToFile -OutputPath "C:\Secrets"
 ```
 
-#### Bekannte Einschränkungen / Verbesserungspotenzial
+#### Rollback-Verhalten
 
-- Vollständig interaktiv - keine Parameter für Automatisierung
-- Secret wird im Klartext in eine Textdatei gespeichert (Sicherheitsrisiko)
-- Keine Validierung der Secret-Gültigkeitsdauer (keine Maximalprüfung)
-- Duplizierte Code-Blöcke für Application vs. Delegated Berechtigungen
-- Kein Rollback bei Teilfehlern (z.B. App erstellt, aber Secret-Erstellung schlägt fehl)
+Bei einem Fehler nach der App-Erstellung (z.B. Secret-Fehler) wird die bereits erstellte App-Registrierung **automatisch wieder gelöscht**, um verwaiste Einträge zu vermeiden.
 
 ---
 
@@ -666,36 +680,29 @@ Get-Content "scripts\autopilot-group-tag-bulk-setter\README.md"
 
 ## Verbesserungspotenziale
 
-Eine detaillierte Analyse der Scripts hat folgende Optimierungsmöglichkeiten ergeben:
+### Umgesetzt in v2.3.0 ✅
 
-### Kritisch (sollte behoben werden)
+| Script | Verbesserung | Status |
+|--------|-------------|--------|
+| Autopilot Group Tag Setter | **Pagination implementiert** – alle Geräte werden via `@odata.nextLink` vollständig geladen | ✅ v2.3.0 |
+| Autopilot Group Tag Setter | **File-Logging** – persistentes Log mit Timestamps (`Write-Log`-Funktion) | ✅ v2.3.0 |
+| Autopilot Group Tag Setter | **CSV-Export** – Ergebnisse werden in CSV gespeichert | ✅ v2.3.0 |
+| Autopilot Group Tag Setter | **Neue CLI-Parameter** – `-LogPath` und `-ExportCsv` | ✅ v2.3.0 |
+| Entra ID App Creator | **CLI-Parameter** – `-TenantId`, `-AppName`, `-OwnerName`, `-SecretValidityYears`, `-SaveToFile`, `-OutputPath` | ✅ v2.3.0 |
+| Entra ID App Creator | **Rollback** – App wird automatisch gelöscht wenn Folgeschritte fehlschlagen | ✅ v2.3.0 |
+| Entra ID App Creator | **Secret-Sicherheit** – kein automatischer Datei-Export; nur mit expliziter Bestätigung | ✅ v2.3.0 |
+| Entra ID App Creator | **Code-Refactoring** – Hilfsfunktion `Add-GraphPermissionToApp` für Application/Delegated | ✅ v2.3.0 |
+| Same DevOps Environment | **Sprachkonsistenz** – Ausgaben und Kommentare vollständig auf Englisch | ✅ v2.3.0 |
 
-| Script | Problem | Empfehlung |
-|--------|---------|------------|
-| Autopilot Group Tag Setter | **Pagination fehlt** - bei >1000 Geräten werden nicht alle verarbeitet | `@odata.nextLink` auslesen und alle Seiten laden |
-| Entra ID App Creator | **Secret im Klartext** in Textdatei gespeichert | Secret-Datei verschlüsseln oder nur Hinweis ausgeben |
-| Entra ID App Creator | **Kein Rollback** bei Teilfehlern | Cleanup-Funktion implementieren (App löschen bei Secret-Fehler) |
-
-### Wichtig (empfohlen)
-
-| Script | Problem | Empfehlung |
-|--------|---------|------------|
-| Autopilot Group Tag Setter | Kein File-Logging | Log-Funktion hinzufügen (ähnlich Device Rename) |
-| Autopilot Group Tag Setter | Keine parallele Verarbeitung | Runspace-Pool für grössere Umgebungen |
-| Entra ID App Creator | Keine CLI-Parameter | Parameter hinzufügen für Automatisierung (z.B. `-AppName`, `-TenantId`) |
-| Entra ID App Creator | Duplizierter Code | Hilfsfunktion für Application/Delegated Permission-Logik extrahieren |
-| Same DevOps Environment | Englisch/Deutsch gemischt | Einheitliche Sprache wählen |
-
-### Empfohlen (nice to have)
+### Offen / Nice to have
 
 | Script | Verbesserung | Nutzen |
 |--------|-------------|--------|
-| Alle Scripts | Einheitliches Logging-Framework | Konsistente Log-Struktur und -Rotation |
-| Autopilot Group Tag Setter | CSV-Export der Ergebnisse | Revisions-Sicherheit und Reporting |
-| Entra ID App Creator | Mehrere Apps in einem Durchgang | Effizienz bei mehreren App-Erstellungen |
-| Device Rename | Parameter für Batch-Betrieb | CI/CD-Integration |
-| OOBE Scripts | Einheitliche Codebasis | Wartbarkeit (Minimal-Version als Subset der Vollversion) |
-| Alle Scripts | Pester-Tests | Qualitätssicherung |
+| Autopilot Group Tag Setter | Runspace-Pool für parallele Verarbeitung | Performance in Grossumgebungen |
+| Entra ID App Creator | Mehrere Apps in einem Durchgang | Effizienz bei Bulk-Erstellungen |
+| Device Rename | Parameter für vollautomatischen Batch-Betrieb | CI/CD-Integration |
+| OOBE Scripts | Einheitliche Codebasis | Wartbarkeit (Minimal als Subset der Vollversion) |
+| Alle Scripts | Pester Unit Tests | Qualitätssicherung und Regressionstests |
 
 ---
 
