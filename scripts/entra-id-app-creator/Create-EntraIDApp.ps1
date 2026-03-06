@@ -441,7 +441,7 @@ WICHTIG: Bewahren Sie diese Informationen sicher auf!
                 $acl.SetAccessRule($rule)
                 Set-Acl $exportPath $acl
             } catch {
-                # Berechtigungs-Einschränkung nicht kritisch
+                Write-Warning "ACL-Einschränkung fehlgeschlagen (nicht kritisch): $($_.Exception.Message)"
             }
 
             Write-Host "`n✓ Details gespeichert: $((Get-Item $exportPath).FullName)" -ForegroundColor Yellow
