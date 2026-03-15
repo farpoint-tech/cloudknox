@@ -7,6 +7,70 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-03-05 CET
+
+### Fixed / Improved
+- **AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1**: Kritischer Bug behoben – Pagination fehlte, Geräte >1000 wurden nicht verarbeitet
+  - `@odata.nextLink` wird jetzt vollständig durchlaufen (alle Seiten)
+  - `Write-Log`-Funktion hinzugefügt: persistentes Log mit Timestamp, Level-Farben (INFO/WARN/ERROR/SUCCESS)
+  - CSV-Export der Ergebnisse (SerialNumber, Model, GroupTag, Status, Timestamp, ErrorMessage)
+  - Neue Parameter: `-LogPath` und `-ExportCsv` (mit Auto-Defaults unter `.\Logs\`)
+
+- **Create-EntraIDApp.ps1**: Mehrere kritische und wichtige Punkte behoben
+  - CLI-Parameter ergänzt: `-TenantId`, `-AppName`, `-OwnerName`, `-SecretValidityYears`, `-SaveToFile`, `-OutputPath`
+  - Rollback implementiert: bei Fehler nach App-Erstellung wird App automatisch via `Remove-MgApplication` gelöscht
+  - Secret-Sicherheit verbessert: kein automatischer Klartext-Export; nur mit expliziter Bestätigung oder `-SaveToFile`
+  - Datei-Berechtigungen eingeschränkt (ACL auf CurrentUser) wenn Datei-Export aktiv
+  - Hilfsfunktion `Add-GraphPermissionToApp` extrahiert – eliminiert duplizierten Code für Application/Delegated
+
+- **sameDevOpsEnvironment.ps1**: Sprachkonsistenz hergestellt
+  - Alle Ausgaben und Kommentare auf Englisch vereinheitlicht
+  - Formatierungs-Inkonsistenzen (doppelte Leerzeilen, Einrückungen) bereinigt
+
+### Updated
+- **README.md** auf v2.3.0 aktualisiert:
+  - Parameter-Tabellen für Autopilot Group Tag Setter und Entra ID App Creator hinzugefügt
+  - Rollback-Verhalten für Entra ID App Creator dokumentiert
+  - Verbesserungsabschnitt: umgesetzte Punkte als ✅ markiert, offene Punkte aktualisiert
+- **log.md**: Implementierungsdetails dokumentiert
+
+### Technical Details
+- **Geänderte Scripts**: 3 PS1-Dateien
+- **Branch**: claude/audit-scripts-docs-ZXfWs
+- **Autor**: Claude Code (Anthropic) / Philipp Schmidt - Farpoint Technologies
+
+## [2.2.0] - 2026-03-05 CET
+
+### Added
+- **Vollständige Script-Analyse**: Tiefgehende Analyse aller 9 Scripts und 2 Module (Quellcode-Review, Sicherheitsprüfung, Funktionsanalyse)
+- **Verbesserungspotenziale dokumentiert**: Kritische, wichtige und empfohlene Optimierungen identifiziert und dokumentiert
+
+### Changed
+- **README.md vollständig überarbeitet** (v2.1 → v2.2):
+  - Detaillierte Schritt-für-Schritt Funktionsbeschreibungen für alle 8 Scripts
+  - Vollständige Parameter-Tabellen mit Typ und Beschreibung
+  - Authentifizierungsmethoden-Übersichten pro Script
+  - Shared Modules vollständig dokumentiert (AuthenticationModule, TeamsIntegrationModule)
+  - Installierte Software/Module in übersichtlichen Tabellen
+  - Neuer Abschnitt "Verbesserungspotenziale" (Kritisch / Wichtig / Nice-to-have)
+  - Inhaltsverzeichnis mit Direktlinks
+  - Einheitliches Format und Tabellenstruktur durchgehend
+- **log.md erweitert**: Detaillierter Analyse-Eintrag mit Script-Übersichtstabelle und identifizierten Problemen
+
+### Identified Issues (zur Behebung in künftigen Versionen)
+- **Kritisch**: Pagination bei Autopilot Group Tag Setter fehlt (>1000 Geräte nicht abgedeckt)
+- **Kritisch**: Entra ID App Creator schreibt Client Secret im Klartext in Textdatei
+- **Kritisch**: Entra ID App Creator hat keinen Rollback bei Teilfehlern
+- **Wichtig**: Autopilot Group Tag Setter hat kein File-Logging
+- **Wichtig**: Entra ID App Creator ist nicht automatisierbar (keine CLI-Parameter)
+- **Wichtig**: sameDevOpsEnvironment.ps1 hat gemischte Sprache (EN/DE)
+
+### Technical Details
+- **Analysierte Scripts**: 9 PS1-Dateien, 2 PSM1-Module
+- **Codezeilen analysiert**: ~7.500+ Zeilen
+- **Branch**: claude/audit-scripts-docs-ZXfWs
+- **Autor**: Claude Code (Anthropic) / Philipp Schmidt - Farpoint Technologies
+
 ## [2.0.0] - 2025-08-08 08:08:51 CET
 
 ### Added

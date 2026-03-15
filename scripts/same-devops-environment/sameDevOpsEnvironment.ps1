@@ -99,7 +99,7 @@ Write-Progress-Step "Checking Dependencies" "Verifying winget installation and c
 Write-Host "Checking Dependencies..." -ForegroundColor Cyan
 
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Write-Host "winget not found. Please install App Installer from Microsoft Store." -ForegroundColor Red
+    Write-Host "winget not found. Please install App Installer from the Microsoft Store." -ForegroundColor Red
     exit 1
 }
 Write-Host "* winget is available" -ForegroundColor Green
@@ -125,7 +125,7 @@ foreach ($app in $installApps.GetEnumerator()) {
             Write-Host " Installing/Upgrading..." -ForegroundColor Cyan
             $upgradeProcess = Start-Process -FilePath "winget" -ArgumentList "upgrade $appId --silent --accept-package-agreements --accept-source-agreements" -Wait -NoNewWindow -PassThru
             if ($upgradeProcess.ExitCode -eq 0) {
-                Write-Host "    * $friendlyName upgraded" -ForegroundColor Green
+                Write-Host "    * $friendlyName upgraded successfully" -ForegroundColor Green
             } else {
                 Write-Host "    * No upgrade needed or already current" -ForegroundColor Green
             }
@@ -189,7 +189,7 @@ Write-Host "Installing PowerShell Modules..." -ForegroundColor Cyan
 if ($RequiredModules.Count -gt 0) {
     # Performance optimization: Fetch all module information once before the loop
     Write-Host "Gathering module information for performance optimization..." -ForegroundColor Yellow
-    
+
     # Get all installed modules with version information
     $installedModulesHash = @{}
     try {
@@ -213,23 +213,23 @@ if ($RequiredModules.Count -gt 0) {
         Write-Host "  Warning: Could not retrieve installed modules list: $($_.Exception.Message)" -ForegroundColor Yellow
         $installedModulesHash = @{}
     }
-    
+
     # Get available modules from PowerShell Gallery for update checking
     $galleryModulesHash = @{}
     try {
         Write-Host "  Fetching PowerShell Gallery information..." -ForegroundColor Gray
-        
+
         # Use Find-Module to get latest versions from gallery (batch operation for better performance)
         $galleryModules = Find-Module -Name $RequiredModules -ErrorAction SilentlyContinue
-        
+
         foreach ($module in $galleryModules) {
             $galleryModulesHash[$module.Name] = @{
-                Name = $module.Name
+                Name    = $module.Name
                 Version = $module.Version
-                Module = $module
+                Module  = $module
             }
         }
-        
+
         Write-Host "  Found $($galleryModulesHash.Count) modules in PowerShell Gallery" -ForegroundColor Green
     } catch {
         Write-Host "  Warning: Could not retrieve PowerShell Gallery information: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -283,9 +283,9 @@ if ($RequiredModules.Count -gt 0) {
     
     Write-Host ""
     Write-Host "Module Analysis Summary:" -ForegroundColor Cyan
-    Write-Host "  To Install: $($modulesToInstall.Count)" -ForegroundColor Red
-    Write-Host "  To Update: $($modulesToUpdate.Count)" -ForegroundColor Yellow  
-    Write-Host "  Up to Date: $($modulesUpToDate.Count)" -ForegroundColor Green
+    Write-Host "  To Install:  $($modulesToInstall.Count)" -ForegroundColor Red
+    Write-Host "  To Update:   $($modulesToUpdate.Count)" -ForegroundColor Yellow
+    Write-Host "  Up to Date:  $($modulesUpToDate.Count)" -ForegroundColor Green
     Write-Host ""
 
     # Install missing modules
@@ -296,7 +296,7 @@ if ($RequiredModules.Count -gt 0) {
             $installCount++
             $moduleName = $moduleInfo.Name
             Write-Host "[$installCount/$($modulesToInstall.Count)] Installing $moduleName..." -ForegroundColor Yellow -NoNewline
-            
+
             try {
                 Install-Module -Name $moduleName -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck -ErrorAction Stop
                 Write-Host " * Success" -ForegroundColor Green
@@ -306,7 +306,7 @@ if ($RequiredModules.Count -gt 0) {
         }
         Write-Host ""
     }
-    
+
     # Update existing modules
     if ($modulesToUpdate.Count -gt 0) {
         Write-Host "Updating existing modules..." -ForegroundColor Cyan
@@ -315,7 +315,7 @@ if ($RequiredModules.Count -gt 0) {
             $updateCount++
             $moduleName = $moduleInfo.Name
             Write-Host "[$updateCount/$($modulesToUpdate.Count)] Updating $moduleName ($($moduleInfo.CurrentVersion) -> $($moduleInfo.GalleryVersion))..." -ForegroundColor Yellow -NoNewline
-            
+
             try {
                 Update-Module -Name $moduleName -Force -ErrorAction Stop
                 Write-Host " * Success" -ForegroundColor Green
@@ -331,7 +331,7 @@ if ($RequiredModules.Count -gt 0) {
         }
         Write-Host ""
     }
-    
+
     # Display up-to-date modules
     if ($modulesUpToDate.Count -gt 0) {
         Write-Host "Modules already up to date:" -ForegroundColor Green
@@ -411,9 +411,9 @@ Write-Host "Setting Up PowerShell Profiles..." -ForegroundColor Cyan
 Write-Host "Setting PowerShell execution policy..." -ForegroundColor Yellow
 try {
     Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-    Write-Host "Execution policy set to RemoteSigned for CurrentUser" -ForegroundColor Green
+    Write-Host "  Execution policy set to RemoteSigned (CurrentUser)" -ForegroundColor Green
 } catch {
-    Write-Host "Failed to set execution policy: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  Failed to set execution policy: $($_.Exception.Message)" -ForegroundColor Red
 }
 
 # Functions to add to all profiles - PowerShell 5.1 compatible
@@ -591,18 +591,18 @@ foreach ($profilePath in $profilePaths) {
             Copy-Item -Path $profilePath -Destination $backupPath -Force
             Write-Host "    Backup created: $backupPath" -ForegroundColor Green
         }
-        
+
         # Create the profile
         Write-Host "[$profileCount/$totalProfiles] Creating profile: $profilePath" -ForegroundColor Yellow
         Set-Content -Path $profilePath -Value $profileFunctions -Force -Encoding UTF8 -ErrorAction Stop
-        
+
         # Verify profile was created and has content
         if ((Test-Path $profilePath) -and ((Get-Content $profilePath -Raw).Length -gt 0)) {
             Write-Host "    Profile configured successfully" -ForegroundColor Green
         } else {
             Write-Host "    Profile creation failed or file is empty" -ForegroundColor Red
         }
-        
+
         # Test if the profile can be dot-sourced (syntax check)
         try {
             $null = [scriptblock]::Create((Get-Content $profilePath -Raw))
@@ -622,11 +622,11 @@ Write-Host ""
 Write-Host "=== Setup Complete! ===" -ForegroundColor Magenta
 Write-Host ""
 
-Write-Host "Applications installed:" -ForegroundColor Cyan
+Write-Host "Applications:" -ForegroundColor Cyan
 $installApps.GetEnumerator() | ForEach-Object { Write-Host "  * $($_.Value)" -ForegroundColor Green }
 
 Write-Host ""
-Write-Host "PowerShell modules:" -ForegroundColor Cyan
+Write-Host "PowerShell Modules:" -ForegroundColor Cyan
 if ($modulesToInstall.Count -gt 0 -or $modulesToUpdate.Count -gt 0) {
     Write-Host "  * $($modulesToInstall.Count) modules installed" -ForegroundColor Green
     Write-Host "  * $($modulesToUpdate.Count) modules updated" -ForegroundColor Yellow
@@ -635,11 +635,11 @@ Write-Host "  * $($modulesUpToDate.Count) modules already up to date" -Foregroun
 Write-Host "  * Total: $($RequiredModules.Count) modules processed" -ForegroundColor Cyan
 
 Write-Host ""
-Write-Host "VS Code extensions:" -ForegroundColor Cyan
+Write-Host "VS Code Extensions:" -ForegroundColor Cyan
 Write-Host "  * $($VSCodeExtensions.Count) extensions processed" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "PowerShell profiles:" -ForegroundColor Cyan
+Write-Host "PowerShell Profiles:" -ForegroundColor Cyan
 foreach ($profilePath in $profilePaths) {
     if (Test-Path $profilePath) {
         $size = (Get-Item $profilePath).Length
