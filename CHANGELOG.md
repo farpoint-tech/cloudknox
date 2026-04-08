@@ -7,6 +7,25 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-04-08 CET
+
+### Added
+- **Enterprise Apps Owner Assignment** – Neues Script-Paket zur Verwaltung von Enterprise App Ownern via Microsoft Graph API
+  - `Export-EnterpriseAppOwnerList.ps1` (Phase 1): Analysiert alle Enterprise Apps im Tenant, zeigt Tag-/Kategorie-Uebersicht, exportiert formatierte Excel-Datei fuer Abteilungen
+  - `Import-EnterpriseAppOwners.ps1` (Phase 2): Liest ausgefuellte Excel zurueck und weist Owner zu (mit WhatIf/Apply-Modus)
+  - `Assign-OwnerByCategory.ps1` (Phase 3): Interaktive Owner-Zuweisung nach Kategorie oder global
+  - `Assign-EnterpriseAppOwners.ps1` (Standalone): Weist einen Default-Owner allen Apps ohne Owner zu
+  - Umfassende Dokumentation (README.md) mit Workflow-Beschreibung, Excel-Struktur und Fehlerbehebung
+
+### Updated
+- **README.md**: Inhaltsverzeichnis, Repository-Struktur und Script-Dokumentation um Enterprise Apps Owner Assignment erweitert
+
+### Technical Details
+- **Neue Scripts**: 4 PowerShell-Scripts in `scripts/enterprise-apps-owner-assignment/`
+- **Benoetigte Module**: Microsoft.Graph, ImportExcel
+- **Graph API Scopes**: Application.Read.All, Application.ReadWrite.All, Directory.Read.All, Directory.ReadWrite.All
+- **Branch**: claude/enterprise-apps-owner-assignment-YTrKR
+
 ## [2.3.0] - 2026-03-05 CET
 
 ### Fixed / Improved
