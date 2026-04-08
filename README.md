@@ -2,7 +2,7 @@
 
 **Farpoint Technologies - Microsoft Intune & Azure AD Management Scripts**
 
-> Letzte Aktualisierung: 2026-03-05 | Version: 2.3.0
+> Letzte Aktualisierung: 2026-04-08 | Version: 2.4.0
 
 ---
 
@@ -19,6 +19,7 @@
   - [6. OOBE Autopilot Registration - Minimal](#6-oobe-autopilot-registration---minimal-version)
   - [7. OOBE Autopilot Registration - Vollversion](#7-oobe-autopilot-registration---vollversion)
   - [8. Same DevOps Environment](#8-same-devops-environment)
+  - [9. Enterprise Apps Owner Assignment](#9-enterprise-apps-owner-assignment)
 - [Shared Modules](#-shared-modules)
 - [Allgemeine Voraussetzungen](#-allgemeine-voraussetzungen)
 - [Verwendung](#-verwendung)
@@ -83,8 +84,14 @@ cloudknox/
 │   ├── oobe-autopilot-registration-full/           # OOBE Autopilot (Vollversion)
 │   │   ├── OOBE Autopilot Registration.ps1
 │   │   └── README.md
-│   └── same-devops-environment/                    # DevOps-Umgebungs-Standardisierung
-│       ├── sameDevOpsEnvironment.ps1
+│   ├── same-devops-environment/                    # DevOps-Umgebungs-Standardisierung
+│   │   ├── sameDevOpsEnvironment.ps1
+│   │   └── README.md
+│   └── enterprise-apps-owner-assignment/            # Enterprise App Owner-Verwaltung
+│       ├── Export-EnterpriseAppOwnerList.ps1
+│       ├── Import-EnterpriseAppOwners.ps1
+│       ├── Assign-OwnerByCategory.ps1
+│       ├── Assign-EnterpriseAppOwners.ps1
 │       └── README.md
 ├── DevicePolicyRemovalTool/                        # Policy-Entfernungs-Tool
 │   ├── DevicePolicyRemovalTool_Enhanced.ps1
@@ -492,6 +499,59 @@ Das Script konfiguriert folgende Hilfsfunktionen in allen PS-Profilen:
 | PowerShell 7.x | Vollständig |
 | Parallels VM (Mac) | Vollständig |
 | macOS/Linux | Teilweise (PS 7+ Profile) |
+
+---
+
+### 9. Enterprise Apps Owner Assignment
+
+**Pfad:** `scripts/enterprise-apps-owner-assignment/`
+**Version:** 1.0 | **Autor:** Farpoint Technologies
+**Sprache:** Deutsch
+**Scripts:** 4 (Export, Import, Interaktiv, Standalone)
+
+#### Was macht dieses Script-Paket?
+
+Umfassende Loesung zur Analyse und Zuweisung von Ownern fuer Enterprise Applications (Service Principals) in Azure Entra ID. Der Workflow ist in 3 Phasen aufgeteilt, ergaenzt durch ein Standalone-Script fuer einfache Bulk-Zuweisungen.
+
+#### Funktionsweise (3-Phasen-Workflow)
+
+1. **Phase 1 – Analyse & Export** (`Export-EnterpriseAppOwnerList.ps1`): Liest alle Enterprise Apps, analysiert Tags/Kategorien, zeigt eine Uebersicht und exportiert eine formatierte Excel-Datei fuer die Abteilungen
+2. **Phase 2 – Import & Zuweisung** (`Import-EnterpriseAppOwners.ps1`): Liest die von Abteilungen ausgefuellte Excel-Datei zurueck und weist die eingetragenen Owner zu (mit Dry-Run-Modus)
+3. **Phase 3 – Interaktiv** (`Assign-OwnerByCategory.ps1`): IT weist Owner direkt per Kategorie oder global zu
+4. **Standalone** (`Assign-EnterpriseAppOwners.ps1`): Weist einen konfigurierten Default-Owner allen Apps ohne Owner zu
+
+#### Verwendungsbeispiele
+
+```powershell
+# Phase 1: Export
+.\Export-EnterpriseAppOwnerList.ps1
+
+# Phase 2: Import (Dry-Run)
+.\Import-EnterpriseAppOwners.ps1 -ExcelPath ".\EnterpriseApp_OwnerAssignment_20260408.xlsx"
+
+# Phase 2: Import (Live)
+.\Import-EnterpriseAppOwners.ps1 -ExcelPath ".\EnterpriseApp_OwnerAssignment_20260408.xlsx" -Mode Apply
+
+# Phase 3: Interaktive Kategorie-Zuweisung
+.\Assign-OwnerByCategory.ps1
+
+# Standalone: Default-Owner zuweisen
+.\Assign-EnterpriseAppOwners.ps1
+```
+
+#### Benoetigte Berechtigungen
+
+| Berechtigung | Phase 1 | Phase 2/3 | Standalone |
+|-------------|---------|-----------|------------|
+| Application.Read.All | Ja | – | Ja |
+| Application.ReadWrite.All | – | Ja | – |
+| Directory.Read.All | Ja | – | – |
+| Directory.ReadWrite.All | – | Ja | Ja |
+
+#### Benoetigte Module
+
+- `Microsoft.Graph` – Microsoft Graph PowerShell SDK
+- `ImportExcel` – Excel-Export/Import ohne Office (nur Phase 1 & 2)
 
 ---
 
