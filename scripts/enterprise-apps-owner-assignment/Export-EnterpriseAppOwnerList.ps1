@@ -1,46 +1,73 @@
 <#
 .SYNOPSIS
-    Analysiert alle Enterprise Applications im Tenant und exportiert eine Excel-Liste fuer die Owner-Zuweisung.
+    Analyzes all Enterprise Applications in the tenant and exports an Excel list for owner assignment.
 
 .DESCRIPTION
-    Dieses Script verbindet sich via Microsoft Graph API mit dem Azure AD / Entra ID Tenant,
-    liest alle Service Principals (Enterprise Apps) aus und analysiert deren Tags und Owner-Status.
+    This script connects to the Azure AD / Entra ID tenant via Microsoft Graph API,
+    reads all Service Principals (Enterprise Apps) and analyzes their tags and owner status.
 
-    Es erstellt eine uebersichtliche Konsolenausgabe mit:
-    - Allen erkannten Tags im Tenant
-    - Einer Kategorie-Zusammenfassung (Apps pro Tag, davon ohne Owner)
+    It creates a console summary with:
+    - All detected tags in the tenant
+    - A category summary (apps per tag, including those without an owner)
 
-    Anschliessend wird eine formatierte Excel-Datei exportiert, die an die jeweiligen
-    Abteilungen gesendet werden kann. Die Abteilungen fuellen die Spalten "NEW Owner UPN",
-    "Department" und "Notes" aus.
+    It then exports a formatted Excel file that can be sent to departments.
+    Departments fill in the columns "NEW Owner UPN", "Department", and "Notes".
 
 .EXAMPLE
     .\Export-EnterpriseAppOwnerList.ps1
-    Exportiert alle Enterprise Apps in eine Excel-Datei im aktuellen Verzeichnis.
+    Exports all Enterprise Apps into an Excel file.
+    Default path: C:\Temp (Windows) or ~/Downloads (macOS)
 
 .NOTES
-    Erforderliche Berechtigungen:
+    Required Permissions:
     - Application.Read.All
     - Directory.Read.All
 
-    Erforderliche Module:
+    Required Modules:
     - Microsoft.Graph
     - ImportExcel
 
-    Version: 1.0
-    Autor: Farpoint Technologies
-    Erstellt: 2026-04-08
+    Version: 1.3
+    Author: Farpoint Technologies
+    Created:  2026-04-08
+    Modified: 2026-04-09 - Fix: Module checks, ConditionalText, auto export path
 #>
-
-#Requires -Modules Microsoft.Graph, ImportExcel
 
 # ============================================================
 # Export-EnterpriseAppOwnerList.ps1
-# Phase 1: Analyse, Tag-Uebersicht & Excel-Export
+# Phase 1: Analysis, Tag Overview & Excel Export
 # ============================================================
 
 # --- CONFIGURATION ---
-$ExportPath = ".\EnterpriseApp_OwnerAssignment_$(Get-Date -Format 'yyyyMMdd').xlsx"
+$FileName = "EnterpriseApp_OwnerAssignment_$(Get-Date -Format 'yyyyMMdd').xlsx"
+
+if ($IsMacOS) {
+    $ExportFolder = "$HOME/Downloads"
+} else {
+    $ExportFolder = "C:\Temp"
+}
+
+if (-not (Test-Path $ExportFolder)) {
+    New-Item -ItemType Directory -Path $ExportFolder -Force | Out-Null
+    Write-Host "📁 Created folder: $ExportFolder" -ForegroundColor Gray
+}
+
+$ExportPath = Join-Path $ExportFolder $FileName
+Write-Host "📁 Export path: $ExportPath" -ForegroundColor Gray
+
+# --- MODULE CHECK ---
+if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Applications)) {
+    Write-Host "`n⚠ Microsoft.Graph module not found. Installing..." -ForegroundColor Yellow
+    Install-Module Microsoft.Graph -Scope CurrentUser -Force
+}
+Import-Module Microsoft.Graph.Applications
+Import-Module Microsoft.Graph.Users
+
+if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
+    Write-Host "`n⚠ ImportExcel module not found. Installing..." -ForegroundColor Yellow
+    Install-Module ImportExcel -Scope CurrentUser -Force
+}
+Import-Module ImportExcel
 
 # --- CONNECT ---
 Connect-MgGraph -Scopes "Application.Read.All", "Directory.Read.All"
@@ -66,7 +93,7 @@ $CategorySummary = $AllSPs | Group-Object {
 
 Write-Host "`n📊 APPS BY CATEGORY (first tag):" -ForegroundColor Yellow
 Write-Host ("=" * 55)
-Write-Host ("{0,-25} {1,-10} {2}" -f "Category","Apps","No Owner")
+Write-Host ("{0,-25} {1,-10} {2}" -f "Category", "Apps", "No Owner")
 Write-Host ("-" * 55)
 foreach ($grp in $CategorySummary) {
     $noOwner = 0
@@ -90,9 +117,9 @@ foreach ($SP in $AllSPs) {
         }) -join "; "
     } else { "" }
 
-    $Category = if ($SP.Tags -and $SP.Tags.Count -gt 0) { $SP.Tags[0] } else { "(no tag)" }
+    $Category  = if ($SP.Tags -and $SP.Tags.Count -gt 0) { $SP.Tags[0] } else { "(no tag)" }
     $TagString = if ($SP.Tags) { $SP.Tags -join "; " } else { "" }
-    $Status = if ($OwnerUPNs) { "Has Owner" } else { "No Owner" }
+    $Status    = if ($OwnerUPNs) { "Has Owner" } else { "No Owner" }
 
     $ExportData += [PSCustomObject]@{
         AppObjectId            = $SP.Id
@@ -109,17 +136,22 @@ foreach ($SP in $AllSPs) {
     }
 }
 
-# --- EXPORT TO EXCEL (requires ImportExcel module) ---
-# Install if needed: Install-Module ImportExcel -Scope CurrentUser
+# --- EXPORT TO EXCEL ---
 $ExportData | Export-Excel -Path $ExportPath `
     -WorksheetName "App Owner Assignment" `
     -AutoSize -AutoFilter -FreezeTopRow `
     -TableName "AppOwners" -TableStyle Medium2 `
-    -ConditionalFormat @(
-        New-ConditionalFormattingIconSet -Range "H2:H9999" -Pattern "No Owner" -Color "FFA500"
+    -ConditionalText (
+        New-ConditionalText -Text "No Owner" `
+            -ConditionalTextColor Black `
+            -BackgroundColor Orange `
+            -Range "H2:H9999"
     )
 
 Write-Host "`n✅ Export saved to: $ExportPath" -ForegroundColor Green
 Write-Host "📧 Send this file to each department. They fill in columns I, J, K." -ForegroundColor Cyan
+
+# --- OPEN FILE ---
+Start-Process $ExportPath
 
 Disconnect-MgGraph

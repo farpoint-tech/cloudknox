@@ -2,7 +2,7 @@
 
 **Farpoint Technologies - Microsoft Intune & Azure AD Management Scripts**
 
-> Letzte Aktualisierung: 2026-04-08 | Version: 2.4.0
+> Letzte Aktualisierung: 2026-04-09 | Version: 2.4.1
 
 ---
 
@@ -504,54 +504,56 @@ Das Script konfiguriert folgende Hilfsfunktionen in allen PS-Profilen:
 
 ### 9. Enterprise Apps Owner Assignment
 
-**Pfad:** `scripts/enterprise-apps-owner-assignment/`
-**Version:** 1.0 | **Autor:** Farpoint Technologies
-**Sprache:** Deutsch
-**Scripts:** 4 (Export, Import, Interaktiv, Standalone)
+**Path:** `scripts/enterprise-apps-owner-assignment/`
+**Version:** 1.3 (Export) / 1.0 (others) | **Author:** Farpoint Technologies
+**Language:** English
+**Scripts:** 4 (Export, Import, Interactive, Standalone)
 
-#### Was macht dieses Script-Paket?
+#### What does this script package do?
 
-Umfassende Loesung zur Analyse und Zuweisung von Ownern fuer Enterprise Applications (Service Principals) in Azure Entra ID. Der Workflow ist in 3 Phasen aufgeteilt, ergaenzt durch ein Standalone-Script fuer einfache Bulk-Zuweisungen.
+Comprehensive solution for analyzing and assigning owners to Enterprise Applications (Service Principals) in Azure Entra ID. The workflow is divided into 3 phases, complemented by a standalone script for simple bulk assignments. Cross-platform compatible (Windows / macOS).
 
-#### Funktionsweise (3-Phasen-Workflow)
+#### How it works (3-phase workflow)
 
-1. **Phase 1 – Analyse & Export** (`Export-EnterpriseAppOwnerList.ps1`): Liest alle Enterprise Apps, analysiert Tags/Kategorien, zeigt eine Uebersicht und exportiert eine formatierte Excel-Datei fuer die Abteilungen
-2. **Phase 2 – Import & Zuweisung** (`Import-EnterpriseAppOwners.ps1`): Liest die von Abteilungen ausgefuellte Excel-Datei zurueck und weist die eingetragenen Owner zu (mit Dry-Run-Modus)
-3. **Phase 3 – Interaktiv** (`Assign-OwnerByCategory.ps1`): IT weist Owner direkt per Kategorie oder global zu
-4. **Standalone** (`Assign-EnterpriseAppOwners.ps1`): Weist einen konfigurierten Default-Owner allen Apps ohne Owner zu
+1. **Phase 1 – Analysis & Export** (`Export-EnterpriseAppOwnerList.ps1`): Reads all Enterprise Apps, analyzes tags/categories, shows an overview and exports a formatted Excel file for the departments. Auto path detection (`C:\Temp` on Windows, `~/Downloads` on macOS), automatic module installation, file opens automatically after export.
+2. **Phase 2 – Import & Assignment** (`Import-EnterpriseAppOwners.ps1`): Reads the Excel file filled in by departments and assigns the entered owners (with dry-run mode).
+3. **Phase 3 – Interactive** (`Assign-OwnerByCategory.ps1`): IT assigns owners directly by category or globally.
+4. **Standalone** (`Assign-EnterpriseAppOwners.ps1`): Assigns a configured default owner to all apps without an owner.
 
-#### Verwendungsbeispiele
+#### Usage examples
 
 ```powershell
-# Phase 1: Export
+# Phase 1: Export (auto path: C:\Temp or ~/Downloads)
 .\Export-EnterpriseAppOwnerList.ps1
 
-# Phase 2: Import (Dry-Run)
-.\Import-EnterpriseAppOwners.ps1 -ExcelPath ".\EnterpriseApp_OwnerAssignment_20260408.xlsx"
+# Phase 2: Import (dry-run)
+.\Import-EnterpriseAppOwners.ps1 -ExcelPath "C:\Temp\EnterpriseApp_OwnerAssignment_20260408.xlsx"
 
-# Phase 2: Import (Live)
-.\Import-EnterpriseAppOwners.ps1 -ExcelPath ".\EnterpriseApp_OwnerAssignment_20260408.xlsx" -Mode Apply
+# Phase 2: Import (live)
+.\Import-EnterpriseAppOwners.ps1 -ExcelPath "C:\Temp\EnterpriseApp_OwnerAssignment_20260408.xlsx" -Mode Apply
 
-# Phase 3: Interaktive Kategorie-Zuweisung
+# Phase 3: Interactive category assignment
 .\Assign-OwnerByCategory.ps1
 
-# Standalone: Default-Owner zuweisen
+# Standalone: Assign default owner
 .\Assign-EnterpriseAppOwners.ps1
 ```
 
-#### Benoetigte Berechtigungen
+#### Required permissions
 
-| Berechtigung | Phase 1 | Phase 2/3 | Standalone |
-|-------------|---------|-----------|------------|
-| Application.Read.All | Ja | – | Ja |
-| Application.ReadWrite.All | – | Ja | – |
-| Directory.Read.All | Ja | – | – |
-| Directory.ReadWrite.All | – | Ja | Ja |
+| Permission | Phase 1 | Phase 2/3 | Standalone |
+|-----------|---------|-----------|------------|
+| Application.Read.All | Yes | – | Yes |
+| Application.ReadWrite.All | – | Yes | – |
+| Directory.Read.All | Yes | – | – |
+| Directory.ReadWrite.All | – | Yes | Yes |
 
-#### Benoetigte Module
+#### Required modules
 
 - `Microsoft.Graph` – Microsoft Graph PowerShell SDK
-- `ImportExcel` – Excel-Export/Import ohne Office (nur Phase 1 & 2)
+- `ImportExcel` – Excel export/import without Office (Phase 1 & 2 only)
+
+> The Export script installs missing modules automatically on first run.
 
 ---
 

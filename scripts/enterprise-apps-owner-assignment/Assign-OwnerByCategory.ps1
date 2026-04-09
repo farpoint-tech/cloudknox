@@ -1,33 +1,33 @@
 <#
 .SYNOPSIS
-    Interaktives Script zur Owner-Zuweisung nach Kategorie oder global fuer alle Enterprise Apps.
+    Interactive script for owner assignment by category or globally for all Enterprise Apps.
 
 .DESCRIPTION
-    Dieses Script ist Phase 3 des Owner-Assignment-Workflows und bietet eine interaktive
-    Moeglichkeit, einen Owner direkt per Kommandozeile zuzuweisen.
+    This script is Phase 3 of the owner assignment workflow and provides an interactive
+    way to assign an owner directly from the command line.
 
-    Nach dem Start zeigt das Script alle verfuegbaren Kategorien (basierend auf dem ersten Tag
-    der jeweiligen Enterprise App) an. Der Benutzer kann dann waehlen:
-    - Alle Apps auf einmal (Option 0)
-    - Einzelne oder mehrere Kategorien (kommagetrennte Auswahl)
+    After starting, the script displays all available categories (based on the first tag
+    of each Enterprise App). The user can then choose:
+    - All apps at once (option 0)
+    - One or multiple categories (comma-separated selection)
 
-    Apps die bereits einen Owner besitzen, werden uebersprungen.
+    Apps that already have an owner are skipped.
 
 .EXAMPLE
     .\Assign-OwnerByCategory.ps1
-    Startet den interaktiven Modus zur Kategorie-basierten Owner-Zuweisung.
+    Starts the interactive mode for category-based owner assignment.
 
 .NOTES
-    Erforderliche Berechtigungen:
+    Required Permissions:
     - Application.ReadWrite.All
     - Directory.ReadWrite.All
 
-    Erforderliche Module:
+    Required Modules:
     - Microsoft.Graph
 
     Version: 1.0
-    Autor: Farpoint Technologies
-    Erstellt: 2026-04-08
+    Author: Farpoint Technologies
+    Created: 2026-04-08
 #>
 
 #Requires -Modules Microsoft.Graph
