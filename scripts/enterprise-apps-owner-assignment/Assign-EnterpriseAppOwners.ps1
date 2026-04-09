@@ -1,36 +1,36 @@
 <#
 .SYNOPSIS
-    Weist allen Enterprise Apps ohne Owner einen definierten Standard-Owner zu.
+    Assigns a defined default owner to all Enterprise Apps without an owner.
 
 .DESCRIPTION
-    Dieses Script verbindet sich via Microsoft Graph API mit dem Tenant und prueft alle
-    Service Principals (Enterprise Applications) auf vorhandene Owner.
+    This script connects to the tenant via Microsoft Graph API and checks all
+    Service Principals (Enterprise Applications) for existing owners.
 
-    Fuer jede App ohne Owner wird automatisch der in $DefaultOwnerUPN konfigurierte
-    Benutzer als Owner zugewiesen. Apps die bereits mindestens einen Owner besitzen,
-    werden uebersprungen.
+    For each app without an owner, the user configured in $DefaultOwnerUPN is
+    automatically assigned as owner. Apps that already have at least one owner
+    are skipped.
 
-    Am Ende wird eine Zusammenfassung mit Anzahl zugewiesener, uebersprungener und
-    fehlerhafter Apps ausgegeben.
+    At the end, a summary is displayed with the number of assigned, skipped,
+    and failed apps.
 
 .EXAMPLE
     .\Assign-EnterpriseAppOwners.ps1
-    Weist den konfigurierten Default-Owner allen Enterprise Apps ohne Owner zu.
+    Assigns the configured default owner to all Enterprise Apps without an owner.
 
 .NOTES
-    Erforderliche Berechtigungen:
+    Required Permissions:
     - Application.Read.All
     - Directory.ReadWrite.All
 
-    Erforderliche Module:
+    Required Modules:
     - Microsoft.Graph
 
-    Konfiguration:
-    - $DefaultOwnerUPN im Script auf den gewuenschten Owner anpassen
+    Configuration:
+    - Adjust $DefaultOwnerUPN in the script to the desired owner
 
     Version: 1.0
-    Autor: Farpoint Technologies
-    Erstellt: 2026-04-08
+    Author: Farpoint Technologies
+    Created: 2026-04-08
 #>
 
 #Requires -Modules Microsoft.Graph

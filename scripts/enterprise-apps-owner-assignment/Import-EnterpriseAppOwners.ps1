@@ -1,43 +1,43 @@
 <#
 .SYNOPSIS
-    Liest eine ausgefuellte Excel-Datei ein und weist Enterprise Apps die eingetragenen Owner zu.
+    Reads a filled Excel file and assigns the entered owners to the corresponding Enterprise Apps.
 
 .DESCRIPTION
-    Dieses Script ist Phase 2 des Owner-Assignment-Workflows. Es liest die von den Abteilungen
-    ausgefuellte Excel-Datei (exportiert durch Export-EnterpriseAppOwnerList.ps1) ein und weist
-    die in der Spalte "NEW Owner UPN" eingetragenen Benutzer als Owner der jeweiligen
-    Enterprise Application (Service Principal) zu.
+    This script is Phase 2 of the owner assignment workflow. It reads the Excel file
+    filled in by the departments (originally exported by Export-EnterpriseAppOwnerList.ps1)
+    and assigns the users entered in the "NEW Owner UPN" column as owners of the
+    respective Enterprise Application (Service Principal).
 
-    Das Script unterstuetzt zwei Modi:
-    - WhatIf (Standard): Zeigt an, welche Zuweisungen vorgenommen wuerden, ohne Aenderungen durchzufuehren
-    - Apply: Fuehrt die Owner-Zuweisungen tatsaechlich durch
+    The script supports two modes:
+    - WhatIf (default): Shows which assignments would be made, without actually applying changes
+    - Apply: Actually performs the owner assignments
 
 .PARAMETER ExcelPath
-    Pfad zur ausgefuellten Excel-Datei (.xlsx). Muss das Worksheet "App Owner Assignment" enthalten.
+    Path to the filled Excel file (.xlsx). Must contain a worksheet named "App Owner Assignment".
 
 .PARAMETER Mode
-    Ausfuehrungsmodus: "WhatIf" fuer Dry-Run (Standard) oder "Apply" fuer Live-Ausfuehrung.
+    Execution mode: "WhatIf" for dry-run (default) or "Apply" for live execution.
 
 .EXAMPLE
     .\Import-EnterpriseAppOwners.ps1 -ExcelPath ".\EnterpriseApp_OwnerAssignment_20260408.xlsx"
-    Fuehrt einen Dry-Run durch und zeigt alle geplanten Zuweisungen an.
+    Performs a dry-run and shows all planned assignments.
 
 .EXAMPLE
     .\Import-EnterpriseAppOwners.ps1 -ExcelPath ".\EnterpriseApp_OwnerAssignment_20260408.xlsx" -Mode Apply
-    Fuehrt die Owner-Zuweisungen tatsaechlich durch.
+    Actually performs the owner assignments.
 
 .NOTES
-    Erforderliche Berechtigungen:
+    Required Permissions:
     - Application.ReadWrite.All
     - Directory.ReadWrite.All
 
-    Erforderliche Module:
+    Required Modules:
     - Microsoft.Graph
     - ImportExcel
 
     Version: 1.0
-    Autor: Farpoint Technologies
-    Erstellt: 2026-04-08
+    Author: Farpoint Technologies
+    Created: 2026-04-08
 #>
 
 #Requires -Modules Microsoft.Graph, ImportExcel
