@@ -19,6 +19,7 @@
   - [6. OOBE Autopilot Registration - Minimal](#6-oobe-autopilot-registration---minimal-version)
   - [7. OOBE Autopilot Registration - Vollversion](#7-oobe-autopilot-registration---vollversion)
   - [8. Same DevOps Environment](#8-same-devops-environment)
+  - [9. Exchange Mailbox Provisioner](#9-exchange-mailbox-provisioner)
 - [Shared Modules](#-shared-modules)
 - [Allgemeine Voraussetzungen](#-allgemeine-voraussetzungen)
 - [Verwendung](#-verwendung)
@@ -83,8 +84,12 @@ cloudknox/
 │   ├── oobe-autopilot-registration-full/           # OOBE Autopilot (Vollversion)
 │   │   ├── OOBE Autopilot Registration.ps1
 │   │   └── README.md
-│   └── same-devops-environment/                    # DevOps-Umgebungs-Standardisierung
-│       ├── sameDevOpsEnvironment.ps1
+│   ├── same-devops-environment/                    # DevOps-Umgebungs-Standardisierung
+│   │   ├── sameDevOpsEnvironment.ps1
+│   │   └── README.md
+│   └── exchange-mailbox-provisioner/                # Exchange Mailbox & DL-Provisioning
+│       ├── Provisioning.ps1
+│       ├── config.json
 │       └── README.md
 ├── DevicePolicyRemovalTool/                        # Policy-Entfernungs-Tool
 │   ├── DevicePolicyRemovalTool_Enhanced.ps1
@@ -492,6 +497,70 @@ Das Script konfiguriert folgende Hilfsfunktionen in allen PS-Profilen:
 | PowerShell 7.x | Vollständig |
 | Parallels VM (Mac) | Vollständig |
 | macOS/Linux | Teilweise (PS 7+ Profile) |
+
+---
+
+### 9. Exchange Mailbox Provisioner
+
+**Pfad:** `scripts/exchange-mailbox-provisioner/Provisioning.ps1`
+**Version:** 4.0 | **Autor:** Farpoint Technologies
+**Sprache:** Deutsch
+
+#### Was macht dieses Script?
+
+Provisioniert Shared Mailboxes und Verteilergruppen (Distribution Groups) in Exchange Online auf Basis einer Excel-Datei. Die Excel-Datei enthält auf **einem Worksheet** zwei **benannte Tabellen** (ListObjects): `SharedMailboxes` und `DistributionGroups`. Das Script erkennt beide Tabellen automatisch anhand ihrer Namen und verarbeitet sie in einem Durchlauf. Konfiguration (Domain, Präfixe, Authentifizierungsmodus) kommt aus einer `config.json`.
+
+#### Funktionsweise (Schritt für Schritt)
+
+1. Prüft und installiert benötigte Module (`ExchangeOnlineManagement`, `ImportExcel`)
+2. Lädt `config.json` und Excel-Datei
+3. Liest beide benannte Tabellen (`SharedMailboxes`, `DistributionGroups`) aus dem Worksheet
+4. Führt eine vollständige Vorab-Validierung durch (Pflichtfelder, E-Mail-Syntax, doppelte Aliase)
+5. Zeigt Probleme und fragt bei Fehlern nach Bestätigung
+6. Verbindet sich mit Exchange Online (interaktiv oder per App-Registrierung)
+7. Erstellt Shared Mailboxes inkl. Weiterleitung, FullAccess- und SendAs-Berechtigungen
+8. Erstellt Distribution Groups inkl. Mitglieder und Besitzer
+9. Exportiert Ergebnisbericht als CSV und trennt die Verbindung
+
+#### Parameter
+
+| Parameter | Typ | Beschreibung | Standard |
+|-----------|-----|--------------|----------|
+| `-ConfigFileName` | String | Name der Konfigurationsdatei | `config.json` |
+| `-ExcelFileName` | String | Überschreibt den Excel-Dateinamen aus der Config | – |
+| `-WhatIf` | Switch | Trockenlauf ohne echte Änderungen | – |
+
+#### Verwendungsbeispiele
+
+```powershell
+# Standardlauf mit config.json und interaktivem Login
+.\Provisioning.ps1
+
+# Testlauf ohne Änderungen
+.\Provisioning.ps1 -WhatIf
+
+# Andere Excel-Datei verwenden
+.\Provisioning.ps1 -ExcelFileName "Test.xlsx"
+```
+
+#### Benötigte Module
+
+- `ExchangeOnlineManagement`
+- `ImportExcel`
+
+#### Benötigte Berechtigungen
+
+- Exchange Administrator oder Global Administrator
+
+#### Funktionsmerkmale
+
+- **Zwei Tabellen auf einem Worksheet** - Shared Mailboxes und Distribution Groups in derselben Excel-Datei
+- **Vorab-Validierung** - Pflichtfelder, E-Mail-Adressen, doppelte Aliase werden vor der Ausführung geprüft
+- **Umlaut-Normalisierung** - Automatische Ersetzung von ä/ö/ü/ß in Aliasen
+- **Idempotente Berechtigungen** - Bereits vorhandene FullAccess-/SendAs-Rechte werden übersprungen
+- **Zwei Authentifizierungsmodi** - Interaktiver Web-Login oder App-Registrierung mit Zertifikat
+- **Fehlertoleranz** - Einzelne fehlerhafte Zeilen unterbrechen nicht die gesamte Verarbeitung
+- **CSV-Ergebnisbericht** - Vollständiger Export aller verarbeiteten Zeilen
 
 ---
 
