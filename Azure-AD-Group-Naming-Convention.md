@@ -1,328 +1,262 @@
-# Azure AD Naming Convention (Groups & Users)
-**Version:** 3.0 | **Organisation:** 365solution AG | **Status:** ✅ Final
+# Konzept zur Benennungslogik für Microsoft Entra ID Gruppen und Benutzerkonten
 
----
+**Version:** 4.0
+**Organisation:** 365solution AG
+**Status:** Arbeitsstand / Entwurf
 
 ## Management Summary
 
-Die Etablierung einer durchdachten und konsistenten Namenskonvention für Entra ID Objekte ist ein fundamentaler Baustein für eine sichere, skalierbare und effizient verwaltbare Cloud-Infrastruktur. Dieses Dokument definiert den Standard für die Benennung von Gruppen und Benutzerkonten der 365solution AG.
+Dieses Dokument beschreibt das konzeptionelle Zielbild für die Benennung von Gruppen und Benutzerkonten in Microsoft Entra ID. Es ist bewusst nicht als starre Richtlinie oder operative Arbeitsanweisung formuliert, sondern als gemeinsames Strukturmodell, das die gewünschte Leserichtung, die innere Logik und die spätere Anwendbarkeit im Betrieb erklärt.
 
-Die Gruppenstruktur berücksichtigt hybride Szenarien (`AAD`/`AD`), definiert klare Baselines (`BASE` vs. `BaseEXT`) und ermöglicht eine sofortige Identifikation des Gruppenzwecks. Zusätzlich wird eine strikte Namensgebung für Benutzerkonten etabliert, um privilegierte Zugriffe und Dienstkonten klar von Standard-Benutzern zu trennen und Zero-Trust-Prinzipien auf Identitätsebene durchzusetzen.
+Das Ziel ist, dass sowohl neue als auch bestehende Administratoren Namen künftig nicht nur lesen, sondern inhaltlich sofort einordnen können:
+- Gehört die Gruppe zur globalen Basiskonfiguration (`BASE`) oder handelt es sich um eine gezielte Erweiterung davon (`BAEX`)?
+- In welchem Systembereich bewege ich mich (Identität, Geräte, Services)?
+- Bezieht sich die Gruppe auf ein Land, eine Region oder einen Standort?
+- Welcher fachliche Kontext ist gemeint?
+- Welche konkrete Funktion bildet die Gruppe ab?
+
+Die Benennung soll damit nicht nur formal konsistent sein, sondern vor allem verständlich, lesbar und in der Praxis anschlussfähig.
+
+### Abgrenzung des Dokuments
+Dieses Konzept beantwortet ausschließlich die Frage: *Wie heißt ein Objekt, und wie erkenne ich anhand des Namens, was es ist?*
+Operative Fragestellungen — etwa wie eine Gruppe technisch konfiguriert wird, welche Policies greifen, wer verantwortlich ist oder wie der Lebenszyklus gesteuert wird — sind bewusst nicht Gegenstand dieses Dokuments. Sie werden in separaten Konzepten behandelt (siehe Kapitel 16).
 
 ---
 
-## 1. Zielsetzung
+## 1. Zielbild und Rahmenbedingungen
 
-Das primäre Ziel ist die Etablierung einer einheitlichen, skalierbaren und logischen Namenskonvention für Entra ID-Gruppen und Benutzer. Dies ermöglicht eine klare Struktur, vereinfacht die tägliche Verwaltung und bildet die Grundlage für automatisierte Provisionierungs- und Deprovisionierungsprozesse. Eine standardisierte Benennung minimiert Fehlkonfigurationen bei der Zuweisung von Berechtigungen, Applikationen und Richtlinien in Microsoft Intune und Conditional Access.
+Das Konzept verfolgt das Ziel, Gruppen- und Kontonamen so aufzubauen, dass sie in Entra ID, Intune, Microsoft 365, PowerShell, Graph-Auswertungen und im täglichen Administrationsbetrieb eine klare Leserichtung haben.
+
+Im Vordergrund steht nicht die rein technische Syntax, sondern die Frage:
+**Wie denken wir die Struktur, und wie lesen wir einen Namen inhaltlich von links nach rechts?**
+
+Die gewünschte Grundidee ist:
+1. Der Anfang eines Namens zeigt den strukturellen Rahmen.
+2. Die Mitte beschreibt Einordnung und Kontext.
+3. Das Ende zeigt die konkrete Funktion oder eine besondere Ausprägung wie Test oder Pilot.
+
+### Hinweis zur Länge und Lesbarkeit (Best Practice)
+Die Namensstruktur ist auf Eindeutigkeit optimiert. Es wird jedoch empfohlen, die Namen so kurz wie möglich und nur so lang wie nötig zu halten.
+- In Entra ID sind bis zu 256 Zeichen möglich.
+- In Teams- oder SharePoint-Ansichten werden Namen jedoch oft nach ca. 30–40 Zeichen optisch abgeschnitten.
+- Bei einem eventuellen Rückschreiben ins lokale AD (Group Writeback) ist das sAMAccountName-Limit von 20 Zeichen zu beachten.
+
+Daher gilt: Segmente wie der Qualifier werden nur genutzt, wenn sie zur Unterscheidung zwingend notwendig sind.
+
+### Beispielhafte Leserichtung
+- `BASE_IAM-DE-HRx-DEF`
+- `BASE_MDM-MUCx-WIN-DEF`
+- `BAEX_365-DACH-SAL-TMS`
+
+Bereits beim ersten Blick wird erkennbar:
+- Ist es `BASE` oder `BAEX`?
+- Ist es `IAM`, `MDM` oder `365`?
+- Welcher Geo-Bezug ist enthalten?
+- Welcher fachliche Kontext liegt vor?
+- Welche Funktion ist konkret gemeint?
 
 ---
 
-## 2. Naming Convention Struktur für Gruppen
+## 2. Grundgedanke der Struktur
 
-### 2.1 Grundmuster
+Die Benennungslogik orientiert sich an einem wiederkehrenden Aufbau, der von links nach rechts gelesen wird.
 
+### Konzeptionelles Grundmuster
 ```text
-[Hybrid]-[Scope]-[System]-[SubSystem]-[Function]-[TEST/PILOT]
+[LAD_|ENT_][BASE|BAEX]_[IAM|MDM|365]-[Geo]-[Context]-[Function]-[Qualifier]_[TEST|PILOT]
 ```
 
-> **Hinweis:** Nicht benötigte Segmente entfallen. Das Geo-Suffix bei `BaseEXT` ersetzt keinen Block, sondern ist Teil des Scope-Segments. Die produktive Umgebung (PROD) ist der Standard und wird nicht explizit im Namen aufgeführt.
+Nicht jedes Segment muss in jedem Fall verwendet werden. Wichtiger als die vollständige Länge ist die lesbare, immer wiederkehrende Struktur.
 
-### 2.2 Komponenten-Definition
+### Die gedachte Leserichtung
+1. **Hybrid-Kontext** (optional, nur in hybriden Umgebungen)
+2. **Scope** / Ausgangspunkt
+3. **Systembereich**
+4. **Geo-Bezug**
+5. **Fachlicher oder technischer Kontext**
+6. **Konkrete Funktion**
+7. **Optionale Spezifizierung** (Qualifier)
+8. **Optionale Umgebungskennzeichnung**
 
-#### Hybrid-Indikator
-Nur in hybriden Umgebungen. In Cloud-Only Umgebungen entfällt dieser Block.
+### Beispiele
+- `BASE_IAM-DE-HRx-DEF`
+- `ENT_BASE_IAM-DE-HRx-DEF`
+- `LAD_BASE_IAM-DE-ITx-ADM`
+- `BASE_MDM-WIEN-APL-USR`
+- `BAEX_365-DACH-SAL-TMS`
 
-| Wert | Beschreibung |
-| :--- | :--- |
-| `AAD` | Cloud-Only Objekt (existiert nur in Entra ID) |
-| `AD` | Vom lokalen Active Directory synchronisiertes Objekt |
+---
 
-#### Scope
-| Wert | Beschreibung |
-| :--- | :--- |
-| `BASE` | Globale Blueprint-Grundkonfiguration — gilt für alle |
-| `BaseEXT` | Globale Erweiterung — kein Geo = gilt überall |
-| `BaseEXT_DE` | Länderspezifische Erweiterung (z.B. DE, AT, CH) |
-| `BaseEXT_Munich` | Stadtspezifische Erweiterung |
-| `BaseEXT_DACH` | Regionale Erweiterung für mehrere Länder |
+## 3. Die gedachte Logik von links nach rechts
 
-> **Regel:** Fehlt das Geo-Suffix → gilt die Gruppe global.
+### 3.1 Hybrid-Kontext (optional)
+In hybriden Szenarien kann zu Beginn erkennbar gemacht werden, aus welchem technischen Kontext ein Objekt stammt. Hierfür stehen optional die Präfixe:
 
-#### System
-| Wert | Beschreibung |
-| :--- | :--- |
-| `IAM` | Identity & Access Management — immer User-bezogen |
-| `MDM` | Mobile Device Management — immer Device-bezogen |
-| `M365` | Microsoft 365 Services (Teams, SharePoint, Lizenzen) |
-| `CAP` | Conditional Access Policies — folgt separatem Schema |
+- `ENT_` — Entra ID, cloud-nativ (ehemals Azure AD / AAD)
+- `LAD_` — lokales Active Directory, on-premises synchronisiert
 
-#### SubSystem (optional)
-| Wert | Beschreibung |
-| :--- | :--- |
-| `PIM` | Privileged Identity Management |
-| `ADM` | Administrative Konten |
+Beide Codes sind konsequent dreistellig und vermeiden das veraltete Naming-Schema `AAD`. In reinen Cloud-Only-Umgebungen oder wo diese Unterscheidung keinen Mehrwert bringt, entfällt das Präfix vollständig. Vor `BASE` bzw. `BAEX` kommt ausschließlich `ENT_` oder `LAD_` — kein anderer Präfix.
 
-#### Function (3-Zeichen Code)
-Für IAM und M365 Systeme definiert dies die Abteilung oder Funktion. Für MDM Systeme definiert dieser Block primär die OS-Plattform (z.B. `WIN`, `MAC`). Bei PIM-Gruppen wird hier abweichend von der 3-Zeichen-Regel der volle Rollenname (z.B. `GlobalAdmin`) verwendet.
+### 3.2 Scope: BASE und BAEX
+Der eigentliche strukturelle Rahmen beginnt mit dem Scope:
 
-| Code | Bedeutung | Beschreibung |
+- `BASE` — globale Basiskonfiguration, gilt für alle (4-stellig)
+- `BAEX` — gezielte Erweiterung der Basiskonfiguration, z. B. für bestimmte Regionen, Länder oder Standorte (4-stellig)
+
+Beide Codes sind konsequent vierstellig, was das Namensbild kompakt und gleichmäßig hält.
+
+### 3.3 Systembereich: IAM, MDM und 365
+Nach `BASE_` oder `BAEX_` folgt der Bereich, in dem sich die Gruppe bewegt.
+
+- `IAM` — Identity & Access Management: Benutzer, Rollen, App-Zugriffe
+- `MDM` — Mobile Device Management: Geräte, Plattformen, Autopilot
+- `365` — Microsoft 365 Services: Lizenzen, Teams, SharePoint
+
+---
+
+## 4. Geo als zweiter Orientierungspunkt
+
+Nach dem System folgt der Geo-Bezug zur räumlichen oder organisatorischen Verortung. Die verwendeten Codes orientieren sich an international etablierten Normen.
+
+- **Globale Gültigkeit (`GLOB`)**: Wenn eine Gruppe nicht auf einen Standort beschränkt ist, sondern unternehmensweit gilt.
+- **Länder (2-stellig, z.B. `DE`, `AT`, `CH`)**: Nach ISO 3166-1 Alpha-2.
+- **Regionen (4-stellig, z.B. `DACH`, `EMEA`)**: Regionale Zusammenfassungen.
+- **Städte / Standorte (4-stellig, z.B. `MUCx`, `BERx`, `WIEN`)**: Orientiert am UN/LOCODE-Standard. Wenn ein Standortcode nur drei Zeichen umfasst, wird er mit einem kleinen `x` ergänzt (Füller).
+
+---
+
+## 5. Context als eigentliche Fachlogik
+
+Der Context beantwortet die Frage: In welchem fachlichen oder technischen Zusammenhang bewegt sich die Gruppe? Die Werte sind in der Regel 3-stellig.
+
+- **Im IAM-Kontext**: Meist fachlich oder organisatorisch geprägt (`HRx`, `ITx`, `FIN`, `SAL`, `LEG`, `MGT`, `PIM`, `DEF`).
+- **Im MDM-Kontext**: Hier ist die **Plattform ein Pflichtfeld** (siehe Kapitel 6).
+- **Im 365-Kontext**: Meist der fachliche Zielbereich (`HRx`, `FIN`, `SAL`, `DEF`).
+
+---
+
+## 6. Plattform-Tag im MDM-Context (Pflichtfeld)
+
+Im MDM-Bereich (Mobile Device Management) ist die Angabe der Plattform im Context-Segment ein **Pflichtfeld** — mit einer einzigen definierten Ausnahme. Dies stellt sicher, dass Intune-Policies und Konfigurationen sofort der richtigen Zielplattform zugeordnet werden können.
+
+| Situation | Context-Segment | Beispiel |
 | :--- | :--- | :--- |
-| `STD` | Standard | Standard-Konfiguration |
-| `ALL` | All | Alle Objekte der Kategorie |
-| `HRx` | Human Resources | Human Resources |
-| `FIN` | Finance | Finanzen |
-| `ITx` | IT | IT-Abteilung |
-| `SAL` | Sales | Vertrieb |
-| `LEG` | Legal | Rechtsabteilung |
-| `MGT` | Management | Geschäftsführung |
-| `SMB` | Shared Mailbox | Shared Mailbox Zugriff |
-| `DST` | Distribution List | Verteilergruppe |
-| `TMS` | Teams | Microsoft Teams |
-| `SPO` | SharePoint Online | SharePoint Online |
-| `LIC` | License | Lizenzzuweisung |
-| `APR` | Approver | PIM Genehmiger |
-| `ELG` | Eligible | PIM Eligible Assignment |
-| `ACT` | Active | PIM Active Assignment |
-| `WIN` | Windows | Windows OS (für MDM) |
-| `MAC` | macOS | macOS (für MDM) |
-| `IOS` | iOS | Apple iOS (für MDM) |
-| `AND` | Android | Android OS (für MDM) |
-
-#### Environment-Suffix (optional)
-Wird ans **Ende** des Gruppennamens angehängt — kennzeichnet eine Test- oder Pilotversion einer bestehenden Gruppe. Fehlt das Suffix, handelt es sich um eine produktive Gruppe.
-
-| Wert | Beschreibung |
-| :--- | :--- |
-| `TEST` | Testgruppe ohne produktiven Impact |
-| `PILOT` | Kontrollierter Rollout in der Produktion |
+| Policy gilt nur für Windows | `WIN` | `BASE_MDM-GLOB-WIN-DEF` |
+| Policy gilt nur für macOS | `MAC` | `BASE_MDM-GLOB-MAC-DEF` |
+| Policy gilt nur für iOS/iPadOS | `IOS` | `BASE_MDM-GLOB-IOS-DEF` |
+| Policy gilt nur für Android | `AND` | `BASE_MDM-GLOB-AND-DEF` |
+| Policy gilt für Autopilot (plattformübergreifend) | `APL` | `BASE_MDM-GLOB-APL-USR` |
+| **Ausnahme:** Policy gilt explizit für alle Devices | `DEF` oder `GLOB` | `BASE_MDM-GLOB-DEF-USR` |
 
 ---
 
-## 3. Naming Convention für Benutzerkonten
+## 7. Function als konkrete Ausprägung
 
-| Prefix | Typ | Beschreibung | Beispiel |
-| :--- | :--- | :--- | :--- |
-| *(kein Prefix)* | Standard User | Reguläres Konto, keine administrativen Berechtigungen | `m.mustermann@365solution.de` |
-| `adm-` | Admin User | Dediziertes Admin-Konto, idealerweise mit PIM | `adm-m.mustermann@365solution.de` |
-| `srv-` | Service Account | Dienstkonten für Apps, Automation, Drucker. Kein interaktiver Login | `srv-backup@365solution.de` |
-| `ext-` | External Member | Externe B2B-Konten die als Member provisioniert werden | `ext-m.mustermann@365solution.de` |
-| `tst-` | Test Account | Testkonten ohne produktiven Zugriff | `tst-m.mustermann@365solution.de` |
-| `res-` | Resource Account | Funktionale Konten für Räume oder Equipment | `res-meetingroom-munich@365solution.de` |
-| `agt-` | Agent Account | Konten für AI Agents oder Copilot Automations | `agt-copilot-hrx@365solution.de` |
-| `smb-` | Shared Mailbox | Funktionale Postfächer ohne persönliche Zuordnung | `smb-support@365solution.de` |
+Die Function beschreibt, was die Gruppe konkret tut oder abbildet. Die Werte sind in der Regel 3-stellig.
 
-### Break-Glass Konten
-Break-Glass Notfallkonten erhalten **keinen sprechenden Namen**. Der Kontoname basiert auf der Seriennummer des zugewiesenen YubiKeys (z.B. `28491837@365solution.de`). Dies verhindert gezielte Angriffe auf Notfallkonten.
+- `DEF` — Default-Ausprägung
+- `ADM` — Administrative Konten
+- `EAP` — Enterprise Application / SSO-Zugriff
+- `ELG` / `ACT` / `APR` — PIM-Stati
+- `USR` — User-Driven (z.B. bei MDM)
+- `LIC` — Lizenzzuweisung
+- `TMS` — Teams
+- `SPO` — SharePoint Online
+- `SMB` — Shared Mailbox
+- `DST` — Distribution List
 
-### Kiosk-Szenarien
-Kiosk-Arbeitsplätze erhalten **kein dediziertes Benutzerkonto**. Der Zugriff wird ausschließlich über das Gerät abgebildet — via Intune Autopilot Self-Deploying Mode mit gerätegebundenem Kiosk-Profil. Authentifizierung und Zugriffskontrolle erfolgen auf Device-Ebene, nicht auf User-Ebene.
+**Enterprise Applications (EAP):** Wenn eine Gruppe im IAM-Bereich dazu dient, Benutzern den Zugriff auf eine Drittanwendung zu gewähren, wird die Function `EAP` genutzt. Der Name der Applikation folgt dann als Qualifier (z.B. `BASE_IAM-GLOB-DEF-EAP-Salesforce`).
 
 ---
 
-## 4. Gruppenkategorien & Praxisbeispiele
+## 8. Qualifier und Environment-Suffix
 
-### 4.1 Cloud-Only vs. Hybrid (IAM)
+**Qualifier:** Manche Gruppen benötigen nach der Function noch eine weitere Spezifizierung.
+- `BASE_IAM-DE-PIM-ELG-GlobalAdmin`
+- `BASE_IAM-GLOB-DEF-EAP-Workday`
 
-| Gruppenname | Beschreibung |
-| :--- | :--- |
-| `BASE-IAM-STD` | Cloud-Only: Globale Blueprint-Standardgruppe |
-| `AAD-BASE-IAM-STD` | Hybrid: Cloud-Only Standardgruppe |
-| `AD-BASE-IAM-STD` | Hybrid: AD-synchronisierte Standardgruppe |
-
-### 4.2 Scope & Geo Beispiele
-
-| Gruppenname | Beschreibung |
-| :--- | :--- |
-| `BaseEXT-IAM-HRx` | Globale Erweiterung HR (kein Geo = gilt überall) |
-| `BaseEXT_DE-IAM-HRx` | HR-Benutzer Deutschland |
-| `BaseEXT_AT-IAM-HRx` | HR-Benutzer Österreich |
-| `BaseEXT_DACH-IAM-HRx` | HR-Benutzer DACH-Region |
-| `BaseEXT_Munich-MDM-WIN` | Windows-Geräte Standort München |
-
-### 4.3 Mobile Device Management (MDM)
-
-| Gruppenname | Beschreibung |
-| :--- | :--- |
-| `BASE-MDM-WIN` | Alle Windows-Geräte der 365solution AG |
-| `BASE-MDM-MAC` | Alle macOS-Geräte der 365solution AG |
-| `BASE-MDM-IOS` | Alle iOS-Geräte der 365solution AG |
-| `BASE-MDM-AND` | Alle Android-Geräte der 365solution AG |
-| `BASE-MDM-APL-USR` | Autopilot User-Driven Deployments |
-| `BASE-MDM-WIN-TEST` | Testgruppe neue Windows-Konfiguration |
-| `BASE-MDM-WIN-PILOT` | Pilotgruppe Windows-Rollout |
-| `BaseEXT_Munich-MDM-WIN` | Windows-Geräte Standort München |
-
-### 4.4 Identity & Access Management (IAM)
-
-| Gruppenname | Beschreibung |
-| :--- | :--- |
-| `BASE-IAM-STD` | Alle Standard-Benutzer der 365solution AG |
-| `BASE-IAM-ADM-ITx` | Admin-Konten (`adm-`) des IT-Teams |
-| `BASE-IAM-PIM-ELG-GlobalAdmin` | PIM Eligible Assignment Global Admin |
-| `BASE-IAM-PIM-ACT-GlobalAdmin` | PIM Active Assignment Global Admin |
-| `BASE-IAM-PIM-APR-GlobalAdmin` | Genehmiger für Global Admin Aktivierung |
-| `BASE-IAM-PIM-ELG-GlobalAdmin-TEST` | Testgruppe PIM Eligible Global Admin |
-| `BaseEXT_DE-IAM-HRx` | HR-Benutzer Deutschland |
-| `BaseEXT_DACH-IAM-FIN` | Finance-Benutzer DACH-Region |
-
-### 4.5 Microsoft 365 (M365)
-
-| Gruppenname | Beschreibung |
-| :--- | :--- |
-| `BASE-M365-LIC-STD` | Standard M365 Lizenzzuweisung |
-| `BASE-M365-TMS-STD` | Standard Teams Zuweisung |
-| `BASE-M365-SPO-STD` | Standard SharePoint Zuweisung |
-| `BASE-M365-SMB-HRx` | Shared Mailbox HR |
-| `BASE-M365-SMB-FIN` | Shared Mailbox Finance |
-| `BaseEXT_DE-M365-SPO-HRx` | SharePoint HR Deutschland |
-| `BaseEXT-M365-DST-SAL` | Globale Verteilergruppe Sales |
+**TEST und PILOT:** Wenn eine Gruppe nicht produktiv im Regelbetrieb steht, wird dies am Ende des Namens mit einem Unterstrich sichtbar gemacht.
+- `BASE_MDM-MUCx-WIN-DEF_TEST`
+- `BAEX_365-DE-HRx-SPO_PILOT`
 
 ---
 
-## 5. Dynamic Membership Rules
+## 9. Wie ein Name gelesen werden soll
 
-Alle Entra ID Gruppen der 365solution AG werden wo möglich als **Dynamic Groups** konfiguriert. Dies stellt sicher dass Mitgliedschaften automatisch durch Entra ID gepflegt werden und manuelle Eingriffe auf Ausnahmen reduziert werden.
+Ein Name soll in Zukunft idealerweise wie eine kleine Aussage verstanden werden.
 
-### 5.1 Grundprinzip
-
-| Gruppentyp | Membership |
-| :--- | :--- |
-| `BASE-*` | Dynamic — Rule basiert auf User/Device Attributen |
-| `BaseEXT_[Geo]-*` | Dynamic — Rule kombiniert Geo + weitere Attribute |
-| `BaseEXT-*` | Dynamic — Rule ohne Geo-Einschränkung |
-| Break-Glass Konten | Static — manuelle Zuweisung, keine Dynamic Rule möglich |
-| PIM Gruppen | Static — Mitgliedschaft wird über PIM Workflow gesteuert |
-
-### 5.2 User-basierte Rules (IAM)
-
-| Gruppe | Dynamic Membership Rule |
-| :--- | :--- |
-| `BASE-IAM-STD` | `(user.userType -eq "Member")` |
-| `BASE-IAM-ADM-ITx` | `(user.userPrincipalName -startsWith "adm-")` |
-| `BaseEXT-IAM-HRx` | `(user.department -eq "HR")` |
-| `BaseEXT_DE-IAM-HRx` | `(user.country -eq "DE") AND (user.department -eq "HR")` |
-| `BaseEXT_DACH-IAM-FIN` | `(user.country -eq "DE" OR user.country -eq "AT" OR user.country -eq "CH") AND (user.department -eq "Finance")` |
-| `BaseEXT-IAM-EXT` | `(user.userPrincipalName -startsWith "ext-")` |
-
-### 5.3 Device-basierte Rules (MDM)
-
-| Gruppe | Dynamic Membership Rule |
-| :--- | :--- |
-| `BASE-MDM-WIN` | `(device.deviceOSType -eq "Windows")` |
-| `BASE-MDM-MAC` | `(device.deviceOSType -eq "MacOS")` |
-| `BASE-MDM-IOS` | `(device.deviceOSType -eq "IOS")` |
-| `BASE-MDM-AND` | `(device.deviceOSType -eq "Android")` |
-| `BASE-MDM-APL-USR` | `(device.devicePhysicalIds -any _ -eq "[OrderID]:AutopilotUserDriven")` |
-| `BaseEXT_Munich-MDM-WIN` | `(device.deviceOSType -eq "Windows") AND (device.devicePhysicalIds -any _ -eq "[OrderID]:Munich")` |
-| `BaseEXT_Munich-MDM-APL` | `(device.devicePhysicalIds -any _ -eq "[OrderID]:Munich")` |
-
-### 5.4 M365-basierte Rules
-
-| Gruppe | Dynamic Membership Rule |
-| :--- | :--- |
-| `BASE-M365-LIC-STD` | `(user.userType -eq "Member")` |
-| `BASE-M365-SMB-HRx` | `(user.department -eq "HR")` |
-| `BaseEXT_DE-M365-SPO-HRx` | `(user.country -eq "DE") AND (user.department -eq "HR")` |
-
-### 5.5 Statische Gruppen (Ausnahmen)
-
-Folgende Gruppen werden bewusst als statische Gruppen geführt:
-
-- **Break-Glass Konten** — manuelle Zuweisung, keine Dynamic Rule möglich
-- **PIM Gruppen** (`ELG`, `ACT`, `APR`) — Mitgliedschaft wird ausschließlich über den PIM Workflow gesteuert
+- **`BASE_IAM-DE-HRx-DEF`**
+  Globale Basiskonfiguration im Bereich Identity & Access Management, bezogen auf Deutschland, im HR-Kontext, Default-Ausprägung.
+- **`BASE_MDM-MUCx-WIN-DEF`**
+  Basiskonfiguration für Mobile Device Management, Standort München, Windows-Kontext, Default-Ausprägung.
 
 ---
 
-## 6. Vorteile der Struktur
+## 10. Benutzerkonten
 
-### 6.1 Klarheit & Lesbarkeit
-- Sofortige Erkennbarkeit von Scope, System, Funktion und Geo-Zugehörigkeit durch konsistentes Namensschema
-- 3-Zeichen Function-Codes ermöglichen schnelles Scannen auch bei langen Gruppenlisten
-- `BASE` vs. `BaseEXT` Unterscheidung auf den ersten Blick erkennbar — kein Standard wird versehentlich als Erweiterung behandelt
+Neben Gruppen folgt auch die Benennung von Benutzerkonten einer erkennbaren Logik. Hier steht nicht die Segmentstruktur im Vordergrund, sondern der Präfix als Kontotyp. Der Präfix wird vom eigentlichen Benutzernamen durch einen Punkt getrennt.
 
-### 6.2 Zero Trust
-- Klare Trennung von Standard- (`STD`), Admin- (`adm-`), Service- (`srv-`) und externen Konten (`ext-`) auf Identitätsebene
-- Break-Glass Konten ohne sprechenden Namen schützen Notfallzugänge vor gezielten Angriffen
-- Kiosk-Szenarien werden konsequent auf Device-Ebene abgebildet — kein geteiltes Benutzerkonto
+- `(kein Präfix)` = Standardkonto
+- `adm.` = Admin-Konto
+- `srv.` = Service-Konto
+- `ext.` = externer Benutzer mit Member-Status
+- `tst.` = Testkonto
+- `res.` = Resource-Konto
+- `agt.` = Agent-/Automationskonto
+- `smb.` = funktionaler Shared-Mailbox-Bezug
 
-### 6.3 Skalierbarkeit
-- Einfache Erweiterung um neue Geo-Regionen via `BaseEXT_[Geo]` ohne Strukturänderung
-- Neue Abteilungen oder Funktionen durch Ergänzung der 3-Zeichen Code Tabelle
-- Konsistente Struktur über Cloud-Only und Hybrid-Umgebungen hinweg (`AAD`/`AD`)
-
-### 6.4 Automatisierung
-- Dynamic Membership Rules befüllen Gruppen automatisch — kein manueller Pflegeaufwand
-- Maschinenlesbare, vorhersagbare Namensmuster für PowerShell & Graph API
-- User-Prefix (`adm-`, `srv-`, `ext-` etc.) direkt als Basis für Dynamic Rules nutzbar
-
-### 6.5 Wartbarkeit
-- `ARCHIVE-` Präfix ermöglicht sauberen Lifecycle ohne sofortige Löschung
-- PIM Gruppen klar als statische Gruppen definiert — kein Risiko ungewollter Dynamic Rule Eingriffe
-- Namenskonvention ist selbstdokumentierend — reduziert Abhängigkeit von externer Dokumentation
+**Best Practice:** Der User Principal Name (UPN) und die primäre SMTP-Adresse werden konsequent in Kleinbuchstaben (lowercase) geschrieben.
 
 ---
 
-## 7. Migration
+## 11. Break-Glass und Sonderfälle
 
-### 7.1 Voraussetzungen
-
-- Alle User-Attribute in Entra ID sind gepflegt (`country`, `department`, `userPrincipalName`)
-- Dynamic Group Feature ist im Tenant lizenziert (Entra ID P1 oder P2)
-- Bestehende Gruppen und ihre Zuweisungen sind dokumentiert
-
-### 7.2 Risikohinweise
-
-- **Dynamic Rules** erst nach vollständiger Validierung der User-Attribute aktivieren — unvollständige Attribute führen zu falscher Gruppenbefüllung
-- **PIM Gruppen** nie als Dynamic Group konfigurieren — Mitgliedschaft muss kontrolliert bleiben
-- **Break-Glass Konten** vom Migrationsprozess ausschliessen — manuelle Pflege bleibt bestehen
-
-### 7.3 Durchführung
-
-Die Migration kann eigenständig durch das interne IT-Team der 365solution AG durchgeführt werden oder in Begleitung des Providers. Bei komplexen Umgebungen, bestehenden Hybrid-Strukturen oder fehlenden internen Ressourcen empfiehlt sich eine begleitete Migration durch den Provider.
-
-**Phase 1 — Vorbereitung**
-- [ ] Neue Gruppen nach Konvention erstellen
-- [ ] Dynamic Membership Rules konfigurieren und Mitgliedschaft validieren
-- [ ] Benutzerkonten nach neuem Prefix-Schema provisionieren (`adm-`, `srv-`, `ext-` etc.)
-
-**Phase 2 — Transition**
-- [ ] Bestehende Zuweisungen (Intune, CAP, M365) schrittweise auf neue Gruppen umstellen
-- [ ] Parallelbetrieb alter und neuer Gruppen während der Übergangsphase sicherstellen
-- [ ] Validierung je Zuweisung vor Abschaltung der alten Gruppe durchführen
-
-**Phase 3 — Validierung**
-- [ ] Funktionalität aller Zuweisungen auf neuen Gruppen bestätigen
-- [ ] Dynamic Rules auf korrekte Befüllung prüfen
-- [ ] Alte Gruppen mit `ARCHIVE-` Präfix versehen — noch keine Löschung
-
-**Phase 4 — Cleanup**
-- [ ] Archivierte Gruppen nach definierter Karenzzeit (empfohlen: 90 Tage) im regulären IAM-Review entfernen
-- [ ] Abschlussdokumentation aktualisieren
+- **Break-Glass Konten:** Sollen keinen sprechenden Namen tragen (z.B. auf Basis einer Seriennummer wie `28491837@365solution.de`).
+- **Kiosk-Szenarien:** Kein dediziertes Benutzerkonto (`kiosk.x`), stattdessen ein Gerätekontext wie `BASE_MDM-WIEN-WIN-DEF`.
 
 ---
 
-## 8. Governance & Standards
+## 12. Lifecycle und Expiration (Best Practice)
 
-**Schreibweise als funktionales Unterscheidungsmerkmal:**
-- `BASE` — Vollständig in Großbuchstaben, kennzeichnet die globale Blueprint-Grundkonfiguration
-- `BaseEXT` — CamelCase, kennzeichnet bewusst eine Erweiterung. Die gemischte Schreibweise signalisiert sofort: *"Das ist kein Standard, sondern eine Ergänzung."*
-- Alle weiteren Segmente (`IAM`, `MDM`, `PIM`, `ADM` etc.) — konsequent in **Großbuchstaben**
-- Function-Codes — immer **3 Zeichen**, konsequent in **Großbuchstaben** (Ausnahme: `HRx`, `ITx` als bewusste Platzhalter)
-
-**Trennzeichen:**
-- Segmente → **Bindestrich** (`-`)
-- Geo-Suffix bei BaseEXT → **Unterstrich** (`_`): `BaseEXT_DE`, `BaseEXT_Munich`
-- Keine Leerzeichen oder Sonderzeichen (`@`, `#`, `!`)
-
-**Sprache:** Englische Begriffe sind verbindlich. Ausnahme: Eigennamen bei Geo-Angaben (`BaseEXT_Munich` ist zulässig).
-
-**Lifecycle:**
-- Aktive Gruppen → normale Benennung
-- Nicht mehr genutzte Gruppen → Präfix `ARCHIVE-` (z.B. `ARCHIVE-BASE-IAM-STD`)
-- Entfernung nach Karenzzeit im regulären IAM-Review
-
-**Verantwortlichkeit:** Das IAM-Team der 365solution AG überwacht die Einhaltung der Konvention und ist alleinige Instanz für Ausnahmen.
+Nicht mehr genutzte Gruppen erhalten das Präfix `ARCHIVE-` (z.B. `ARCHIVE-BASE_IAM-DE-HRx-DEF`) und werden nach einer Karenzzeit gelöscht. Für Gruppen im Bereich 365 wird der Lebenszyklus perspektivisch durch automatisierte Expiration Policies unterstützt.
 
 ---
 
-**Version:** 3.0 | **Autor:** IAM Team — 365solution AG
+## 13. Optionaler Vorschlag: Gruppentyp-Kennzeichnung nach dem Geo-Bereich
+
+⚠️ *Dieser Abschnitt ist ein Vorschlag und kein Bestandteil des aktuellen Entwurfs.*
+Bei Bedarf kann nach dem Geo-Segment eine Kennzeichnung des technischen Gruppentyps eingefügt werden:
+- `SEC` — Security Group
+- `365` — Microsoft 365 Group
+Beispiel: `BASE_IAM-DE-SEC-HRx-DEF`
+
+---
+
+## 14. Offene Fragestellungen und Abgrenzung zur Governance
+
+Dieses Naming-Konzept definiert, wie Objekte heißen. Die folgenden Fragestellungen gehen über die reine Benennung hinaus und müssen in separaten Konzepten adressiert werden:
+
+| Fragestellung | Naming-Konzept | Governance / Betriebskonzept |
+| :--- | :---: | :---: |
+| Wie heißt ein Objekt? | ✅ | |
+| Wie erkenne ich den Typ am Namen? | ✅ | |
+| Welche Segmente hat der Name? | ✅ | |
+| In welche Gruppe gehört ein Benutzer? | ✅ (Struktur) | ✅ (Zuweisung) |
+| Wie wird eine Gruppe technisch konfiguriert? | | ✅ |
+| Welche Conditional Access Policies greifen? | | ✅ |
+| Wie authentifiziert sich ein Kontotyp? | | ✅ |
+| Wer ist Owner einer Gruppe oder eines Kontos? | | ✅ |
+| Wie wird der Lebenszyklus gesteuert? | | ✅ |
+| Wie werden Berechtigungen zugewiesen? | | ✅ |
+| Welche Expiration Policies gelten? | | ✅ |
+
+*(Die detaillierten offenen Fragen nach Kontotyp und Systembereich aus V3.9 sind in die operativen Konzepte überführt worden.)*
+
+---
+
+**Version:** 4.0 | **Autor:** IAM Team — 365solution AG
+
+**Änderungen (3.9 → 4.0)**
+- Integration des Plattform-Tags als Pflichtfeld im MDM-Context (Kapitel 6)
+- Definition der Ausnahmeregelung für plattformübergreifende Zuweisungen (`DEF` / `GLOB`)
+- Konsolidierung der Dokumentenstruktur
