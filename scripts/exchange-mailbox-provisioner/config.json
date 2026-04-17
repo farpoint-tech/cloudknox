@@ -1,0 +1,16 @@
+{
+  "general": {
+    "excelFile": "Provisioning.xlsx",
+    "domain": "contoso.com",
+    "delimiter": ";",
+    "displayNamePrefixSharedMailbox": "SM - ",
+    "displayNamePrefixDistributionGroup": "DG - ",
+    "defaultHiddenFromGAL": false
+  },
+  "authentication": {
+    "mode": "interactive",
+    "appId": "",
+    "organization": "",
+    "certificateThumbprint": ""
+  }
+}
