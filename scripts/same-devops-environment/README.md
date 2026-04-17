@@ -1,357 +1,140 @@
 # Same DevOps Environment
 
-## Beschreibung
+## Description
 
-PowerShell-Script zur Standardisierung und Synchronisation von DevOps-Umgebungen. Diese Lösung gewährleistet konsistente Entwicklungs-, Test- und Produktionsumgebungen durch automatisierte Konfiguration und Deployment-Prozesse.
+PowerShell script for standardising and setting up development environments on new Windows devices. This solution ensures consistent environments by automating the installation of applications, PowerShell modules, VS Code extensions and PowerShell profile configuration.
 
-## Hauptfunktionen
+## Features
 
-### 🔄 Umgebungs-Synchronisation
-- **Multi-Environment Support**: Verwaltung von Dev, Test, Staging und Production
-- **Konfigurationsdrift-Erkennung**: Automatische Erkennung von Abweichungen
-- **Baseline-Management**: Definierte Baseline-Konfigurationen
-- **Rollback-Funktionen**: Schnelle Wiederherstellung bei Problemen
+### Application Installation
+- **winget-based**: Installs Git, PowerShell 7 and VS Code via winget
+- **Update check**: Checks all configured apps for available updates before installing
+- **Already-installed detection**: Skips already installed applications gracefully
 
-### 🛠️ Automatisierte Konfiguration
-- **Infrastructure as Code**: Deklarative Umgebungsdefinitionen
-- **Tool-Installation**: Automatische Installation von DevOps-Tools
-- **Dependency-Management**: Verwaltung von Abhängigkeiten
-- **Version-Kontrolle**: Konsistente Tool-Versionen
+### PowerShell Module Management
+- **Gallery comparison**: Fetches latest versions from PowerShell Gallery before processing
+- **Smart analysis**: Separates modules into "to install", "to update" and "up to date"
+- **Automatic update**: Updates outdated modules; falls back to reinstall if needed
 
-### 📊 Monitoring und Compliance
-- **Environment Health Checks**: Regelmäßige Gesundheitsprüfungen
-- **Compliance-Überwachung**: Einhaltung von Standards
-- **Drift-Reporting**: Berichte über Konfigurationsabweichungen
-- **Audit-Trail**: Vollständige Nachverfolgbarkeit
+### VS Code Extensions
+- **10 extensions**: Installs a curated set of extensions for PowerShell and Azure development
+- **Skip if installed**: Only installs missing extensions
 
-### 🔧 DevOps-Tool-Integration
-- **Git-Integration**: Automatische Repository-Konfiguration
-- **CI/CD-Pipeline-Setup**: Jenkins, Azure DevOps, GitHub Actions
-- **Container-Support**: Docker und Kubernetes-Konfiguration
-- **Cloud-Provider-Integration**: Azure, AWS, GCP
+### PowerShell Profile Setup
+- **Multi-profile**: Configures Windows PS 5.1, PS 7+ and VS Code profiles
+- **Backup**: Creates timestamped backup of existing profiles before overwriting
+- **Syntax validation**: Validates the created profile using `[scriptblock]::Create()`
+- **Platform detection**: Handles Windows, Parallels VM (Mac) and Unix paths correctly
 
-## Voraussetzungen
+### Custom Profile Functions
 
-- PowerShell 5.1 oder höher
-- Administratorrechte auf Zielsystemen
-- Git (für Repository-Management)
-- Docker (optional, für Container-Umgebungen)
-- Cloud CLI-Tools (je nach Provider)
+| Function | Description |
+|----------|-------------|
+| `Get-PublicIP` | Returns the public IP address |
+| `Get-UTCTime` | Returns the current UTC time |
+| `Find-TenantID` | Finds tenant ID for a given domain |
+| `Get-RandomPassword` | Generates a random password |
+| Custom prompt | Shows timestamp in the PS prompt |
 
-## Verwendung
+## Prerequisites
 
-### Grundlegende Umgebungseinrichtung
+- Windows 10/11
+- PowerShell 5.1 or higher
+- winget (App Installer from Microsoft Store)
+- Administrator privileges (recommended for system-wide installs)
+
+## Usage
+
 ```powershell
-# Neue DevOps-Umgebung einrichten
-.\sameDevOpsEnvironment.ps1 -Action "Setup" -Environment "Development"
-
-# Bestehende Umgebung synchronisieren
-.\sameDevOpsEnvironment.ps1 -Action "Sync" -Environment "Production"
-
-# Umgebung validieren
-.\sameDevOpsEnvironment.ps1 -Action "Validate" -Environment "Test"
+# Run the setup script
+.\sameDevOpsEnvironment.ps1
 ```
 
-### Erweiterte Konfiguration
+The script runs through 5 steps automatically:
+1. Check dependencies and upgrade existing apps
+2. Install applications via winget
+3. Install / update PowerShell modules
+4. Install VS Code extensions
+5. Configure PowerShell profiles
+
+## Installed Applications
+
+| Application | winget ID |
+|-------------|-----------|
+| Git | `Git.Git` |
+| PowerShell 7 | `Microsoft.PowerShell` |
+| VS Code | `Microsoft.VisualStudioCode` |
+
+## PowerShell Modules
+
+| Module | Purpose |
+|--------|---------|
+| Az | Azure PowerShell |
+| ExchangeOnlineManagement | Exchange Online |
+| M365Permissions | Microsoft 365 Permissions |
+| Microsoft.Graph | Microsoft Graph SDK |
+| Microsoft.Graph.Entra | Entra ID Extensions |
+| Microsoft.Graph.Beta | Graph Beta Endpoints |
+| PNP.PowerShell | SharePoint / PNP |
+| Wintuner | Intune App Packaging |
+| ZeroTrustAssessment | Zero Trust Assessment |
+
+## VS Code Extensions
+
+| Extension | Description |
+|-----------|-------------|
+| `github.copilot` | GitHub Copilot |
+| `ms-vsliveshare.vsliveshare` | Live Share |
+| `ms-vscode.powershell` | PowerShell Extension |
+| `gruntfuggly.todo-tree` | TODO Tree |
+| `mechatroner.rainbow-csv` | Rainbow CSV |
+| `azemoh.one-monokai` | One Monokai Theme |
+| `ms-azuretools.vscode-bicep` | Bicep Extension |
+| `microsoft-dciborow.align-bicep` | Align Bicep |
+| `eamodio.gitlens` | GitLens |
+| `shd101wyy.markdown-preview-enhanced` | Markdown Preview Enhanced |
+
+## Platform Support
+
+| Platform | Support |
+|----------|---------|
+| Windows 10/11 | Full |
+| PowerShell 5.1 | Full |
+| PowerShell 7.x | Full |
+| Parallels VM (Mac) | Full |
+| macOS/Linux | Partial (PS 7+ profiles only) |
+
+## Customisation
+
+Edit the configuration arrays at the top of the script to adjust what gets installed:
+
 ```powershell
-# Mit spezifischer Konfigurationsdatei
-.\sameDevOpsEnvironment.ps1 -ConfigFile "C:\DevOps\config.json" -Environment "Staging"
-
-# Nur bestimmte Komponenten
-.\sameDevOpsEnvironment.ps1 -Components "Git,Docker,Kubernetes" -Environment "Development"
-
-# Mit Backup vor Änderungen
-.\sameDevOpsEnvironment.ps1 -Action "Sync" -CreateBackup -BackupPath "C:\Backups"
-```
-
-## Konfigurationsdatei
-
-### config.json Beispiel
-```json
-{
-  "Environments": {
-    "Development": {
-      "Tools": {
-        "Git": {
-          "Version": "2.41.0",
-          "GlobalConfig": {
-            "user.name": "DevOps Bot",
-            "user.email": "devops@company.com"
-          }
-        },
-        "Docker": {
-          "Version": "24.0.5",
-          "DaemonConfig": {
-            "log-driver": "json-file",
-            "log-opts": {
-              "max-size": "10m",
-              "max-file": "3"
-            }
-          }
-        },
-        "Kubernetes": {
-          "Version": "1.28.0",
-          "Context": "dev-cluster"
-        }
-      },
-      "Repositories": [
-        {
-          "Name": "main-app",
-          "URL": "https://github.com/company/main-app.git",
-          "Branch": "develop",
-          "Path": "C:\\Projects\\main-app"
-        }
-      ],
-      "EnvironmentVariables": {
-        "NODE_ENV": "development",
-        "API_BASE_URL": "https://api-dev.company.com"
-      }
-    },
-    "Production": {
-      "Tools": {
-        "Git": {
-          "Version": "2.41.0",
-          "GlobalConfig": {
-            "user.name": "Production Bot",
-            "user.email": "production@company.com"
-          }
-        },
-        "Docker": {
-          "Version": "24.0.5",
-          "DaemonConfig": {
-            "log-driver": "syslog",
-            "log-opts": {
-              "syslog-address": "tcp://logs.company.com:514"
-            }
-          }
-        }
-      },
-      "Repositories": [
-        {
-          "Name": "main-app",
-          "URL": "https://github.com/company/main-app.git",
-          "Branch": "main",
-          "Path": "C:\\Production\\main-app"
-        }
-      ],
-      "EnvironmentVariables": {
-        "NODE_ENV": "production",
-        "API_BASE_URL": "https://api.company.com"
-      }
-    }
-  },
-  "GlobalSettings": {
-    "BackupEnabled": true,
-    "BackupRetentionDays": 30,
-    "LogLevel": "Info",
-    "NotificationWebhook": "https://hooks.slack.com/..."
-  }
+# Add or remove winget apps
+$installApps = @{
+    "Git.Git"                    = "Git"
+    "Microsoft.PowerShell"       = "PowerShell 7"
+    "Microsoft.VisualStudioCode" = "VS Code"
 }
+
+# Add or remove PS modules
+$RequiredModules = @(
+    "Az",
+    "Microsoft.Graph",
+    ...
+)
+
+# Add or remove VS Code extensions
+$VSCodeExtensions = @(
+    "github.copilot",
+    ...
+)
 ```
 
-## Unterstützte Aktionen
+## Authors
 
-### Setup
-- Ersteinrichtung einer neuen DevOps-Umgebung
-- Installation aller erforderlichen Tools
-- Konfiguration der Baseline-Einstellungen
-- Repository-Kloning und -Konfiguration
-
-### Sync
-- Synchronisation mit Baseline-Konfiguration
-- Update von Tools auf definierte Versionen
-- Anpassung von Konfigurationsdateien
-- Repository-Updates
-
-### Validate
-- Überprüfung der aktuellen Konfiguration
-- Vergleich mit Baseline
-- Generierung von Compliance-Berichten
-- Identifikation von Drift
-
-### Backup
-- Erstellung von Umgebungs-Backups
-- Sicherung von Konfigurationsdateien
-- Repository-Snapshots
-- Rollback-Vorbereitung
-
-### Restore
-- Wiederherstellung aus Backups
-- Rollback zu vorherigen Konfigurationen
-- Disaster Recovery
-- Umgebungs-Reset
-
-## Unterstützte Tools
-
-### Versionskontrolle
-- **Git**: Repository-Management und Konfiguration
-- **SVN**: Legacy-Support für Subversion
-- **Mercurial**: Alternative Versionskontrolle
-
-### CI/CD-Tools
-- **Jenkins**: Pipeline-Konfiguration und Plugins
-- **Azure DevOps**: Build- und Release-Pipelines
-- **GitHub Actions**: Workflow-Definitionen
-- **GitLab CI**: Pipeline-Konfiguration
-
-### Container-Technologien
-- **Docker**: Container-Runtime und Konfiguration
-- **Kubernetes**: Cluster-Konfiguration und Contexts
-- **Podman**: Alternative Container-Runtime
-- **Docker Compose**: Multi-Container-Anwendungen
-
-### Cloud-Tools
-- **Azure CLI**: Azure-Ressourcen-Management
-- **AWS CLI**: AWS-Service-Integration
-- **Google Cloud SDK**: GCP-Konfiguration
-- **Terraform**: Infrastructure as Code
-
-### Entwicklungstools
-- **Node.js**: JavaScript-Runtime und NPM
-- **Python**: Python-Interpreter und Pip
-- **Java**: JDK/JRE-Konfiguration
-- **Visual Studio Code**: Editor-Konfiguration
-
-## Monitoring und Reporting
-
-### Health Checks
-```powershell
-# Umfassende Gesundheitsprüfung
-.\sameDevOpsEnvironment.ps1 -Action "HealthCheck" -Environment "All"
-
-# Spezifische Tool-Prüfung
-.\sameDevOpsEnvironment.ps1 -Action "HealthCheck" -Tools "Docker,Kubernetes"
-```
-
-### Drift-Erkennung
-```powershell
-# Konfigurationsdrift analysieren
-.\sameDevOpsEnvironment.ps1 -Action "DriftAnalysis" -Environment "Production"
-
-# Automatische Drift-Korrektur
-.\sameDevOpsEnvironment.ps1 -Action "AutoCorrect" -Environment "Development"
-```
-
-### Berichte
-- **HTML-Dashboard**: Übersichtliche Darstellung des Umgebungsstatus
-- **JSON-Export**: Maschinenlesbare Daten für weitere Verarbeitung
-- **CSV-Berichte**: Tabellarische Auswertungen
-- **Grafische Trends**: Visualisierung von Änderungen über Zeit
-
-## Automatisierung
-
-### Scheduled Tasks
-```powershell
-# Tägliche Synchronisation einrichten
-schtasks /create /tn "DevOps Sync" /tr "powershell.exe -File 'C:\Scripts\sameDevOpsEnvironment.ps1' -Action Sync -Environment All" /sc daily /st 02:00
-```
-
-### CI/CD-Integration
-```yaml
-# Azure DevOps Pipeline Beispiel
-trigger:
-- main
-
-pool:
-  vmImage: 'windows-latest'
-
-steps:
-- task: PowerShell@2
-  displayName: 'Sync DevOps Environment'
-  inputs:
-    filePath: 'scripts/sameDevOpsEnvironment.ps1'
-    arguments: '-Action Sync -Environment $(Environment)'
-```
-
-### Webhook-Integration
-```powershell
-# Webhook-basierte Synchronisation
-.\sameDevOpsEnvironment.ps1 -Action "WebhookListener" -Port 8080
-```
-
-## Sicherheit und Compliance
-
-### Sicherheitsfeatures
-- **Credential-Management**: Sichere Speicherung von Anmeldedaten
-- **Encrypted Communication**: TLS-verschlüsselte Verbindungen
-- **Access Control**: Rollenbasierte Zugriffskontrolle
-- **Audit Logging**: Vollständige Protokollierung aller Aktionen
-
-### Compliance-Standards
-- **SOC 2**: Sicherheits- und Verfügbarkeitskontrollen
-- **ISO 27001**: Informationssicherheits-Management
-- **PCI DSS**: Zahlungskarten-Datensicherheit
-- **GDPR**: Datenschutz-Compliance
-
-## Best Practices
-
-### 1. Umgebungs-Design
-- Klare Trennung zwischen Umgebungen
-- Konsistente Namenskonventionen
-- Dokumentierte Baseline-Konfigurationen
-- Regelmäßige Reviews und Updates
-
-### 2. Automatisierung
-- Infrastructure as Code verwenden
-- Idempotente Scripts entwickeln
-- Rollback-Strategien implementieren
-- Monitoring und Alerting einrichten
-
-### 3. Sicherheit
-- Minimale Berechtigungen verwenden
-- Secrets-Management implementieren
-- Regelmäßige Sicherheitsaudits
-- Patch-Management-Prozesse
-
-## Fehlerbehebung
-
-### Häufige Probleme
-1. **Tool-Installation fehlgeschlagen**: Berechtigungen und Netzwerk prüfen
-2. **Repository-Kloning fehlgeschlagen**: Git-Konfiguration und Credentials validieren
-3. **Konfigurationsdrift**: Baseline-Definitionen überprüfen
-4. **Performance-Probleme**: Parallele Verarbeitung optimieren
-
-### Debug-Modus
-```powershell
-.\sameDevOpsEnvironment.ps1 -Action "Sync" -Debug -Verbose -LogLevel "Trace"
-```
-
-### Recovery-Optionen
-```powershell
-# Notfall-Wiederherstellung
-.\sameDevOpsEnvironment.ps1 -Action "EmergencyRestore" -BackupId "20240808-120000"
-
-# Umgebung zurücksetzen
-.\sameDevOpsEnvironment.ps1 -Action "Reset" -Environment "Development" -Confirm
-```
-
-## Integration mit anderen Tools
-
-### Monitoring-Systeme
-- **Prometheus**: Metriken-Export für Monitoring
-- **Grafana**: Dashboard-Integration
-- **Nagios**: Health Check-Integration
-- **Zabbix**: System-Monitoring
-
-### Notification-Services
-- **Slack**: Team-Benachrichtigungen
-- **Microsoft Teams**: Enterprise-Integration
-- **Email**: SMTP-basierte Benachrichtigungen
-- **PagerDuty**: Incident-Management
-
-## Autor
-
-Philipp Schmidt - Farpoint Technologies
+**Script:** Roy Klooster - RKSolutions
+**Repository:** Philipp Schmidt - Farpoint Technologies
 
 ## Version
 
-1.0 - Erste Veröffentlichung der DevOps-Umgebungs-Standardisierung
-
-## Support
-
-Für technischen Support:
-1. Debug-Modus aktivieren
-2. Log-Dateien analysieren
-3. Konfigurationsdateien validieren
-4. Support-Team mit detaillierten Informationen kontaktieren
-
+1.3 - Language consistency update (fully English)

@@ -1,50 +1,76 @@
 # Autopilot Group Tag Bulk Setter
 
-## Beschreibung
+## Description
 
-Dieses PowerShell-Script ermöglicht das massenhafte Setzen von Group Tags für Autopilot-Geräte in Microsoft Intune. Es bietet eine effiziente Lösung für die Verwaltung großer Mengen von Autopilot-Geräten durch automatisierte Group Tag-Zuweisung.
+This PowerShell script enables bulk assignment of Group Tags for Autopilot devices in Microsoft Intune. It provides an efficient solution for managing large numbers of Autopilot devices through automated group tag assignment, with full pagination support for environments with more than 1,000 devices.
 
-## Funktionen
+## Features
 
-- **Massenhafte Group Tag-Zuweisung**: Setzen von Group Tags für mehrere Autopilot-Geräte gleichzeitig
-- **CSV-Import**: Unterstützung für CSV-Dateien mit Gerätelisten
-- **Validierung**: Überprüfung der Gerätedaten vor der Verarbeitung
-- **Logging**: Detaillierte Protokollierung aller Aktionen
-- **Fehlerbehandlung**: Robuste Fehlerbehandlung mit Retry-Mechanismus
+- **Bulk group tag assignment**: Set group tags for multiple Autopilot devices at once
+- **Full pagination**: Handles environments with more than 1,000 devices via `@odata.nextLink`
+- **Test mode**: Preview which devices would be tagged without making real changes
+- **File logging**: Persistent log with timestamps and colour-coded levels (INFO/WARN/ERROR/SUCCESS)
+- **CSV export**: Export results for audit and reporting purposes
+- **Validation and error handling**: Robust error handling per device with individual error messages
 
-## Voraussetzungen
+## Prerequisites
 
-- PowerShell 5.1 oder höher
-- Microsoft Graph PowerShell SDK
-- Entsprechende Azure AD-Berechtigungen:
+- PowerShell 5.1 or higher
+- Microsoft Graph PowerShell SDK (`Microsoft.Graph.Authentication`)
+- Azure AD permissions:
   - `DeviceManagementServiceConfig.ReadWrite.All`
-  - `Device.ReadWrite.All`
+- Intune Administrator or Global Administrator role
 
-## Verwendung
+## Parameters
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `-GroupTag` | String | The group tag to set | Interactive prompt |
+| `-Test` | Switch | Test mode: shows changes without executing | – |
+| `-LogPath` | String | Path for the log file | `.\Logs\AutopilotGroupTag_<date>.log` |
+| `-ExportCsv` | String | Path for the CSV export | `.\Logs\AutopilotGroupTag_<date>.csv` |
+
+## Usage
 
 ```powershell
-# Grundlegende Verwendung
+# Test run (no real changes)
+.\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 -Test
+
+# Interactive tag selection
 .\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1
 
-# Mit CSV-Datei
-.\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 -CsvPath "C:\path\to\devices.csv"
+# Set tag directly via parameter
+.\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 -GroupTag "userdriven"
 
-# Mit spezifischem Group Tag
-.\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 -GroupTag "IT-Department"
+# With custom log path and CSV export
+.\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 -GroupTag "userdriven" -LogPath "C:\Logs\autopilot.log" -ExportCsv "C:\Logs\results.csv"
 ```
 
-## CSV-Format
+## How It Works
 
-Die CSV-Datei sollte folgende Spalten enthalten:
-- `SerialNumber`: Seriennummer des Geräts
-- `GroupTag`: Gewünschter Group Tag
-- `DeviceName`: (Optional) Gerätename
+1. Connects to Microsoft Graph (`DeviceManagementServiceConfig.ReadWrite.All`)
+2. Loads **all** Windows Autopilot devices via paginated API calls
+3. Filters devices without an existing group tag
+4. Prompts the user to select or enter a group tag
+5. Requires explicit confirmation before making real changes
+6. Sets the group tag via the `updateDeviceProperties` endpoint (Beta API)
+7. Writes a persistent log file and CSV export with results
 
-## Autor
+## CSV Export Columns
+
+| Column | Description |
+|--------|-------------|
+| `SerialNumber` | Device serial number |
+| `Model` | Device model |
+| `GroupTag` | Applied group tag |
+| `Status` | Result: Success / Error / TEST |
+| `Timestamp` | Timestamp of the operation |
+| `ErrorMessage` | Error message if applicable |
+
+## Author
 
 Philipp Schmidt - Farpoint Technologies
 
 ## Version
 
-1.0 - Erste Veröffentlichung
-
+2.0 - Added pagination, file logging, CSV export

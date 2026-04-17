@@ -1,97 +1,96 @@
 # Intune DDG AutoCreator Ultimate
 
-## Beschreibung
+## Description
 
-Die ultimative Lösung für die automatische Erstellung und Verwaltung von Dynamic Device Groups (DDG) in Microsoft Intune. Dieses umfassende PowerShell-Framework bietet erweiterte Funktionen für die automatisierte Gruppenverwaltung mit Teams-Integration und modularer Architektur.
+The ultimate solution for automatic creation and management of Dynamic Device Groups (DDG) in Microsoft Intune. This comprehensive PowerShell framework provides advanced features for automated group management with Teams integration, modular architecture and a central JSON configuration.
 
-## Hauptfunktionen
+## Features
 
-### 🚀 Automatische Gruppenerstellung
-- **Dynamic Device Groups**: Automatische Erstellung basierend auf Geräteattributen
-- **Regel-Engine**: Flexible Regeldefinition für Gruppenmitgliedschaft
-- **Bulk-Operationen**: Massenhafte Gruppenerstellung und -verwaltung
-- **Template-System**: Vordefinierte Gruppenvorlagen
+### Automatic Group Creation
+- **Dynamic Device Groups**: Automatic creation based on device attributes
+- **Rule engine**: Flexible rule definitions for group membership
+- **Bulk operations**: Mass group creation and management
+- **Template system**: Predefined group templates
 
-### 🔧 Erweiterte Konfiguration
-- **JSON-Konfiguration**: Zentrale Konfigurationsverwaltung
-- **Modulare Architektur**: Getrennte Module für verschiedene Funktionen
-- **Skalierbare Lösung**: Unterstützung für große Umgebungen
-- **Anpassbare Workflows**: Flexible Anpassung an Unternehmensanforderungen
+### Advanced Configuration
+- **JSON configuration**: Central configuration management via `config-ultimate.json`
+- **Modular architecture**: Separate modules for different functions
+- **Scalable solution**: Support for large environments
+- **Customisable workflows**: Flexible adaptation to enterprise requirements
 
-### 🔐 Authentifizierung und Sicherheit
-- **Multiple Auth-Methoden**: Verschiedene Authentifizierungsoptionen
-- **Sichere Credential-Verwaltung**: Verschlüsselte Speicherung von Anmeldedaten
-- **RBAC-Integration**: Rollenbasierte Zugriffskontrolle
-- **Audit-Logging**: Umfassende Protokollierung aller Aktionen
+### Authentication and Security
+- **Multiple auth methods**: Interactive, Client Credentials, Device Code, Username/Password
+- **Secure credential management**: Encrypted storage of credentials
+- **RBAC integration**: Role-based access control
+- **Audit logging**: Comprehensive logging of all actions
 
-### 🔔 Teams-Integration
-- **Webhook-Benachrichtigungen**: Echtzeitbenachrichtigungen über Teams
-- **Status-Updates**: Automatische Fortschrittsmeldungen
-- **Fehler-Alerts**: Sofortige Benachrichtigung bei Problemen
-- **Zusammenfassungsberichte**: Detaillierte Ausführungsberichte
+### Teams Integration
+- **Webhook notifications**: Real-time notifications via Teams
+- **Status updates**: Automatic progress messages
+- **Error alerts**: Immediate notification of issues
+- **Summary reports**: Detailed execution reports
 
-## Projektstruktur
+## Project Structure
 
 ```
 project/
-├── script1/                        # Hauptskript
+├── script1/                        # Main script
 │   ├── Intune-DDG-AutoCreator-Ultimate.ps1
 │   └── README.md
-├── script2/                        # Zusätzliche Skripte (Platzhalter)
+├── script2/                        # Additional scripts (placeholder)
 │   └── README.md
-├── shared-modules/                 # Gemeinsame Module
+├── shared-modules/                 # Shared modules
 │   ├── AuthenticationModule.psm1
 │   ├── TeamsIntegrationModule.psm1
 │   └── README.md
-├── shared-config/                  # Konfigurationsdateien
+├── shared-config/                  # Configuration files
 │   ├── config-ultimate.json
 │   └── README.md
-├── docs/                          # Dokumentation
+├── docs/                           # Documentation
 │   └── IntuneDynamicDeviceGroupAutoCreator-UltimateEnterpriseEdition.md
-├── examples/                      # Verwendungsbeispiele
+├── examples/                       # Usage examples
 │   └── README.md
-└── README.md                      # Hauptdokumentation
+└── README.md                       # Main documentation
 ```
 
-## Voraussetzungen
+## Prerequisites
 
-- PowerShell 5.1 oder höher
+- PowerShell 5.1 or higher
 - Microsoft Graph PowerShell SDK
-- Azure AD-Berechtigungen:
+- Azure AD permissions:
   - `Group.ReadWrite.All`
   - `Device.Read.All`
   - `DeviceManagementManagedDevices.Read.All`
-- Microsoft Intune-Lizenz
+- Microsoft Intune licence
 
-## Schnellstart
+## Quick Start
 
-### 1. Konfiguration
+### 1. Configuration
 ```powershell
-# Konfigurationsdatei anpassen
+# Adjust configuration file
 notepad shared-config\config-ultimate.json
 ```
 
-### 2. Module importieren
+### 2. Import modules
 ```powershell
-# Authentifizierungsmodul
+# Authentication module
 Import-Module ".\shared-modules\AuthenticationModule.psm1" -Force
 
-# Teams-Integration (optional)
+# Teams integration (optional)
 Import-Module ".\shared-modules\TeamsIntegrationModule.psm1" -Force
 ```
 
-### 3. Script ausführen
+### 3. Run script
 ```powershell
-# Grundlegende Ausführung
+# Basic execution
 .\script1\Intune-DDG-AutoCreator-Ultimate.ps1
 
-# Mit Teams-Benachrichtigungen
+# With Teams notifications
 .\script1\Intune-DDG-AutoCreator-Ultimate.ps1 -TeamsWebhook "https://your-webhook-url"
 ```
 
-## Konfiguration
+## Configuration (config-ultimate.json)
 
-### config-ultimate.json
 ```json
 {
   "GroupSettings": {
@@ -105,7 +104,7 @@ Import-Module ".\shared-modules\TeamsIntegrationModule.psm1" -Force
       "Rule": "(device.deviceOSType -eq \"Windows\")"
     },
     {
-      "Name": "iOS Devices", 
+      "Name": "iOS Devices",
       "Rule": "(device.deviceOSType -eq \"iOS\")"
     }
   ],
@@ -116,135 +115,74 @@ Import-Module ".\shared-modules\TeamsIntegrationModule.psm1" -Force
 }
 ```
 
-## Verwendungsszenarien
+## Usage Scenarios
 
-### 1. Betriebssystem-basierte Gruppen
 ```powershell
-# Automatische Erstellung von OS-spezifischen Gruppen
+# OS-based groups
 .\script1\Intune-DDG-AutoCreator-Ultimate.ps1 -GroupType "OperatingSystem"
-```
 
-### 2. Abteilungs-basierte Gruppen
-```powershell
-# Gruppen basierend auf Abteilungszugehörigkeit
+# Department-based groups
 .\script1\Intune-DDG-AutoCreator-Ultimate.ps1 -GroupType "Department" -DepartmentList "IT,HR,Finance"
-```
 
-### 3. Compliance-basierte Gruppen
-```powershell
-# Gruppen für Compliance-Status
+# Compliance-based groups
 .\script1\Intune-DDG-AutoCreator-Ultimate.ps1 -GroupType "Compliance"
 ```
 
-## Erweiterte Funktionen
+## Authentication
 
-### Bulk-Operationen
-- Massenhafte Gruppenerstellung
-- Batch-Verarbeitung von Regeln
-- Parallele Ausführung für bessere Performance
-- Fortschrittsüberwachung
+### Supported Methods
 
-### Template-System
-- Vordefinierte Gruppenvorlagen
-- Anpassbare Regel-Templates
-- Wiederverwendbare Konfigurationen
-- Best-Practice-Implementierungen
+| Method | Use case |
+|--------|---------|
+| Interactive | Manual execution (browser-based) |
+| Service Principal | Automated execution / CI/CD |
+| Managed Identity | Azure-hosted environments |
+| Device Code | MFA-compatible, no browser required |
 
-### Monitoring und Reporting
-- Detaillierte Ausführungsprotokolle
-- Performance-Metriken
-- Fehlerberichterstattung
-- Trend-Analyse
-
-## Authentifizierung
-
-### Unterstützte Methoden
-1. **Interactive Authentication** (Empfohlen für manuelle Ausführung)
-2. **Service Principal** (Für automatisierte Ausführung)
-3. **Managed Identity** (Für Azure-gehostete Umgebungen)
-4. **Certificate-based Authentication** (Für höchste Sicherheit)
-
-### Beispiel: Service Principal
+### Example: Service Principal
 ```powershell
 $AuthParams = @{
-    TenantId = "your-tenant-id"
-    ClientId = "your-client-id"
+    TenantId     = "your-tenant-id"
+    ClientId     = "your-client-id"
     ClientSecret = "your-client-secret"
 }
-
 .\script1\Intune-DDG-AutoCreator-Ultimate.ps1 @AuthParams
 ```
 
-## Teams-Integration
+## Teams Integration Setup
 
-### Webhook-Setup
-1. Teams-Kanal öffnen
-2. Connectors konfigurieren
-3. Incoming Webhook hinzufügen
-4. Webhook-URL kopieren
+1. Open Teams channel
+2. Configure connectors
+3. Add Incoming Webhook
+4. Copy webhook URL
 
-### Benachrichtigungstypen
-- **Start-Benachrichtigungen**: Script-Ausführung beginnt
-- **Fortschritts-Updates**: Gruppenerstellungsstatus
-- **Erfolgs-Meldungen**: Erfolgreich erstellte Gruppen
-- **Fehler-Alerts**: Probleme und Fehlschläge
-- **Zusammenfassungen**: Vollständige Ausführungsberichte
-
-## Fehlerbehebung
-
-### Häufige Probleme
-1. **Authentifizierungsfehler**: Berechtigungen überprüfen
-2. **Gruppenerstellung fehlgeschlagen**: Regel-Syntax validieren
-3. **Teams-Benachrichtigungen funktionieren nicht**: Webhook-URL prüfen
-4. **Performance-Probleme**: Batch-Größe anpassen
-
-### Debug-Modus
 ```powershell
-.\script1\Intune-DDG-AutoCreator-Ultimate.ps1 -Debug -Verbose
+.\script1\Intune-DDG-AutoCreator-Ultimate.ps1 -TeamsWebhook "https://outlook.office.com/webhook/..."
 ```
 
-### Log-Analyse
+## Troubleshooting
+
 ```powershell
-# Aktuelle Logs anzeigen
+# Debug mode
+.\script1\Intune-DDG-AutoCreator-Ultimate.ps1 -Debug -Verbose
+
+# View latest logs
 Get-Content "C:\Logs\DDG-AutoCreator\latest.log" -Tail 50
 
-# Fehler suchen
+# Search for errors
 Select-String -Path "C:\Logs\DDG-AutoCreator\*.log" -Pattern "ERROR"
 ```
 
 ## Best Practices
 
-### 1. Regel-Design
-- Eindeutige und spezifische Regeln verwenden
-- Performance-optimierte Abfragen erstellen
-- Regel-Konflikte vermeiden
-- Regelmäßige Validierung durchführen
+1. **Rule design**: Use clear and specific rules; avoid conflicts; validate regularly
+2. **Security**: Use minimum required permissions; enable audit logging
+3. **Maintenance**: Keep modules updated; clean up orphaned groups; keep documentation current
 
-### 2. Sicherheit
-- Minimale erforderliche Berechtigungen verwenden
-- Sichere Credential-Speicherung implementieren
-- Audit-Logging aktivieren
-- Regelmäßige Sicherheitsüberprüfungen
-
-### 3. Wartung
-- Regelmäßige Updates der Module
-- Monitoring der Gruppenperformance
-- Bereinigung verwaister Gruppen
-- Dokumentation aktuell halten
-
-## Autor
+## Author
 
 Philipp Schmidt - Farpoint Technologies
 
 ## Version
 
 1.0 - Ultimate Enterprise Edition
-
-## Support
-
-Für technischen Support:
-1. Dokumentation in `docs/` überprüfen
-2. Debug-Modus aktivieren
-3. Log-Dateien analysieren
-4. Support-Team kontaktieren
-
