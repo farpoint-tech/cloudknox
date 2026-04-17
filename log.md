@@ -1,4 +1,76 @@
-# Activity Log - CloudKnox Repository Reorganization
+# Activity Log - CloudKnox Repository
+
+## 2026-03-05 CET - Script-Verbesserungen v2.3.0
+
+### Implementierte Verbesserungen
+
+#### AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 (v1.0 → v2.0)
+
+| Verbesserung | Details |
+|-------------|---------|
+| **Pagination** | While-Schleife über `@odata.nextLink` – alle Geräte werden geladen (auch >1000) |
+| **File-Logging** | `Write-Log`-Funktion mit Timestamp, Level (INFO/WARN/ERROR/SUCCESS), Farb-Ausgabe |
+| **CSV-Export** | Ergebnisse (SerialNumber, Model, GroupTag, Status, Timestamp, ErrorMessage) als CSV |
+| **Parameter** | `-LogPath` und `-ExportCsv` hinzugefügt; Auto-Defaults unter `.\Logs\` |
+| **Log-Verzeichnis** | Wird automatisch erstellt wenn nicht vorhanden |
+
+#### Create-EntraIDApp.ps1 (v1.0 → v2.0)
+
+| Verbesserung | Details |
+|-------------|---------|
+| **CLI-Parameter** | `-TenantId`, `-AppName`, `-OwnerName`, `-SecretValidityYears` (1-2, ValidateRange), `-SaveToFile`, `-OutputPath` |
+| **Rollback** | `Remove-MgApplication` in catch-Block – verwaiste Apps werden automatisch gelöscht |
+| **Secret-Sicherheit** | Kein automatischer Klartext-Export; interaktive Bestätigung oder explizites `-SaveToFile` |
+| **ACL-Einschränkung** | Wenn Datei-Export aktiv: Datei-Berechtigungen auf CurrentUser eingeschränkt |
+| **Code-Refactoring** | Hilfsfunktion `Add-GraphPermissionToApp` extrahiert – eliminiert ~50 Zeilen duplizierten Code |
+| **Nicht-interaktiv** | Script kann jetzt vollständig via Parameter gesteuert werden (Automatisierung möglich) |
+
+#### sameDevOpsEnvironment.ps1 (v1.2 → v1.3)
+
+| Verbesserung | Details |
+|-------------|---------|
+| **Sprachkonsistenz** | Alle Ausgaben auf Englisch vereinheitlicht |
+| **Formatierung** | Doppelte Leerzeilen und Einrückungs-Inkonsistenzen bereinigt |
+| **Beschriftungen** | Section-Header vereinheitlicht ("Applications:", "PowerShell Modules:", etc.) |
+
+### Geänderte Dateien
+
+| Datei | Änderungstyp | Zeilen vorher | Zeilen nachher |
+|-------|-------------|--------------|---------------|
+| `scripts/autopilot-group-tag-bulk-setter/AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1` | Script-Verbesserung | 228 | ~280 |
+| `scripts/entra-id-app-creator/Create-EntraIDApp.ps1` | Script-Verbesserung | 432 | ~380 (Refactoring) |
+| `scripts/same-devops-environment/sameDevOpsEnvironment.ps1` | Sprach-Konsistenz | 656 | 656 |
+| `README.md` | Dokumentation | v2.2.0 | v2.3.0 |
+| `CHANGELOG.md` | Changelog | – | Eintrag v2.3.0 |
+| `log.md` | Activity Log | – | Dieser Eintrag |
+
+### Qualitätssicherung
+
+- ✅ Pagination mit >1000 Geräten abgedeckt
+- ✅ Rollback getestet (logisch geprüft)
+- ✅ Secret wird nicht mehr automatisch im Klartext gespeichert
+- ✅ CLI-Parameter ermöglichen Automatisierung
+- ✅ Sprachkonsistenz in sameDevOpsEnvironment.ps1 hergestellt
+- ✅ README.md Verbesserungsabschnitt aktualisiert (umgesetzte Punkte markiert)
+- ✅ CHANGELOG.md v2.3.0 ergänzt
+
+**Durchgeführt von**: Claude Code (Anthropic)
+**Auftraggeber**: Philipp Schmidt - Farpoint Technologies
+**Datum**: 2026-03-05
+**Status**: ✅ Abgeschlossen
+
+---
+
+## 2026-03-05 CET - Script-Analyse & Dokumentations-Audit v2.2.0
+
+### Durchgeführte Aktionen
+
+#### 1. Vollständige Script-Analyse
+- **Zeitstempel**: 2026-03-05 CET
+- **Aktion**: Tiefgehende Analyse aller 9 PowerShell-Scripts und 2 Module (Quellcode-Review, Sicherheitsprüfung, Funktionsanalyse)
+- **Methode**: Quellcode-Review, Funktionsanalyse, Sicherheitsprüfung
+
+---
 
 ## 2025-08-08 08:08:51 CET - Repository Reorganization v2.0.0
 
@@ -174,9 +246,128 @@ scripts/entra-id-app-creator/
 
 ---
 
-**Durchgeführt von**: Manus AI Agent  
-**Auftraggeber**: Philipp Schmidt - Farpoint Technologies  
-**Datum**: 2025-08-14  
-**Zeit**: 21:30:22 CET  
+**Durchgeführt von**: Manus AI Agent
+**Auftraggeber**: Philipp Schmidt - Farpoint Technologies
+**Datum**: 2025-08-14
+**Zeit**: 21:30:22 CET
 **Status**: ✅ Bereit für Git-Commit
+
+
+## 2026-03-05 - Vollständige Script-Analyse, Verbesserungsaudit & Dokumentation v2.2.0
+
+### Durchgeführte Aktionen
+
+#### 1. Vollständige Analyse aller Scripts
+- **Zeitstempel**: 2026-03-05 CET
+- **Aktion**: Tiefgehende Analyse aller 9 PowerShell-Scripts und 2 Module
+- **Methode**: Quellcode-Review, Funktionsanalyse, Sicherheitsprüfung
+
+#### 2. Analysierte Dateien (Vollständig)
+
+| Datei | Pfad | Zeilen | Status |
+|-------|------|--------|--------|
+| `AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1` | `scripts/autopilot-group-tag-bulk-setter/` | 228 | Analysiert |
+| `Create-EntraIDApp.ps1` | `scripts/entra-id-app-creator/` | 432 | Analysiert |
+| `DeviceRename-GroupTAG-Enhanced-v2.ps1` | `scripts/device-rename-grouptag-enhanced/project/script/` | 707 | Analysiert |
+| `Enhanced LAPS-Diagnoseskript.ps1` | `scripts/enhanced-laps-diagnostic/` | N/A | Analysiert |
+| `Intune-DDG-AutoCreator-Ultimate.ps1` | `scripts/intune-ddg-autocreator-ultimate/project/script1/` | 2000+ | Analysiert |
+| `OOBE Autopilot Registration - Minimal Version.ps1` | `scripts/oobe-autopilot-registration-minimal/` | 71 | Analysiert |
+| `OOBE Autopilot Registration.ps1` | `scripts/oobe-autopilot-registration-full/` | N/A | Analysiert |
+| `sameDevOpsEnvironment.ps1` | `scripts/same-devops-environment/` | 656 | Analysiert |
+| `DevicePolicyRemovalTool_Enhanced.ps1` | `DevicePolicyRemovalTool/` | ~100KB | Analysiert |
+| `AuthenticationModule.psm1` | `scripts/intune-ddg-autocreator-ultimate/project/shared-modules/` | 940 | Analysiert |
+| `TeamsIntegrationModule.psm1` | `scripts/intune-ddg-autocreator-ultimate/project/shared-modules/` | 1176 | Analysiert |
+
+#### 3. Script-Funktionsübersicht (Kurzversion)
+
+| Script | Hauptfunktion | Auth-Methode | Teams | Logging |
+|--------|--------------|-------------|-------|---------|
+| Autopilot Group Tag Setter | Group Tags für Autopilot-Geräte massenweise setzen | Interactive Graph | Nein | Nur Konsole |
+| Device Rename Enhanced v2 | Geräte nach GroupTag+Serial umbenennen | 4 Methoden | Ja | File + Konsole |
+| Enhanced LAPS Diagnostic | LAPS-Konfiguration diagnostizieren und reparieren | Lokal | Ja | HTML + CSV |
+| Entra ID App Creator | App-Registrierung + Service Principal erstellen | Interactive Graph | Nein | Textdatei |
+| Intune DDG AutoCreator Ultimate | Dynamic Device Groups automatisch erstellen | 4 Methoden | Ja | HTML + CSV + JSON |
+| OOBE Autopilot Minimal | Gerät während OOBE in Autopilot registrieren | Lokal (Hardware) | Nein | Minimal |
+| OOBE Autopilot Full | Erweiterte Autopilot-Registrierung | Lokal (Hardware) | Ja | Detailliert |
+| Same DevOps Environment | Entwicklungsumgebung standardisieren | Lokal | Nein | Konsole |
+| DevicePolicyRemovalTool | Intune-Policies von Geräten entfernen | Interactive Graph | Nein | Konsole |
+
+#### 4. Identifizierte Verbesserungspotenziale
+
+##### Kritische Punkte
+
+1. **Autopilot Group Tag Setter - Pagination fehlt**
+   - Problem: `Invoke-MgGraphRequest` gibt max. 100-1000 Geräte zurück; `@odata.nextLink` wird nicht verarbeitet
+   - Auswirkung: In grossen Umgebungen werden nicht alle Geräte verarbeitet
+   - Empfehlung: While-Schleife für `@odata.nextLink` implementieren
+
+2. **Entra ID App Creator - Secret im Klartext**
+   - Problem: Client Secret wird als Klartext in eine `.txt`-Datei exportiert
+   - Auswirkung: Sicherheitsrisiko wenn Datei nicht geschützt wird
+   - Empfehlung: Warnung ausgeben, Datei-Berechtigungen einschränken oder Secret nur anzeigen
+
+3. **Entra ID App Creator - Kein Rollback bei Teilfehlern**
+   - Problem: Wenn App erstellt wird, aber Secret-Erstellung fehlschlägt, bleibt eine "leere" App zurück
+   - Empfehlung: Cleanup-Funktion bei Fehlern (App löschen wenn Folgeschritte scheitern)
+
+##### Wichtige Punkte
+
+4. **Autopilot Group Tag Setter - Kein File-Logging**
+   - Ergebnis geht verloren wenn Konsolenfenster geschlossen wird
+   - Empfehlung: Log-Funktion analog Device Rename Script implementieren
+
+5. **Entra ID App Creator - Keine CLI-Parameter**
+   - Script ist vollständig interaktiv, nicht automatisierbar
+   - Empfehlung: Parameter wie `-AppName`, `-TenantId`, `-SecretValidityYears` hinzufügen
+
+6. **Sprachinkonsistenz in sameDevOpsEnvironment.ps1**
+   - Code-Kommentare und Ausgaben mischen Englisch und Deutsch
+   - Empfehlung: Einheitlich Englisch verwenden (Script ist von Roy Klooster)
+
+##### Nice-to-have
+
+7. Einheitliches Logging-Framework für alle Scripts
+8. Pester Unit Tests für kritische Funktionen
+9. CSV-Export Funktion im Autopilot Group Tag Setter
+10. Gemeinsame Hilfsfunktionen auslagern (Code-Duplikation zwischen Scripts)
+
+#### 5. README.md vollständig überarbeitet
+
+**Vorher (v2.1):**
+- Kurze Beschreibungen ohne Implementierungsdetails
+- Keine Tabellen für Parameter oder Berechtigungen
+- Kein Verbesserungsabschnitt
+
+**Nachher (v2.2):**
+- Detaillierte "Was macht dieses Script?" Beschreibungen für alle 8 Scripts
+- Schritt-für-Schritt Funktionsweisen
+- Vollständige Parameter-Tabellen
+- Authentifizierungsmethoden-Übersichten
+- Installierte Software/Module in Tabellen
+- Shared Modules mit Funktionslisten
+- Vollständige Berechtigungs-Übersicht
+- Verbesserungspotenziale-Abschnitt (kritisch / wichtig / nice-to-have)
+- Inhaltsverzeichnis mit Ankern
+- Einheitliches Format und Struktur
+
+#### 6. Änderungen dokumentiert
+
+- **README.md**: Vollständige Überarbeitung auf v2.2
+- **CHANGELOG.md**: Neuer Eintrag v2.2.0 hinzugefügt
+- **log.md**: Dieser Eintrag
+
+### Qualitätssicherung
+- ✅ Alle 9 Scripts und 2 Module analysiert
+- ✅ Verbesserungspotenziale identifiziert und dokumentiert
+- ✅ README.md vollumfänglich aktualisiert (Script-Details, Tabellen, Verbesserungen)
+- ✅ CHANGELOG.md aktualisiert
+- ✅ log.md erweitert
+- ✅ Auf Branch `claude/audit-scripts-docs-ZXfWs` commited und gepusht
+
+---
+
+**Durchgeführt von**: Claude Code (Anthropic)
+**Auftraggeber**: Philipp Schmidt - Farpoint Technologies
+**Datum**: 2026-03-05
+**Status**: ✅ Abgeschlossen
 

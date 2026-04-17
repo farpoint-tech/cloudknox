@@ -7,6 +7,103 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-04-09 CET
+
+### Fixed / Improved
+- **Export-EnterpriseAppOwnerList.ps1**: Multiple fixes and improvements (v1.3)
+  - Auto path detection: `C:\Temp` on Windows, `~/Downloads` on macOS
+  - Export folder is created automatically if it doesn't exist
+  - Export path is displayed at the start of the run
+  - File opens automatically in Excel after export (`Start-Process`)
+  - Module checks: Microsoft.Graph and ImportExcel are installed automatically when missing
+  - Fixed: `ConditionalText` replaces `ConditionalFormattingIconSet` for proper "No Owner" highlighting
+
+### Changed
+- **Documentation language**: All documentation and script headers for the Enterprise Apps Owner Assignment package have been translated from German to English (folder README, root README section #9, all 4 script Comment-Based Help headers)
+
+## [2.4.0] - 2026-04-08 CET
+
+### Added
+- **Enterprise Apps Owner Assignment** – New script package for managing Enterprise App owners via Microsoft Graph API
+  - `Export-EnterpriseAppOwnerList.ps1` (Phase 1): Analyzes all Enterprise Apps in the tenant, shows tag/category overview, exports formatted Excel file for departments
+  - `Import-EnterpriseAppOwners.ps1` (Phase 2): Reads filled Excel back and assigns owners (with WhatIf/Apply mode)
+  - `Assign-OwnerByCategory.ps1` (Phase 3): Interactive owner assignment by category or globally
+  - `Assign-EnterpriseAppOwners.ps1` (Standalone): Assigns a default owner to all apps without an owner
+  - Comprehensive documentation (README.md) with workflow description, Excel structure, and troubleshooting
+
+### Updated
+- **README.md**: Table of contents, repository structure, and script documentation extended with Enterprise Apps Owner Assignment
+
+### Technical Details
+- **New Scripts**: 4 PowerShell scripts in `scripts/enterprise-apps-owner-assignment/`
+- **Required Modules**: Microsoft.Graph, ImportExcel
+- **Graph API Scopes**: Application.Read.All, Application.ReadWrite.All, Directory.Read.All, Directory.ReadWrite.All
+- **Branch**: claude/enterprise-apps-owner-assignment-YTrKR
+
+## [2.3.0] - 2026-03-05 CET
+
+### Fixed / Improved
+- **AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1**: Kritischer Bug behoben – Pagination fehlte, Geräte >1000 wurden nicht verarbeitet
+  - `@odata.nextLink` wird jetzt vollständig durchlaufen (alle Seiten)
+  - `Write-Log`-Funktion hinzugefügt: persistentes Log mit Timestamp, Level-Farben (INFO/WARN/ERROR/SUCCESS)
+  - CSV-Export der Ergebnisse (SerialNumber, Model, GroupTag, Status, Timestamp, ErrorMessage)
+  - Neue Parameter: `-LogPath` und `-ExportCsv` (mit Auto-Defaults unter `.\Logs\`)
+
+- **Create-EntraIDApp.ps1**: Mehrere kritische und wichtige Punkte behoben
+  - CLI-Parameter ergänzt: `-TenantId`, `-AppName`, `-OwnerName`, `-SecretValidityYears`, `-SaveToFile`, `-OutputPath`
+  - Rollback implementiert: bei Fehler nach App-Erstellung wird App automatisch via `Remove-MgApplication` gelöscht
+  - Secret-Sicherheit verbessert: kein automatischer Klartext-Export; nur mit expliziter Bestätigung oder `-SaveToFile`
+  - Datei-Berechtigungen eingeschränkt (ACL auf CurrentUser) wenn Datei-Export aktiv
+  - Hilfsfunktion `Add-GraphPermissionToApp` extrahiert – eliminiert duplizierten Code für Application/Delegated
+
+- **sameDevOpsEnvironment.ps1**: Sprachkonsistenz hergestellt
+  - Alle Ausgaben und Kommentare auf Englisch vereinheitlicht
+  - Formatierungs-Inkonsistenzen (doppelte Leerzeilen, Einrückungen) bereinigt
+
+### Updated
+- **README.md** auf v2.3.0 aktualisiert:
+  - Parameter-Tabellen für Autopilot Group Tag Setter und Entra ID App Creator hinzugefügt
+  - Rollback-Verhalten für Entra ID App Creator dokumentiert
+  - Verbesserungsabschnitt: umgesetzte Punkte als ✅ markiert, offene Punkte aktualisiert
+- **log.md**: Implementierungsdetails dokumentiert
+
+### Technical Details
+- **Geänderte Scripts**: 3 PS1-Dateien
+- **Branch**: claude/audit-scripts-docs-ZXfWs
+- **Autor**: Claude Code (Anthropic) / Philipp Schmidt - Farpoint Technologies
+
+## [2.2.0] - 2026-03-05 CET
+
+### Added
+- **Vollständige Script-Analyse**: Tiefgehende Analyse aller 9 Scripts und 2 Module (Quellcode-Review, Sicherheitsprüfung, Funktionsanalyse)
+- **Verbesserungspotenziale dokumentiert**: Kritische, wichtige und empfohlene Optimierungen identifiziert und dokumentiert
+
+### Changed
+- **README.md vollständig überarbeitet** (v2.1 → v2.2):
+  - Detaillierte Schritt-für-Schritt Funktionsbeschreibungen für alle 8 Scripts
+  - Vollständige Parameter-Tabellen mit Typ und Beschreibung
+  - Authentifizierungsmethoden-Übersichten pro Script
+  - Shared Modules vollständig dokumentiert (AuthenticationModule, TeamsIntegrationModule)
+  - Installierte Software/Module in übersichtlichen Tabellen
+  - Neuer Abschnitt "Verbesserungspotenziale" (Kritisch / Wichtig / Nice-to-have)
+  - Inhaltsverzeichnis mit Direktlinks
+  - Einheitliches Format und Tabellenstruktur durchgehend
+- **log.md erweitert**: Detaillierter Analyse-Eintrag mit Script-Übersichtstabelle und identifizierten Problemen
+
+### Identified Issues (zur Behebung in künftigen Versionen)
+- **Kritisch**: Pagination bei Autopilot Group Tag Setter fehlt (>1000 Geräte nicht abgedeckt)
+- **Kritisch**: Entra ID App Creator schreibt Client Secret im Klartext in Textdatei
+- **Kritisch**: Entra ID App Creator hat keinen Rollback bei Teilfehlern
+- **Wichtig**: Autopilot Group Tag Setter hat kein File-Logging
+- **Wichtig**: Entra ID App Creator ist nicht automatisierbar (keine CLI-Parameter)
+- **Wichtig**: sameDevOpsEnvironment.ps1 hat gemischte Sprache (EN/DE)
+
+### Technical Details
+- **Analysierte Scripts**: 9 PS1-Dateien, 2 PSM1-Module
+- **Codezeilen analysiert**: ~7.500+ Zeilen
+- **Branch**: claude/audit-scripts-docs-ZXfWs
+- **Autor**: Claude Code (Anthropic) / Philipp Schmidt - Farpoint Technologies
+
 ## [2.0.0] - 2025-08-08 08:08:51 CET
 
 ### Added
