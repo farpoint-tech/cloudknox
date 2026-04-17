@@ -50,6 +50,23 @@ Dieses Repository enthält eine umfassende Sammlung von PowerShell-Scripts für 
 
 ```
 cloudknox/
+├── scripts/
+│   │
+│   ├── [Windows / Intune Scripts]
+│   ├── autopilot-group-tag-bulk-setter/       # Massenhafte Group Tag-Zuweisung
+│   ├── device-rename-grouptag-enhanced/       # Erweiterte Geräteumbenennung
+│   ├── enhanced-laps-diagnostic/              # LAPS-Diagnoseskript
+│   ├── entra-id-app-creator/                  # Entra ID App-Registrierung
+│   ├── intune-ddg-autocreator-ultimate/       # Dynamic Device Groups
+│   ├── oobe-autopilot-registration-minimal/   # OOBE Autopilot (Minimal)
+│   ├── oobe-autopilot-registration-full/      # OOBE Autopilot (Vollversion)
+│   ├── same-devops-environment/               # DevOps-Umgebungs-Standardisierung
+│   │
+│   └── [macOS Scripts]
+│       └── cis-edge-benchmark-macos/          # CIS Edge Benchmark v4.0.0 (macOS)
+│
+├── README.md                                  # Diese Datei
+└── CHANGELOG.md                               # Änderungsprotokoll
 ├── scripts/                                        # Alle PowerShell-Scripts
 │   ├── autopilot-group-tag-bulk-setter/            # Massenhafte Group Tag-Zuweisung
 │   │   ├── AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1
@@ -553,6 +570,49 @@ Provisioniert Shared Mailboxes und Verteilergruppen (Distribution Groups) in Exc
 - `ExchangeOnlineManagement`
 - `ImportExcel`
 
+---
+
+## 🍎 macOS Scripts
+
+> Scripts und Module für den Einsatz auf macOS mit **PowerShell Core 7+**.
+> Diese Scripts verwenden macOS-native APIs statt Windows-spezifischer Mechanismen (Registry, WMI etc.).
+
+### 9. CIS Microsoft Edge Benchmark v4.0.0 (macOS)
+**Pfad:** `scripts/cis-edge-benchmark-macos/`
+**Dokumentation:** [`scripts/cis-edge-benchmark-macos/README.md`](scripts/cis-edge-benchmark-macos/README.md)
+
+Vollständiger macOS-Port des CIS Microsoft Edge Benchmark v4.0.0 Audit- und Enforcement-Tools.
+Prüft und konfiguriert 128 Edge-Security-Policies über das macOS `defaults`-System (Plist-Dateien) anstatt der Windows-Registry.
+
+**Voraussetzungen:**
+- macOS 12 Monterey oder neuer
+- PowerShell Core 7.0+ (`brew install --cask powershell`)
+- Audit: normaler User · Enforcement: `sudo`
+
+**Hauptfunktionen:**
+- 128 CIS-Checks (90 Level 1 + 38 Level 2)
+- Liest MDM-verwaltete Policies (Jamf / Intune) sowie System-Preferences
+- Interaktives HTML-Dashboard mit Charts, Filterung, CSV-Export
+- Enforcement per `defaults write` mit Bestätigungs-Prompt und Dry-Run-Modus
+- Farbige Konsolenausgabe (PASS / FAIL / NOT CONFIGURED / REVIEW)
+- JSON-Ergebnisexport und Enforcement-Log
+
+**Schnellstart:**
+```bash
+# Audit (kein sudo nötig)
+cd scripts/cis-edge-benchmark-macos
+pwsh -Command "Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeAudit"
+
+# Enforcement (sudo erforderlich)
+sudo pwsh -Command "Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeEnforce -OnlyFailed"
+
+# Nur Vorschau ohne Änderungen
+pwsh -Command "Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeEnforce -DryRun"
+```
+
+---
+
+## 🔧 Allgemeine Voraussetzungen
 #### Benötigte Berechtigungen
 
 - Exchange Administrator oder Global Administrator
