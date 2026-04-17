@@ -2,7 +2,7 @@
 
 **Farpoint Technologies - Microsoft Intune & Azure AD Management Scripts**
 
-> Letzte Aktualisierung: 2026-03-05 | Version: 2.3.0
+> Letzte Aktualisierung: 2026-04-09 | Version: 2.4.1
 
 ---
 
@@ -90,6 +90,11 @@ cloudknox/
 │   └── exchange-mailbox-provisioner/                # Exchange Mailbox & DL-Provisioning
 │       ├── Provisioning.ps1
 │       ├── config.json
+│   └── enterprise-apps-owner-assignment/            # Enterprise App Owner-Verwaltung
+│       ├── Export-EnterpriseAppOwnerList.ps1
+│       ├── Import-EnterpriseAppOwners.ps1
+│       ├── Assign-OwnerByCategory.ps1
+│       ├── Assign-EnterpriseAppOwners.ps1
 │       └── README.md
 ├── DevicePolicyRemovalTool/                        # Policy-Entfernungs-Tool
 │   ├── DevicePolicyRemovalTool_Enhanced.ps1
@@ -561,6 +566,58 @@ Provisioniert Shared Mailboxes und Verteilergruppen (Distribution Groups) in Exc
 - **Zwei Authentifizierungsmodi** - Interaktiver Web-Login oder App-Registrierung mit Zertifikat
 - **Fehlertoleranz** - Einzelne fehlerhafte Zeilen unterbrechen nicht die gesamte Verarbeitung
 - **CSV-Ergebnisbericht** - Vollständiger Export aller verarbeiteten Zeilen
+### 9. Enterprise Apps Owner Assignment
+
+**Path:** `scripts/enterprise-apps-owner-assignment/`
+**Version:** 1.3 (Export) / 1.0 (others) | **Author:** Farpoint Technologies
+**Language:** English
+**Scripts:** 4 (Export, Import, Interactive, Standalone)
+
+#### What does this script package do?
+
+Comprehensive solution for analyzing and assigning owners to Enterprise Applications (Service Principals) in Azure Entra ID. The workflow is divided into 3 phases, complemented by a standalone script for simple bulk assignments. Cross-platform compatible (Windows / macOS).
+
+#### How it works (3-phase workflow)
+
+1. **Phase 1 – Analysis & Export** (`Export-EnterpriseAppOwnerList.ps1`): Reads all Enterprise Apps, analyzes tags/categories, shows an overview and exports a formatted Excel file for the departments. Auto path detection (`C:\Temp` on Windows, `~/Downloads` on macOS), automatic module installation, file opens automatically after export.
+2. **Phase 2 – Import & Assignment** (`Import-EnterpriseAppOwners.ps1`): Reads the Excel file filled in by departments and assigns the entered owners (with dry-run mode).
+3. **Phase 3 – Interactive** (`Assign-OwnerByCategory.ps1`): IT assigns owners directly by category or globally.
+4. **Standalone** (`Assign-EnterpriseAppOwners.ps1`): Assigns a configured default owner to all apps without an owner.
+
+#### Usage examples
+
+```powershell
+# Phase 1: Export (auto path: C:\Temp or ~/Downloads)
+.\Export-EnterpriseAppOwnerList.ps1
+
+# Phase 2: Import (dry-run)
+.\Import-EnterpriseAppOwners.ps1 -ExcelPath "C:\Temp\EnterpriseApp_OwnerAssignment_20260408.xlsx"
+
+# Phase 2: Import (live)
+.\Import-EnterpriseAppOwners.ps1 -ExcelPath "C:\Temp\EnterpriseApp_OwnerAssignment_20260408.xlsx" -Mode Apply
+
+# Phase 3: Interactive category assignment
+.\Assign-OwnerByCategory.ps1
+
+# Standalone: Assign default owner
+.\Assign-EnterpriseAppOwners.ps1
+```
+
+#### Required permissions
+
+| Permission | Phase 1 | Phase 2/3 | Standalone |
+|-----------|---------|-----------|------------|
+| Application.Read.All | Yes | – | Yes |
+| Application.ReadWrite.All | – | Yes | – |
+| Directory.Read.All | Yes | – | – |
+| Directory.ReadWrite.All | – | Yes | Yes |
+
+#### Required modules
+
+- `Microsoft.Graph` – Microsoft Graph PowerShell SDK
+- `ImportExcel` – Excel export/import without Office (Phase 1 & 2 only)
+
+> The Export script installs missing modules automatically on first run.
 
 ---
 
