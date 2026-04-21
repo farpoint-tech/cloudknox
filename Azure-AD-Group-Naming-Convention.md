@@ -1,6 +1,6 @@
 # Konzept zur Benennungslogik für Microsoft Entra ID Gruppen und Benutzerkonten
 
-**Version:** 4.0
+**Version:** 4.1
 **Organisation:** 365solution AG
 **Status:** Arbeitsstand / Entwurf
 
@@ -207,12 +207,16 @@ Neben Gruppen folgt auch die Benennung von Benutzerkonten einer erkennbaren Logi
 
 **Best Practice:** Der User Principal Name (UPN) und die primäre SMTP-Adresse werden konsequent in Kleinbuchstaben (lowercase) geschrieben.
 
+*Abgrenzung: Dieses Konzept definiert ausschließlich die Namensgebung der Kontotypen. Operative Fragen — etwa welche Authentifizierungsmethoden ein Kontotyp nutzt, welche Conditional Access Policies greifen, wer Owner ist oder wie der Lebenszyklus gesteuert wird — werden in separaten Governance- und Betriebskonzepten behandelt (siehe Kapitel 16).*
+
 ---
 
 ## 11. Break-Glass und Sonderfälle
 
 - **Break-Glass Konten:** Sollen keinen sprechenden Namen tragen (z.B. auf Basis einer Seriennummer wie `28491837@365solution.de`).
+  *Abgrenzung: Die Aufbewahrung der Zugangsdaten, das Monitoring von Break-Glass-Logins und die Prozesse zur Nutzung im Notfall sind Bestandteil eines separaten Break-Glass-Betriebskonzepts.*
 - **Kiosk-Szenarien:** Kein dediziertes Benutzerkonto (`kiosk.x`), stattdessen ein Gerätekontext wie `BASE_MDM-WIEN-WIN-DEF`.
+  *Abgrenzung: Die Konfiguration des Kiosk-Profils, der Autopilot-Modus und die Geräterichtlinien sind Bestandteil des MDM-/Intune-Konzepts.*
 
 ---
 
@@ -220,9 +224,11 @@ Neben Gruppen folgt auch die Benennung von Benutzerkonten einer erkennbaren Logi
 
 Nicht mehr genutzte Gruppen erhalten das Präfix `ARCHIVE-` (z.B. `ARCHIVE-BASE_IAM-DE-HRx-DEF`) und werden nach einer Karenzzeit gelöscht. Für Gruppen im Bereich 365 wird der Lebenszyklus perspektivisch durch automatisierte Expiration Policies unterstützt.
 
+*Abgrenzung: Die konkreten Karenzzeiten, Review-Zyklen, Expiration-Policy-Konfigurationen und Verantwortlichkeiten im Lifecycle-Prozess sind Bestandteil eines separaten Governance-Konzepts.*
+
 ---
 
-## 13. Optionaler Vorschlag: Gruppentyp-Kennzeichnung nach dem Geo-Bereich
+## 15. Optionaler Vorschlag: Gruppentyp-Kennzeichnung nach dem Geo-Bereich
 
 ⚠️ *Dieser Abschnitt ist ein Vorschlag und kein Bestandteil des aktuellen Entwurfs.*
 Bei Bedarf kann nach dem Geo-Segment eine Kennzeichnung des technischen Gruppentyps eingefügt werden:
@@ -232,7 +238,21 @@ Beispiel: `BASE_IAM-DE-SEC-HRx-DEF`
 
 ---
 
-## 14. Offene Fragestellungen und Abgrenzung zur Governance
+## 14. Einordnung als Zielbild und nicht als starre Vorschrift
+
+Dieses Dokument versteht sich bewusst als Konzept- und Entwurfspapier. Es beschreibt die angestrebte Benennungslogik, die gewünschte Leserichtung und die fachliche Strukturidee.
+
+Es geht dabei weniger um eine unmittelbare, lückenlose Verpflichtung jedes Einzelobjekts, sondern um ein gemeinsames Modell, an dem sich künftige Strukturen ausrichten sollen.
+
+Das Konzept schafft damit:
+- Ein gemeinsames Verständnis
+- Ein lesbares Zielbild
+- Eine Grundlage für spätere Standardisierung
+- Eine bessere Orientierung für Migration und Weiterentwicklung
+
+---
+
+## 16. Offene Fragestellungen und Abgrenzung zur Governance
 
 Dieses Naming-Konzept definiert, wie Objekte heißen. Die folgenden Fragestellungen gehen über die reine Benennung hinaus und müssen in separaten Konzepten adressiert werden:
 
@@ -250,11 +270,80 @@ Dieses Naming-Konzept definiert, wie Objekte heißen. Die folgenden Fragestellun
 | Wie werden Berechtigungen zugewiesen? | | ✅ |
 | Welche Expiration Policies gelten? | | ✅ |
 
-*(Die detaillierten offenen Fragen nach Kontotyp und Systembereich aus V3.9 sind in die operativen Konzepte überführt worden.)*
+### 16.2 Offene Fragen nach Kontotyp
+
+**Service Accounts (`srv.`)**
+- Gibt es eine Struktur nach dem Präfix? (z.B. `srv.appname@…` vs. `srv.system.funktion@…`)
+- Wann wird ein `srv.`-Konto (User-basiert) genutzt vs. eine App Registration oder Managed Identity (ohne UPN)?
+- Wie werden Authentifizierungsmethoden gesteuert (Client Secret, Certificate, Managed Identity)?
+- Welche Conditional Access Policies greifen für Service Accounts?
+- Wer ist verantwortlicher Owner und wie wird Secret-/Zertifikats-Rotation sichergestellt?
+
+**Admin Accounts (`adm.`)**
+- Wie wird die Trennung zwischen Standard- und Admin-Konto operativ durchgesetzt?
+- Ist PIM für alle `adm.`-Konten verpflichtend?
+- Welche Conditional Access Policies greifen spezifisch für Admin-Konten?
+- Wie wird der Zugang bei Offboarding zeitnah entzogen?
+
+**External Accounts (`ext.`)**
+- Wie werden externe Member provisioniert und wer genehmigt den Zugang?
+- Welche Access Reviews greifen für externe Konten?
+- Gibt es automatisierte Expiration oder regelmäßige Rezertifizierung?
+- Wie unterscheidet sich `ext.` (Member) von B2B Guest Accounts?
+
+**Agent Accounts (`agt.`)**
+- Welche Berechtigungen erhalten AI Agents / Copilot Automations?
+- Wie wird der Zugriff überwacht und eingeschränkt?
+- Wer ist verantwortlicher Owner eines Agent-Kontos?
+
+**Resource Accounts (`res.`)**
+- Wie werden Raum- und Equipment-Konten verwaltet?
+- Welche Policies gelten für Resource Accounts in Teams/Exchange?
+
+**Shared Mailboxes (`smb.`)**
+- Wie wird der Zugriff auf Shared Mailboxes gesteuert und auditiert?
+- Gibt es Naming-Regeln für die zugehörigen Berechtigungsgruppen?
+
+**Break-Glass Konten**
+- Wo werden die Zugangsdaten aufbewahrt?
+- Wie wird die Nutzung überwacht (Monitoring / Alerting)?
+- Welcher Prozess gilt für den Einsatz im Notfall?
+
+### 16.3 Offene Fragen nach Systembereich
+
+**IAM — Identity & Access Management**
+- Wie werden Dynamic Membership Rules konfiguriert und validiert?
+- Welche User-Attribute müssen in Entra ID gepflegt sein, damit die Gruppenlogik funktioniert?
+- Wie wird PIM operativ eingesetzt (Eligible vs. Active, Approval Workflows)?
+
+**MDM — Mobile Device Management**
+- Welche Intune-Profile und Compliance Policies werden welchen Gruppen zugewiesen?
+- Wie werden Autopilot-Szenarien (User-Driven, Self-Deploying, Pre-Provisioning) abgebildet?
+- Wie werden Plattform-spezifische Konfigurationen gesteuert?
+
+**365 — Microsoft 365 Services**
+- Wie wird die Lizenzzuweisung über Gruppen gesteuert?
+- Welche Teams/SharePoint-Governance gilt (Erstellung, Archivierung, Gastzugang)?
+- Wie werden Shared Mailboxes und Verteilergruppen operativ verwaltet?
+
+### 16.4 Übergreifende Governance-Fragen
+
+- **Conditional Access:** Welche Policies greifen für welche Kontotypen und Gruppen?
+- **Lifecycle Management:** Wie werden Gruppen und Konten erstellt, reviewed und dekommissioniert?
+- **Ownership:** Wer ist für welche Gruppen und Konten verantwortlich?
+- **Monitoring & Auditierung:** Wie werden Änderungen an Gruppen und Konten nachvollzogen?
+- **Migration:** Wie werden bestehende Objekte in die neue Konvention überführt?
+- **Automatisierung:** Welche Prozesse (PowerShell, Graph API, Logic Apps) unterstützen die Konvention?
+- **Ausnahmemanagement:** Wer entscheidet über Abweichungen von der Konvention?
 
 ---
 
-**Version:** 4.0 | **Autor:** IAM Team — 365solution AG
+**Version:** 4.1 | **Autor:** IAM Team — 365solution AG
+
+**Änderungen (4.0 → 4.1)**
+- Reintegration von Kapitel 14 (Einordnung als Zielbild)
+- Vollständige Reintegration der detaillierten Governance-Fragen in Kapitel 16
+- Ergänzung der Abgrenzungshinweise in den Kapiteln 10, 11 und 12
 
 **Änderungen (3.9 → 4.0)**
 - Integration des Plattform-Tags als Pflichtfeld im MDM-Context (Kapitel 6)
