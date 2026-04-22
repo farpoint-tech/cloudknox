@@ -1,286 +1,175 @@
 # Entra ID App Creator
 
-## Beschreibung
+## Description
 
-Automatisierte PowerShell-Lösung für die Erstellung von App-Registrierungen und Enterprise Apps in Microsoft Entra ID (ehemals Azure AD). Dieses Script vereinfacht den komplexen Prozess der App-Erstellung und konfiguriert automatisch API-Berechtigungen, Client Secrets und Service Principals.
+Automated PowerShell solution for creating app registrations and enterprise apps in Microsoft Entra ID (formerly Azure AD). This script simplifies the complex process of app creation, automatically configures API permissions, client secrets and service principals. Supports both interactive and fully automated (non-interactive) execution via CLI parameters.
 
-## Hauptfunktionen
+## Features
 
-### 🚀 Vollautomatische App-Erstellung
-- **App-Registrierung**: Automatische Erstellung neuer App-Registrierungen
-- **Enterprise App**: Automatische Erstellung des zugehörigen Service Principals
-- **Client Secret**: Generierung sicherer Client Secrets mit konfigurierbarer Gültigkeit
-- **API-Berechtigungen**: Interaktive Konfiguration von Microsoft Graph-Berechtigungen
+### Automated App Creation
+- **App registration**: Automatic creation of new app registrations
+- **Enterprise app**: Automatic creation of the associated service principal
+- **Client secret**: Generation of secure client secrets with configurable validity (1–2 years)
+- **API permissions**: Interactive configuration of Microsoft Graph permissions
 
-### 🔐 Umfassende Authentifizierungsunterstützung
-- **Service Principal Authentication**: Vollständige Konfiguration für automatisierte Authentifizierung
-- **Multiple Auth-Methoden**: Unterstützung für Azure CLI, PowerShell und REST API
-- **Sichere Credential-Verwaltung**: Automatische Generierung und sichere Anzeige von Secrets
-- **Tenant-spezifische Konfiguration**: Flexible Tenant-Auswahl und -Konfiguration
+### CLI Parameters & Automation
+- **Fully parameterised**: Can be run non-interactively for CI/CD pipelines
+- **Parameters**: `-TenantId`, `-AppName`, `-OwnerName`, `-SecretValidityYears`, `-SaveToFile`, `-OutputPath`
 
-### 📊 Interaktive Benutzerführung
-- **Schritt-für-Schritt-Anleitung**: Benutzerfreundliche interaktive Eingabeaufforderungen
-- **Vordefinierte Berechtigungen**: Auswahl aus häufig verwendeten Microsoft Graph-Berechtigungen
-- **Benutzerdefinierte Berechtigungen**: Möglichkeit zur Eingabe spezifischer API-Berechtigungen
-- **Validierung und Fehlerbehandlung**: Umfassende Überprüfung und Fehlerbehandlung
+### Security
+- **No automatic plaintext export**: Client secret is only displayed in the console
+- **File export requires explicit confirmation**: `-SaveToFile` flag or interactive approval required
+- **ACL restriction**: If file export is enabled, file permissions are restricted to the current user
+- **Rollback on failure**: If a step fails after app creation, the app is automatically deleted
 
-### 🔔 Detaillierte Ausgabe und Dokumentation
-- **Kopierbare Ergebnisse**: Strukturierte Ausgabe aller wichtigen Informationen
-- **Authentifizierungsbeispiele**: Fertige Code-Beispiele für verschiedene Plattformen
-- **Troubleshooting-Hinweise**: Hilfestellungen bei häufigen Problemen
-- **Sicherheitshinweise**: Wichtige Informationen zur sicheren Verwendung
+### Output & Documentation
+- **Copy-ready results**: Structured output of all important information
+- **Authentication examples**: Ready-to-use code examples for Azure CLI, PowerShell and Microsoft Graph
+- **Troubleshooting hints**: Guidance for common issues
 
-## Voraussetzungen
+## Prerequisites
 
-### PowerShell und Module
-- PowerShell 5.1 oder höher
-- Microsoft Graph PowerShell SDK (wird automatisch installiert)
-- Internetverbindung zu Microsoft Entra ID
+### PowerShell and Modules
+- PowerShell 5.1 or higher
+- Microsoft Graph PowerShell SDK (installed automatically if missing)
+- Internet connection to Microsoft Entra ID
 
-### Berechtigungen
-- **Global Administrator** oder **Application Administrator** in Entra ID
-- Berechtigung zur Erstellung von App-Registrierungen
-- Berechtigung zur Verwaltung von Enterprise Apps
+### Permissions
+- **Global Administrator** or **Application Administrator** in Entra ID
+- Permission to create app registrations
+- Permission to manage enterprise apps
 
-### Erforderliche Graph-Berechtigungen
+### Required Graph Permissions
 - `Application.ReadWrite.All`
 - `Directory.ReadWrite.All`
 
-## Verwendung
+## Parameters
 
-### Grundlegende Ausführung
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `-TenantId` | String | Tenant ID or tenant name (e.g. contoso.onmicrosoft.com) | Interactive prompt |
+| `-AppName` | String | Name of the app registration | Interactive prompt |
+| `-OwnerName` | String | Owner name (stored in app notes) | `$env:USERNAME` |
+| `-SecretValidityYears` | Int (1–2) | Client secret validity in years | `1` |
+| `-SaveToFile` | Switch | Export app details incl. secret to a file | No |
+| `-OutputPath` | String | Output directory for file export | `.` (current directory) |
+
+## Usage
+
 ```powershell
-# Script ausführen
+# Fully interactive mode
 .\Create-EntraIDApp.ps1
 
-# Das Script führt Sie durch folgende Schritte:
-# 1. Tenant-ID eingeben
-# 2. Anmeldung mit Administrator-Account
-# 3. App-Details konfigurieren
-# 4. API-Berechtigungen auswählen (optional)
-# 5. Automatische Erstellung und Konfiguration
+# Non-interactive with parameters
+.\Create-EntraIDApp.ps1 -TenantId "contoso.onmicrosoft.com" -AppName "MyTool" -SecretValidityYears 2
+
+# With file export
+.\Create-EntraIDApp.ps1 -TenantId "contoso.onmicrosoft.com" -AppName "MyTool" -SaveToFile -OutputPath "C:\Secrets"
 ```
 
-### Interaktive Konfiguration
+## Supported API Permissions
 
-#### 1. Tenant-Auswahl
+### Predefined Microsoft Graph Permissions
+
+| # | Permission | Type | Description |
+|---|-----------|------|-------------|
+| 1 | User.Read | Delegated | Read user profile |
+| 2 | User.ReadBasic.All | Delegated | Read basic profiles of all users |
+| 3 | User.Read.All | Application | Read all user profiles |
+| 4 | Directory.Read.All | Application | Read directory data |
+| 5 | Directory.ReadWrite.All | Application | Read and write directory data |
+| 6 | Group.Read.All | Application | Read all group profiles |
+| 7 | Group.ReadWrite.All | Application | Read and write group profiles |
+| 8 | Mail.Read | Application | Read emails |
+| 9 | Mail.Send | Application | Send emails |
+| 10 | Sites.Read.All | Application | Read all SharePoint site collections |
+| 11 | Sites.ReadWrite.All | Application | Read and write all SharePoint site collections |
+| 12 | Custom | Any | Enter custom API ID and permission name |
+
+## Output Example
+
 ```
-Bitte geben Sie die Tenant-ID oder den Tenant-Namen ein (z.B. contoso.onmicrosoft.com)
-```
-
-#### 2. App-Details
-```
-Name der App: MyAutomationApp
-Name des Autors/Owners: John Doe
-Gültigkeitsdauer des Client Secrets in Jahren [Standard: 1]: 2
-```
-
-#### 3. API-Berechtigungen (Optional)
-```
-Möchten Sie API-Berechtigungen für die App konfigurieren? (J/N) [Standard: N]: J
-
-Häufig verwendete Microsoft Graph Berechtigungen:
-1. User.Read - Lesen des Benutzerprofils
-2. User.ReadBasic.All - Lesen grundlegender Profile aller Benutzer
-3. User.Read.All - Lesen aller Benutzerprofile
-4. Directory.Read.All - Lesen von Verzeichnisdaten
-5. Directory.ReadWrite.All - Lesen und Schreiben von Verzeichnisdaten
-...
-```
-
-## Unterstützte API-Berechtigungen
-
-### Vordefinierte Microsoft Graph-Berechtigungen
-
-#### Benutzer-Berechtigungen
-- **User.Read** (Delegated) - Lesen des Benutzerprofils
-- **User.ReadBasic.All** (Delegated) - Lesen grundlegender Profile aller Benutzer
-- **User.Read.All** (Application) - Lesen aller Benutzerprofile
-
-#### Verzeichnis-Berechtigungen
-- **Directory.Read.All** (Application) - Lesen von Verzeichnisdaten
-- **Directory.ReadWrite.All** (Application) - Lesen und Schreiben von Verzeichnisdaten
-
-#### Gruppen-Berechtigungen
-- **Group.Read.All** (Application) - Lesen aller Gruppenprofile
-- **Group.ReadWrite.All** (Application) - Lesen und Schreiben von Gruppenprofilen
-
-#### E-Mail-Berechtigungen
-- **Mail.Read** (Application) - Lesen von E-Mails
-- **Mail.Send** (Application) - Senden von E-Mails
-
-#### SharePoint-Berechtigungen
-- **Sites.Read.All** (Application) - Lesen aller SharePoint-Websitesammlungen
-- **Sites.ReadWrite.All** (Application) - Lesen und Schreiben aller SharePoint-Websitesammlungen
-
-### Benutzerdefinierte Berechtigungen
-Das Script unterstützt auch die Eingabe benutzerdefinierter API-Berechtigungen:
-- Beliebige API-ID
-- Spezifische Berechtigungsnamen
-- Delegated oder Application-Typ
-
-## Ausgabe und Ergebnisse
-
-### Strukturierte Ergebnisanzeige
-```
-=== App-Registrierung ===
-Name: MyAutomationApp
+=== App Registration ===
+Name:           MyTool
 App (Client) ID: 12345678-1234-1234-1234-123456789012
-Object ID: 87654321-4321-4321-4321-210987654321
+Object ID:      87654321-4321-4321-4321-210987654321
 
 === Client Secret ===
-Wert: abcdef123456789...
-Gültig bis: 14.08.2027 21:30:22
+Value:          abcdef123456789...
+Valid until:    05.03.2027
 
 === Enterprise App ===
-Name: MyAutomationApp
-Object ID: 11111111-2222-3333-4444-555555555555
+Name:           MyTool
+Object ID:      11111111-2222-3333-4444-555555555555
 
 === Tenant Information ===
-Tenant ID: 99999999-8888-7777-6666-555555555555
-Tenant Name: contoso.onmicrosoft.com
+Tenant ID:      99999999-8888-7777-6666-555555555555
+Tenant Name:    contoso.onmicrosoft.com
 ```
 
-### Authentifizierungsbeispiele
+## Authentication Examples
 
-#### Azure CLI
+### Azure CLI
 ```bash
-az login --service-principal -u 12345678-1234-1234-1234-123456789012 -p "abcdef123456789..." --tenant 99999999-8888-7777-6666-555555555555
+az login --service-principal -u <ClientId> -p "<Secret>" --tenant <TenantId>
 ```
 
-#### PowerShell
+### PowerShell
 ```powershell
-$credential = New-Object System.Management.Automation.PSCredential("12345678-1234-1234-1234-123456789012", (ConvertTo-SecureString "abcdef123456789..." -AsPlainText -Force))
-Connect-AzAccount -ServicePrincipal -Credential $credential -Tenant "99999999-8888-7777-6666-555555555555"
+$credential = New-Object System.Management.Automation.PSCredential("<ClientId>", `
+    (ConvertTo-SecureString "<Secret>" -AsPlainText -Force))
+Connect-AzAccount -ServicePrincipal -Credential $credential -Tenant "<TenantId>"
 ```
 
-#### Microsoft Graph PowerShell
+### Microsoft Graph PowerShell
 ```powershell
-$clientSecret = ConvertTo-SecureString "abcdef123456789..." -AsPlainText -Force
-$credential = New-Object System.Management.Automation.PSCredential("12345678-1234-1234-1234-123456789012", $clientSecret)
-Connect-MgGraph -ClientSecretCredential $credential -TenantId "99999999-8888-7777-6666-555555555555"
+$credential = New-Object System.Management.Automation.PSCredential("<ClientId>", `
+    (ConvertTo-SecureString "<Secret>" -AsPlainText -Force))
+Connect-MgGraph -ClientSecretCredential $credential -TenantId "<TenantId>"
 ```
 
-## Sicherheitshinweise
+## Rollback Behaviour
 
-### Client Secret-Verwaltung
-- **Einmalige Anzeige**: Client Secrets werden nur einmal angezeigt
-- **Sichere Speicherung**: Secrets sollten in sicheren Credential-Stores gespeichert werden
-- **Regelmäßige Rotation**: Secrets sollten regelmäßig erneuert werden
-- **Minimale Berechtigungen**: Nur erforderliche API-Berechtigungen zuweisen
+If any step fails **after** the app registration has been created (e.g. secret creation or service principal creation fails), the script automatically deletes the app registration via `Remove-MgApplication` to prevent orphaned entries.
 
-### Best Practices
-- **Prinzip der minimalen Berechtigung**: Nur notwendige Berechtigungen vergeben
-- **Monitoring**: App-Nutzung regelmäßig überwachen
-- **Dokumentation**: App-Zweck und -Verwendung dokumentieren
-- **Lifecycle-Management**: Nicht mehr verwendete Apps regelmäßig entfernen
+## Security Notes
 
-## Fehlerbehebung
+- Client secrets can only be viewed once – note the value immediately
+- Store secrets securely (Azure Key Vault, password manager)
+- Rotate secrets regularly (recommended: max. 1 year validity)
+- Assign only the minimum required permissions
+- Monitor app usage regularly and remove unused apps
 
-### Häufige Probleme
+## Troubleshooting
 
-#### 1. Anmeldungsfehler
+### Authentication error
 ```
-Fehler bei der Anmeldung: Insufficient privileges to complete the operation
+Error during login: Insufficient privileges to complete the operation
 ```
-**Lösung**: Stellen Sie sicher, dass Sie Global Administrator oder Application Administrator-Rechte haben.
+**Solution**: Ensure you have Global Administrator or Application Administrator rights.
 
-#### 2. Modul-Installation fehlgeschlagen
+### Module installation failed
 ```
-Microsoft Graph PowerShell Modul wird installiert...
 Install-Module: Access denied
 ```
-**Lösung**: PowerShell als Administrator ausführen oder `-Scope CurrentUser` verwenden.
+**Solution**: Run PowerShell as administrator or use `-Scope CurrentUser`.
 
-#### 3. Berechtigung nicht gefunden
+### Permission not found
 ```
-⚠ Konnte Berechtigung nicht finden: CustomPermission.Read
+Warning: Permission 'CustomPermission.Read' not found.
 ```
-**Lösung**: Überprüfen Sie die Schreibweise der benutzerdefinierten Berechtigung.
+**Solution**: Check the spelling of the custom permission name.
 
-#### 4. Service Principal-Erstellung verzögert
+### Service principal creation delayed
 ```
-⚠ Enterprise App konnte nicht verifiziert werden. Möglicherweise ist sie noch in Bearbeitung.
+Warning: Enterprise app could not be verified. It may still be processing.
 ```
-**Lösung**: Dies ist normal. Die Enterprise App wird asynchron erstellt und ist nach wenigen Minuten verfügbar.
+**Solution**: This is normal. The enterprise app is created asynchronously and will be available after a few minutes.
 
-### Debug-Modus
-```powershell
-# Erweiterte Protokollierung aktivieren
-$VerbosePreference = "Continue"
-$DebugPreference = "Continue"
-.\Create-EntraIDApp.ps1
-```
-
-## Automatisierung und Integration
-
-### Unattended-Modus (Geplante Entwicklung)
-```powershell
-# Zukünftige Funktionalität für automatisierte Ausführung
-.\Create-EntraIDApp.ps1 -AppName "AutoApp" -Owner "System" -SecretYears 1 -Permissions @("User.Read", "Directory.Read.All") -Unattended
-```
-
-### CI/CD-Integration
-Das Script kann in CI/CD-Pipelines integriert werden für:
-- Automatische App-Erstellung in verschiedenen Umgebungen
-- Infrastructure as Code-Implementierungen
-- DevOps-Automatisierung
-
-### PowerShell-Module-Integration
-```powershell
-# Als Funktion in eigenen Modulen verwenden
-Import-Module .\Create-EntraIDApp.ps1
-New-EntraIDApp -Name "MyApp" -Owner "DevTeam"
-```
-
-## Compliance und Governance
-
-### Audit-Trail
-- Alle erstellten Apps werden mit Erstellungsdatum und Owner-Information versehen
-- Vollständige Protokollierung aller Aktionen
-- Nachverfolgbare App-Erstellung
-
-### Governance-Integration
-- Kompatibel mit Azure AD Governance-Richtlinien
-- Unterstützung für App-Lifecycle-Management
-- Integration in bestehende Approval-Workflows möglich
-
-## Erweiterte Funktionen
-
-### Batch-Erstellung (Geplant)
-- Erstellung mehrerer Apps aus CSV-Datei
-- Template-basierte App-Konfiguration
-- Massenverarbeitung für große Organisationen
-
-### Monitoring-Integration (Geplant)
-- Integration mit Azure Monitor
-- Automatische Benachrichtigungen bei App-Erstellung
-- Usage Analytics und Reporting
-
-## Autor
+## Author
 
 Philipp Schmidt - Farpoint Technologies
 
 ## Version
 
-1.0 - Erste Veröffentlichung der automatisierten Entra ID App-Erstellung
-
-## Support
-
-### Technischer Support
-1. **Berechtigungen überprüfen**: Global Admin oder Application Admin-Rechte erforderlich
-2. **Module-Installation**: Microsoft Graph PowerShell SDK muss verfügbar sein
-3. **Netzwerk-Konnektivität**: Verbindung zu Microsoft Entra ID erforderlich
-4. **Debug-Modus aktivieren**: Für detaillierte Fehlermeldungen
-
-### Häufige Anwendungsfälle
-- **DevOps-Automatisierung**: Service Principal für CI/CD-Pipelines
-- **Monitoring-Apps**: Apps für System-Monitoring und -Überwachung
-- **Integration-Services**: Apps für Dritt-System-Integrationen
-- **Backup-Lösungen**: Service Principals für automatisierte Backups
-
-### Weiterführende Dokumentation
-- [Microsoft Graph API-Referenz](https://docs.microsoft.com/en-us/graph/api/overview)
-- [Azure AD App-Registrierung](https://docs.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app)
-- [Service Principal Best Practices](https://docs.microsoft.com/en-us/azure/active-directory/develop/howto-create-service-principal-portal)
-
+2.0 - Added CLI parameters, rollback, improved secret security, code refactoring

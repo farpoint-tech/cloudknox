@@ -1,9 +1,9 @@
 # Changelog
 
-Alle wichtigen Änderungen an diesem Repository werden in dieser Datei dokumentiert.
+All notable changes to this repository are documented in this file.
 
-Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
-und dieses Projekt folgt [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
@@ -43,205 +43,234 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [2.3.0] - 2026-03-05 CET
 
 ### Fixed / Improved
-- **AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1**: Kritischer Bug behoben – Pagination fehlte, Geräte >1000 wurden nicht verarbeitet
-  - `@odata.nextLink` wird jetzt vollständig durchlaufen (alle Seiten)
-  - `Write-Log`-Funktion hinzugefügt: persistentes Log mit Timestamp, Level-Farben (INFO/WARN/ERROR/SUCCESS)
-  - CSV-Export der Ergebnisse (SerialNumber, Model, GroupTag, Status, Timestamp, ErrorMessage)
-  - Neue Parameter: `-LogPath` und `-ExportCsv` (mit Auto-Defaults unter `.\Logs\`)
+- **AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1**: Critical bug fixed – pagination was missing, devices >1000 were not processed
+  - `@odata.nextLink` is now fully traversed (all pages loaded)
+  - `Write-Log` function added: persistent log with timestamps and level colours (INFO/WARN/ERROR/SUCCESS)
+  - CSV export of results (SerialNumber, Model, GroupTag, Status, Timestamp, ErrorMessage)
+  - New parameters: `-LogPath` and `-ExportCsv` (with auto-defaults under `.\Logs\`)
 
-- **Create-EntraIDApp.ps1**: Mehrere kritische und wichtige Punkte behoben
-  - CLI-Parameter ergänzt: `-TenantId`, `-AppName`, `-OwnerName`, `-SecretValidityYears`, `-SaveToFile`, `-OutputPath`
-  - Rollback implementiert: bei Fehler nach App-Erstellung wird App automatisch via `Remove-MgApplication` gelöscht
-  - Secret-Sicherheit verbessert: kein automatischer Klartext-Export; nur mit expliziter Bestätigung oder `-SaveToFile`
-  - Datei-Berechtigungen eingeschränkt (ACL auf CurrentUser) wenn Datei-Export aktiv
-  - Hilfsfunktion `Add-GraphPermissionToApp` extrahiert – eliminiert duplizierten Code für Application/Delegated
+- **Create-EntraIDApp.ps1**: Multiple critical and important issues resolved
+  - CLI parameters added: `-TenantId`, `-AppName`, `-OwnerName`, `-SecretValidityYears`, `-SaveToFile`, `-OutputPath`
+  - Rollback implemented: on failure after app creation, app is automatically removed via `Remove-MgApplication`
+  - Secret security improved: no automatic plaintext export; only with explicit confirmation or `-SaveToFile`
+  - File permissions restricted (ACL to CurrentUser) when file export is active
+  - Helper function `Add-GraphPermissionToApp` extracted – eliminates duplicated code for Application/Delegated
 
-- **sameDevOpsEnvironment.ps1**: Sprachkonsistenz hergestellt
-  - Alle Ausgaben und Kommentare auf Englisch vereinheitlicht
-  - Formatierungs-Inkonsistenzen (doppelte Leerzeilen, Einrückungen) bereinigt
+- **sameDevOpsEnvironment.ps1**: Language consistency established
+  - All output messages and comments unified in English
+  - Formatting inconsistencies (double blank lines, indentation) cleaned up
 
 ### Updated
-- **README.md** auf v2.3.0 aktualisiert:
-  - Parameter-Tabellen für Autopilot Group Tag Setter und Entra ID App Creator hinzugefügt
-  - Rollback-Verhalten für Entra ID App Creator dokumentiert
-  - Verbesserungsabschnitt: umgesetzte Punkte als ✅ markiert, offene Punkte aktualisiert
-- **log.md**: Implementierungsdetails dokumentiert
+- **README.md** updated to v2.3.0:
+  - Parameter tables for Autopilot Group Tag Setter and Entra ID App Creator added
+  - Rollback behaviour for Entra ID App Creator documented
+  - Improvements section: completed items marked as ✅, open items updated
+- **log.md**: Implementation details documented
+- All documentation translated to English
 
 ### Technical Details
-- **Geänderte Scripts**: 3 PS1-Dateien
+- **Changed scripts**: 3 PS1 files
 - **Branch**: claude/audit-scripts-docs-ZXfWs
-- **Autor**: Claude Code (Anthropic) / Philipp Schmidt - Farpoint Technologies
+- **Author**: Claude Code (Anthropic) / Philipp Schmidt - Farpoint Technologies
 
 ## [2.2.0] - 2026-03-05 CET
 
 ### Added
-- **Vollständige Script-Analyse**: Tiefgehende Analyse aller 9 Scripts und 2 Module (Quellcode-Review, Sicherheitsprüfung, Funktionsanalyse)
-- **Verbesserungspotenziale dokumentiert**: Kritische, wichtige und empfohlene Optimierungen identifiziert und dokumentiert
+- **Full script analysis**: In-depth analysis of all 9 scripts and 2 modules (source code review, security audit, function analysis)
+- **Improvement potentials documented**: Critical, important and recommended optimisations identified and documented
 
 ### Changed
-- **README.md vollständig überarbeitet** (v2.1 → v2.2):
-  - Detaillierte Schritt-für-Schritt Funktionsbeschreibungen für alle 8 Scripts
-  - Vollständige Parameter-Tabellen mit Typ und Beschreibung
-  - Authentifizierungsmethoden-Übersichten pro Script
-  - Shared Modules vollständig dokumentiert (AuthenticationModule, TeamsIntegrationModule)
-  - Installierte Software/Module in übersichtlichen Tabellen
-  - Neuer Abschnitt "Verbesserungspotenziale" (Kritisch / Wichtig / Nice-to-have)
-  - Inhaltsverzeichnis mit Direktlinks
-  - Einheitliches Format und Tabellenstruktur durchgehend
-- **log.md erweitert**: Detaillierter Analyse-Eintrag mit Script-Übersichtstabelle und identifizierten Problemen
+- **README.md fully revised** (v2.1 → v2.2):
+  - Detailed step-by-step function descriptions for all 8 scripts
+  - Complete parameter tables with type and description
+  - Authentication method overviews per script
+  - Shared modules fully documented (AuthenticationModule, TeamsIntegrationModule)
+  - Installed software/modules in clear tables
+  - New section "Improvement Potentials" (Critical / Important / Nice-to-have)
+  - Table of contents with direct links
+  - Consistent format and table structure throughout
+- **log.md extended**: Detailed analysis entry with script overview table and identified issues
 
-### Identified Issues (zur Behebung in künftigen Versionen)
-- **Kritisch**: Pagination bei Autopilot Group Tag Setter fehlt (>1000 Geräte nicht abgedeckt)
-- **Kritisch**: Entra ID App Creator schreibt Client Secret im Klartext in Textdatei
-- **Kritisch**: Entra ID App Creator hat keinen Rollback bei Teilfehlern
-- **Wichtig**: Autopilot Group Tag Setter hat kein File-Logging
-- **Wichtig**: Entra ID App Creator ist nicht automatisierbar (keine CLI-Parameter)
-- **Wichtig**: sameDevOpsEnvironment.ps1 hat gemischte Sprache (EN/DE)
+### Identified Issues (to be resolved in future versions)
+- **Critical**: Pagination missing in Autopilot Group Tag Setter (>1000 devices not covered)
+- **Critical**: Entra ID App Creator writes client secret in plaintext to a text file
+- **Critical**: Entra ID App Creator has no rollback on partial failures
+- **Important**: Autopilot Group Tag Setter has no file logging
+- **Important**: Entra ID App Creator is not automatable (no CLI parameters)
+- **Important**: sameDevOpsEnvironment.ps1 had mixed language (EN/DE)
 
 ### Technical Details
-- **Analysierte Scripts**: 9 PS1-Dateien, 2 PSM1-Module
-- **Codezeilen analysiert**: ~7.500+ Zeilen
+- **Scripts analysed**: 9 PS1 files, 2 PSM1 modules
+- **Lines of code analysed**: ~7,500+
 - **Branch**: claude/audit-scripts-docs-ZXfWs
-- **Autor**: Claude Code (Anthropic) / Philipp Schmidt - Farpoint Technologies
+- **Author**: Claude Code (Anthropic) / Philipp Schmidt - Farpoint Technologies
+
+## [2.1.0] - 2025-08-14 21:30:22 CET
+
+### Added
+- **Entra ID App Creator**: New PowerShell script for automated app registration
+  - **Path**: `scripts/entra-id-app-creator/`
+  - **Script**: `Create-EntraIDApp.ps1`
+  - **Comprehensive README**: Detailed documentation with usage examples
+
+### Features
+- **Fully automated app creation**: Complete automation of the app registration process
+- **Interactive configuration**: User-friendly step-by-step guidance
+- **API permissions**: Predefined and custom Microsoft Graph permissions
+- **Client secret management**: Automatic generation with configurable validity
+- **Service principal creation**: Automatic enterprise app creation
+- **Multi-platform auth examples**: Ready-to-use authentication examples for Azure CLI, PowerShell and Graph
+
+### Technical Details
+- **Supported permissions**: 11 predefined Microsoft Graph permissions
+- **Custom APIs**: Support for any API permissions
+- **Delegated & Application**: Both permission types supported
+- **Automatic module installation**: Microsoft Graph PowerShell SDK installed automatically
+- **Comprehensive error handling**: Robust error handling and validation
+
+### Updated
+- **Repository README**: Main documentation updated
+- **Script overview**: New script added to overall overview
+- **Folder structure**: Extended with `scripts/entra-id-app-creator/`
 
 ## [2.0.0] - 2025-08-08 08:08:51 CET
 
 ### Added
-- **Repository-Reorganisation**: Vollständige Neustrukturierung des Repositories
-- **Individuelle Script-Ordner**: Jedes Script hat nun einen eigenen Ordner mit README.md
-- **Hauptdokumentation**: Umfassende README.md für das gesamte Repository
-- **Changelog**: Systematische Dokumentation aller Änderungen mit CET-Zeitstempel
+- **Repository reorganisation**: Complete restructuring of the repository
+- **Individual script folders**: Each script now has its own folder with README.md
+- **Main documentation**: Comprehensive README.md for the entire repository
+- **Changelog**: Systematic documentation of all changes with CET timestamps
 
 ### Changed
-- **Ordnerstruktur**: Migration von flacher zu hierarchischer Struktur
-- **Dokumentation**: Erweiterte und standardisierte Dokumentation für alle Scripts
-- **Namenskonventionen**: Konsistente Benennung aller Ordner und Dateien
+- **Folder structure**: Migration from flat to hierarchical structure
+- **Documentation**: Extended and standardised documentation for all scripts
+- **Naming conventions**: Consistent naming of all folders and files
 
 ### Scripts Overview
 
 #### 1. Autopilot Group Tag Bulk Setter
-- **Pfad**: `scripts/autopilot-group-tag-bulk-setter/`
-- **Status**: Reorganisiert und dokumentiert
-- **Funktionen**: Massenhafte Group Tag-Zuweisung für Autopilot-Geräte
+- **Path**: `scripts/autopilot-group-tag-bulk-setter/`
+- **Status**: Reorganised and documented
+- **Functions**: Bulk group tag assignment for Autopilot devices
 
 #### 2. Device Rename GroupTAG Enhanced v2.0
-- **Pfad**: `scripts/device-rename-grouptag-enhanced/`
-- **Status**: Vollständiges Projekt mit Modulen und Dokumentation
-- **Funktionen**: Erweiterte Geräteumbenennung mit Teams-Integration
+- **Path**: `scripts/device-rename-grouptag-enhanced/`
+- **Status**: Complete project with modules and documentation
+- **Functions**: Enhanced device renaming with Teams integration
 
 #### 3. Enhanced LAPS Diagnostic
-- **Pfad**: `scripts/enhanced-laps-diagnostic/`
-- **Status**: Reorganisiert und dokumentiert
-- **Funktionen**: Umfassende LAPS-Diagnose für Windows-Geräte
+- **Path**: `scripts/enhanced-laps-diagnostic/`
+- **Status**: Reorganised and documented
+- **Functions**: Comprehensive LAPS diagnostics for Windows devices
 
 #### 4. Intune DDG AutoCreator Ultimate
-- **Pfad**: `scripts/intune-ddg-autocreator-ultimate/`
-- **Status**: Vollständiges Projekt mit modularer Architektur
-- **Funktionen**: Automatische Erstellung von Dynamic Device Groups
+- **Path**: `scripts/intune-ddg-autocreator-ultimate/`
+- **Status**: Complete project with modular architecture
+- **Functions**: Automatic creation of Dynamic Device Groups
 
 #### 5. OOBE Autopilot Registration - Minimal Version
-- **Pfad**: `scripts/oobe-autopilot-registration-minimal/`
-- **Status**: Reorganisiert und dokumentiert
-- **Funktionen**: Schlanke OOBE Autopilot-Registrierung
+- **Path**: `scripts/oobe-autopilot-registration-minimal/`
+- **Status**: Reorganised and documented
+- **Functions**: Lightweight OOBE Autopilot registration
 
-#### 6. OOBE Autopilot Registration - Vollversion
-- **Pfad**: `scripts/oobe-autopilot-registration-full/`
-- **Status**: Reorganisiert und dokumentiert
-- **Funktionen**: Erweiterte OOBE Autopilot-Registrierung mit GUI
+#### 6. OOBE Autopilot Registration - Full Version
+- **Path**: `scripts/oobe-autopilot-registration-full/`
+- **Status**: Reorganised and documented
+- **Functions**: Extended OOBE Autopilot registration with GUI
 
 #### 7. Same DevOps Environment
-- **Pfad**: `scripts/same-devops-environment/`
-- **Status**: Reorganisiert und dokumentiert
-- **Funktionen**: DevOps-Umgebungs-Standardisierung
+- **Path**: `scripts/same-devops-environment/`
+- **Status**: Reorganised and documented
+- **Functions**: DevOps environment standardisation
 
 ## [1.5.0] - 2025-08-08 06:35:42 CET
 
 ### Added
-- **Device Rename GroupTAG Enhanced v2.0**: Vollständiges Projekt hinzugefügt
-  - Hauptskript: `DeviceRename-GroupTAG-Enhanced-v2.ps1`
-  - Teams-Integration-Modul: `TeamsIntegrationModule.psm1`
-  - Umfassende Dokumentation und Beispiele
-  - Lizenz-Datei
+- **Device Rename GroupTAG Enhanced v2.0**: Complete project added
+  - Main script: `DeviceRename-GroupTAG-Enhanced-v2.ps1`
+  - Teams integration module: `TeamsIntegrationModule.psm1`
+  - Comprehensive documentation and examples
+  - Licence file
 
 ### Features
-- Multiple Authentifizierungsoptionen (Interactive, Username/Password, Client Credentials, Device Code)
-- Enhanced UI mit farbenfroher Benutzeroberfläche
-- Teams-Integration für Benachrichtigungen
-- Umfassendes Logging-System
-- RBAC-Rollenvalidierung
-- Batch-Processing-Unterstützung
+- Multiple authentication options (Interactive, Username/Password, Client Credentials, Device Code)
+- Enhanced UI with colourful interface
+- Teams integration for notifications
+- Comprehensive logging system
+- RBAC role validation
+- Batch processing support
 
 ### Technical Details
 - **Commit**: b35d675
-- **Dateien**: 7 neue Dateien hinzugefügt
-- **Zeilen**: 3.476+ Zeilen Code und Dokumentation
-- **Autor**: Philipp Schmidt (Enhanced version)
-- **Original Konzept**: AliAlame - CYBERSYSTEM
+- **Files**: 7 new files added
+- **Lines**: 3,476+ lines of code and documentation
+- **Author**: Philipp Schmidt (Enhanced version)
+- **Original concept**: AliAlame - CYBERSYSTEM
 
 ## [1.0.0] - 2025-08-08 04:22:15 CET
 
 ### Added
-- **Intune DDG AutoCreator Ultimate**: Vollständiges Projekt hinzugefügt
-  - Hauptskript: `Intune-DDG-AutoCreator-Ultimate.ps1`
-  - Authentifizierungs-Modul: `AuthenticationModule.psm1`
-  - Teams-Integration-Modul: `TeamsIntegrationModule.psm1`
-  - Konfigurationsdatei: `config-ultimate.json`
-  - Umfassende Dokumentation
+- **Intune DDG AutoCreator Ultimate**: Complete project added
+  - Main script: `Intune-DDG-AutoCreator-Ultimate.ps1`
+  - Authentication module: `AuthenticationModule.psm1`
+  - Teams integration module: `TeamsIntegrationModule.psm1`
+  - Configuration file: `config-ultimate.json`
+  - Comprehensive documentation
 
 ### Features
-- Automatische Erstellung von Dynamic Device Groups
-- Modulare Architektur mit getrennten Skripten
-- Gemeinsame Module für Authentifizierung und Teams-Integration
-- Zentrale Konfigurationsverwaltung
-- Beispiele und Verwendungsanleitungen
+- Automatic creation of Dynamic Device Groups
+- Modular architecture with separate scripts
+- Shared modules for authentication and Teams integration
+- Central configuration management
+- Examples and usage guides
 
 ### Technical Details
 - **Commit**: 26be832
-- **Dateien**: 11 Dateien hinzugefügt
-- **Zeilen**: 7.000+ Zeilen Code und Dokumentation
-- **Autor**: Philipp Schmidt
+- **Files**: 11 files added
+- **Lines**: 7,000+ lines of code and documentation
+- **Author**: Philipp Schmidt
 - **Version**: 1.0
 
 ## [0.3.0] - 2025-08-08 02:15:30 CET
 
 ### Added
 - **Enterprise Office 365 External Sharing Audit & Compliance Report**
-  - Umfassende Audit-Funktionen für externe Freigaben
-  - Compliance-Berichterstattung
-  - SharePoint und OneDrive-Integration
+  - Comprehensive audit functions for external sharing
+  - Compliance reporting
+  - SharePoint and OneDrive integration
 
 ### Features
-- Automatisierte Audit-Berichte
-- Compliance-Überwachung
-- Detaillierte Protokollierung
-- Export-Funktionen
+- Automated audit reports
+- Compliance monitoring
+- Detailed logging
+- Export functions
 
 ### Technical Details
 - **Commit**: 4696f78
-- **Autor**: Philipp Schmidt
-- **Fokus**: Office 365 Security und Compliance
+- **Author**: Philipp Schmidt
+- **Focus**: Office 365 security and compliance
 
 ## [0.2.0] - 2025-08-07 18:45:22 CET
 
 ### Added
-- **Grundlegende Script-Sammlung**
+- **Initial script collection**
   - `AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1`
   - `Enhanced LAPS-Diagnoseskript für Windows-Geräte.ps1`
   - `sameDevOpsEnvironment.ps1`
-  - OOBE Autopilot Registration Scripts (Minimal und Vollversion)
+  - OOBE Autopilot Registration Scripts (Minimal and Full Version)
 
 ### Features
-- Autopilot Group Tag-Verwaltung
-- LAPS-Diagnose und -Verwaltung
-- DevOps-Umgebungs-Standardisierung
-- OOBE Autopilot-Registrierung
+- Autopilot group tag management
+- LAPS diagnostics and management
+- DevOps environment standardisation
+- OOBE Autopilot registration
 
 ## [0.1.0] - 2025-08-07 15:30:00 CET
 
 ### Added
-- **Initial Repository Setup**
-- **Grundlegende Projektstruktur**
-- **Erste Script-Sammlung**
+- **Initial repository setup**
+- **Basic project structure**
+- **First script collection**
 
 ### Technical Details
 - **Commit**: bdf2d3d
@@ -250,69 +279,32 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
-## Legende
+## Legend
 
-- **Added**: Neue Features
-- **Changed**: Änderungen an bestehenden Features
-- **Deprecated**: Features, die bald entfernt werden
-- **Removed**: Entfernte Features
-- **Fixed**: Fehlerbehebungen
-- **Security**: Sicherheitsupdates
+- **Added**: New features
+- **Changed**: Changes to existing features
+- **Deprecated**: Features to be removed soon
+- **Removed**: Removed features
+- **Fixed**: Bug fixes
+- **Security**: Security updates
 
-## Zeitformat
+## Timestamp Format
 
-Alle Zeitstempel verwenden das Format: `YYYY-MM-DD HH:MM:SS CET` (Central European Time)
+All timestamps use the format: `YYYY-MM-DD HH:MM:SS CET` (Central European Time)
 
-## Versionierung
+## Versioning
 
-Dieses Projekt verwendet [Semantic Versioning](https://semver.org/):
-- **MAJOR**: Inkompatible API-Änderungen
-- **MINOR**: Neue Funktionen (rückwärtskompatibel)
-- **PATCH**: Fehlerbehebungen (rückwärtskompatibel)
+This project uses [Semantic Versioning](https://semver.org/):
+- **MAJOR**: Incompatible API changes
+- **MINOR**: New features (backwards compatible)
+- **PATCH**: Bug fixes (backwards compatible)
 
-## Autoren
+## Authors
 
-- **Philipp Schmidt** - Farpoint Technologies (Hauptentwickler)
-- **AliAlame** - CYBERSYSTEM (Original Device Rename Konzept)
+- **Philipp Schmidt** - Farpoint Technologies (Lead Developer)
+- **AliAlame** - CYBERSYSTEM (Original Device Rename Concept)
+- **Roy Klooster** - RKSolutions (sameDevOpsEnvironment)
 
 ---
 
-**© 2024-2025 Farpoint Technologies. Alle Rechte vorbehalten.**
-
-
-## [2.1.0] - 2025-08-14 21:30:22 CET
-
-### Added
-- **Entra ID App Creator**: Neues PowerShell-Script für automatisierte App-Registrierung
-  - **Pfad**: `scripts/entra-id-app-creator/`
-  - **Script**: `Create-EntraIDApp.ps1`
-  - **Umfassende README**: Detaillierte Dokumentation mit Verwendungsbeispielen
-
-### Features
-- **Vollautomatische App-Erstellung**: Komplette Automatisierung des App-Registrierungsprozesses
-- **Interactive Configuration**: Benutzerfreundliche Schritt-für-Schritt-Anleitung
-- **API-Berechtigungen**: Vordefinierte und benutzerdefinierte Microsoft Graph-Berechtigungen
-- **Client Secret Management**: Automatische Generierung mit konfigurierbarer Gültigkeit
-- **Service Principal Creation**: Automatische Enterprise App-Erstellung
-- **Multi-Platform Auth Examples**: Fertige Authentifizierungsbeispiele für Azure CLI, PowerShell und Graph
-
-### Technical Details
-- **Unterstützte Berechtigungen**: 11 vordefinierte Microsoft Graph-Berechtigungen
-- **Benutzerdefinierte APIs**: Unterstützung für beliebige API-Berechtigungen
-- **Delegated & Application**: Beide Berechtigungstypen unterstützt
-- **Automatic Module Installation**: Microsoft Graph PowerShell SDK wird automatisch installiert
-- **Comprehensive Error Handling**: Robuste Fehlerbehandlung und Validierung
-
-### Documentation
-- **15+ Seiten Dokumentation**: Umfassende README mit allen Details
-- **Verwendungsbeispiele**: Praktische Code-Beispiele für verschiedene Szenarien
-- **Troubleshooting Guide**: Lösungen für häufige Probleme
-- **Security Best Practices**: Sicherheitshinweise und Best Practices
-- **Integration Examples**: Beispiele für CI/CD und Automatisierung
-
-### Updated
-- **Repository README**: Aktualisierung der Hauptdokumentation
-- **Script-Übersicht**: Hinzufügung des neuen Scripts zur Gesamtübersicht
-- **Ordnerstruktur**: Erweiterung um `scripts/entra-id-app-creator/`
-
-
+**© 2025 Farpoint Technologies. All rights reserved.**

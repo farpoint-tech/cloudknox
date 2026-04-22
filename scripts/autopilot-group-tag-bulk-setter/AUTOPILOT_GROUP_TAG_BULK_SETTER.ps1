@@ -1,72 +1,72 @@
 <#
 .SYNOPSIS
-    Setzt Group Tags für Windows Autopilot Geräte ohne bestehende Tags
+    Sets Group Tags for Windows Autopilot devices without existing tags.
 
 .DESCRIPTION
-    Dieses Script verbindet sich mit Microsoft Graph API und setzt Group Tags
-    für alle Autopilot-Geräte die noch keinen Tag haben.
+    This script connects to the Microsoft Graph API and sets Group Tags
+    for all Autopilot devices that do not yet have a tag.
 
-    Group Tags werden in Intune für die automatische Zuweisung von
-    Deployment-Profilen verwendet.
+    Group Tags are used in Intune for automatic assignment of
+    deployment profiles.
 
-    Unterstützt Umgebungen mit mehr als 1000 Geräten durch vollständige
-    Pagination (Verarbeitung aller Seiten via @odata.nextLink).
-    Schreibt ein persistentes Log-File und exportiert Ergebnisse als CSV.
+    Supports environments with more than 1000 devices through full
+    pagination (processing all pages via @odata.nextLink).
+    Writes a persistent log file and exports results as CSV.
 
 .PARAMETER GroupTag
-    Der Group Tag der gesetzt werden soll (z.B. "userdriven", "selfenrollment")
+    The Group Tag to set (e.g. "userdriven", "selfenrollment").
 
 .PARAMETER Test
-    Führt einen Test-Lauf durch ohne echte Änderungen
+    Performs a dry run without making real changes.
 
 .PARAMETER LogPath
-    Pfad für das Log-File (Standard: .\Logs\AutopilotGroupTag_<Datum>.log)
+    Path for the log file (default: .\Logs\AutopilotGroupTag_<date>.log).
 
 .PARAMETER ExportCsv
-    Pfad für den CSV-Export der Ergebnisse (Standard: .\Logs\AutopilotGroupTag_<Datum>.csv)
+    Path for the CSV export of results (default: .\Logs\AutopilotGroupTag_<date>.csv).
 
 .EXAMPLE
     .\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 -Test
-    Zeigt welche Geräte einen Tag bekommen würden
+    Shows which devices would receive a tag.
 
 .EXAMPLE
     .\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 -GroupTag "userdriven"
-    Setzt den Tag "userdriven" für alle Geräte ohne Tag
+    Sets the tag "userdriven" for all devices without a tag.
 
 .EXAMPLE
     .\AUTOPILOT_GROUP_TAG_BULK_SETTER.ps1 -GroupTag "selfenrollment" -LogPath "C:\Logs\autopilot.log"
-    Setzt Tag und schreibt Log in angegebenen Pfad
+    Sets the tag and writes the log to the specified path.
 
 .NOTES
-    Benötigt:
-    - Microsoft.Graph.Authentication PowerShell Modul
-    - Intune Administrator oder Global Administrator Berechtigung
-    - Internet-Verbindung für Graph API
+    Requires:
+    - Microsoft.Graph.Authentication PowerShell module
+    - Intune Administrator or Global Administrator permission
+    - Internet connection for Graph API
 
-    Änderungen werden in Intune nach 5-15 Minuten sichtbar.
+    Changes become visible in Intune after 5-15 minutes.
 
     Version: 2.0
-    Erstellt: 2024
-    Aktualisiert: 2026-03-05 - Pagination, File-Logging, CSV-Export
+    Created: 2024
+    Updated: 2026-04-17 - Full English translation
 #>
 
 param(
-    [Parameter(HelpMessage="Group Tag der gesetzt werden soll")]
+    [Parameter(HelpMessage="Group Tag to set")]
     [string]$GroupTag,
 
-    [Parameter(HelpMessage="Test-Modus ohne echte Änderungen")]
+    [Parameter(HelpMessage="Test mode without real changes")]
     [switch]$Test,
 
-    [Parameter(HelpMessage="Pfad für das Log-File")]
+    [Parameter(HelpMessage="Path for the log file")]
     [string]$LogPath,
 
-    [Parameter(HelpMessage="Pfad für den CSV-Export")]
+    [Parameter(HelpMessage="Path for the CSV export")]
     [string]$ExportCsv
 )
 
 #Requires -Modules Microsoft.Graph.Authentication
 
-# ===== LOG-VERZEICHNIS VORBEREITEN =====
+# ===== PREPARE LOG DIRECTORY =====
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $logDir = Join-Path $PSScriptRoot "Logs"
 
@@ -81,7 +81,7 @@ if (-not $ExportCsv) {
     $ExportCsv = Join-Path $logDir "AutopilotGroupTag_$timestamp.csv"
 }
 
-# ===== LOGGING-FUNKTION =====
+# ===== LOGGING FUNCTION =====
 function Write-Log {
     param(
         [string]$Message,
@@ -101,12 +101,12 @@ function Write-Log {
 }
 
 # ===== SCRIPT START =====
-Write-Host "=== AUTOPILOT GROUP TAG SETZER ===" -ForegroundColor White -BackgroundColor Blue
-Write-Host "Setzt Group Tags für Autopilot-Geräte ohne bestehende Tags`n" -ForegroundColor Cyan
-Write-Log "Script gestartet | Test-Modus: $($Test.IsPresent) | LogFile: $LogPath"
+Write-Host "=== AUTOPILOT GROUP TAG SETTER ===" -ForegroundColor White -BackgroundColor Blue
+Write-Host "Sets Group Tags for Autopilot devices without existing tags`n" -ForegroundColor Cyan
+Write-Log "Script started | Test mode: $($Test.IsPresent) | LogFile: $LogPath"
 
-# Graph API Verbindung herstellen
-Write-Log "Verbinde mit Microsoft Graph..."
+# Connect to Graph API
+Write-Log "Connecting to Microsoft Graph..."
 try {
     Import-Module Microsoft.Graph.Authentication -Force
 
@@ -117,24 +117,24 @@ try {
     Connect-MgGraph -Scopes $requiredScopes -NoWelcome
 
     $context = Get-MgContext
-    Write-Log "Verbunden als: $($context.Account) | Tenant: $($context.TenantId)" "SUCCESS"
+    Write-Log "Connected as: $($context.Account) | Tenant: $($context.TenantId)" "SUCCESS"
 }
 catch {
-    Write-Log "FEHLER bei Graph-Verbindung: $($_.Exception.Message)" "ERROR"
-    Write-Host "Stelle sicher dass du Intune Administrator Rechte hast." -ForegroundColor Yellow
+    Write-Log "ERROR connecting to Graph: $($_.Exception.Message)" "ERROR"
+    Write-Host "Make sure you have Intune Administrator rights." -ForegroundColor Yellow
     exit 1
 }
 
-# Group Tag Parameter bestimmen
+# Determine Group Tag parameter
 if (-not $GroupTag) {
-    Write-Host "`n=== GROUP TAG AUSWAHL ===" -ForegroundColor White -BackgroundColor DarkGreen
-    Write-Host "Verfügbare Standard-Tags:"
-    Write-Host "1 = userdriven    (Für User-Driven Autopilot)"
-    Write-Host "2 = selfenrollment (Für Self-Deployment)"
-    Write-Host "3 = Eigener Tag eingeben"
+    Write-Host "`n=== GROUP TAG SELECTION ===" -ForegroundColor White -BackgroundColor DarkGreen
+    Write-Host "Available standard tags:"
+    Write-Host "1 = userdriven    (For User-Driven Autopilot)"
+    Write-Host "2 = selfenrollment (For Self-Deployment)"
+    Write-Host "3 = Enter custom tag"
 
     do {
-        $wahl = Read-Host "`nDeine Wahl (1, 2 oder 3)"
+        $wahl = Read-Host "`nYour choice (1, 2 or 3)"
     } while ($wahl -notin @("1", "2", "3"))
 
     switch ($wahl) {
@@ -142,19 +142,19 @@ if (-not $GroupTag) {
         "2" { $GroupTag = "selfenrollment" }
         "3" {
             do {
-                $GroupTag = Read-Host "Gib deinen Group Tag ein"
+                $GroupTag = Read-Host "Enter your Group Tag"
             } while ([string]::IsNullOrWhiteSpace($GroupTag))
         }
     }
 
-    Write-Log "Gewählter Group Tag: '$GroupTag'" "SUCCESS"
+    Write-Log "Selected Group Tag: '$GroupTag'" "SUCCESS"
 } else {
-    Write-Log "Group Tag via Parameter: '$GroupTag'"
+    Write-Log "Group Tag via parameter: '$GroupTag'"
 }
 
-# ===== ALLE GERÄTE MIT PAGINATION LADEN =====
-Write-Host "`n=== GERÄTE LADEN ===" -ForegroundColor White -BackgroundColor DarkGreen
-Write-Log "Lade alle Windows Autopilot Geräte (mit Pagination)..."
+# ===== LOAD ALL DEVICES WITH PAGINATION =====
+Write-Host "`n=== LOADING DEVICES ===" -ForegroundColor White -BackgroundColor DarkGreen
+Write-Log "Loading all Windows Autopilot devices (with pagination)..."
 
 $allDevices = [System.Collections.Generic.List[object]]::new()
 
@@ -164,7 +164,7 @@ try {
 
     while ($nextUri) {
         $pageNumber++
-        Write-Log "Lade Seite $pageNumber ($($allDevices.Count) Geräte bisher)..."
+        Write-Log "Loading page $pageNumber ($($allDevices.Count) devices so far)..."
 
         $response = Invoke-MgGraphRequest -Method GET -Uri $nextUri
 
@@ -174,73 +174,73 @@ try {
             }
         }
 
-        # Nächste Seite prüfen
+        # Check for next page
         $nextUri = if ($response.'@odata.nextLink') { $response.'@odata.nextLink' } else { $null }
     }
 
     if ($allDevices.Count -eq 0) {
-        Write-Log "Keine Autopilot-Geräte gefunden." "WARN"
-        Write-Host "Sind Geräte in Autopilot registriert?" -ForegroundColor Yellow
+        Write-Log "No Autopilot devices found." "WARN"
+        Write-Host "Are any devices registered in Autopilot?" -ForegroundColor Yellow
         exit 1
     }
 
-    Write-Log "$($allDevices.Count) Autopilot-Geräte auf $pageNumber Seite(n) gefunden." "SUCCESS"
+    Write-Log "$($allDevices.Count) Autopilot device(s) found across $pageNumber page(s)." "SUCCESS"
 }
 catch {
-    Write-Log "FEHLER beim Laden der Geräte: $($_.Exception.Message)" "ERROR"
+    Write-Log "ERROR loading devices: $($_.Exception.Message)" "ERROR"
     exit 1
 }
 
-# Geräte ohne Group Tag filtern
+# Filter devices without Group Tag
 $devicesWithoutTag = $allDevices | Where-Object { [string]::IsNullOrEmpty($_.groupTag) }
 $devicesWithTag    = $allDevices | Where-Object { -not [string]::IsNullOrEmpty($_.groupTag) }
 
-# Übersicht anzeigen
-Write-Host "`n=== GERÄTE-ÜBERSICHT ===" -ForegroundColor White -BackgroundColor DarkGreen
-Write-Log "Gesamt: $($allDevices.Count) | Mit Tag: $($devicesWithTag.Count) | Ohne Tag: $($devicesWithoutTag.Count)"
-Write-Host "Gesamt Geräte:  $($allDevices.Count)"
-Write-Host "Mit Group Tag:  $($devicesWithTag.Count)" -ForegroundColor Green
-Write-Host "Ohne Group Tag: $($devicesWithoutTag.Count)" -ForegroundColor $(if ($devicesWithoutTag.Count -gt 0) { "Yellow" } else { "Green" })
+# Display overview
+Write-Host "`n=== DEVICE OVERVIEW ===" -ForegroundColor White -BackgroundColor DarkGreen
+Write-Log "Total: $($allDevices.Count) | With tag: $($devicesWithTag.Count) | Without tag: $($devicesWithoutTag.Count)"
+Write-Host "Total devices:    $($allDevices.Count)"
+Write-Host "With Group Tag:   $($devicesWithTag.Count)" -ForegroundColor Green
+Write-Host "Without Group Tag:$($devicesWithoutTag.Count)" -ForegroundColor $(if ($devicesWithoutTag.Count -gt 0) { "Yellow" } else { "Green" })
 
 if ($devicesWithoutTag.Count -eq 0) {
-    Write-Log "Alle Geräte haben bereits Group Tags. Keine Aktion erforderlich." "SUCCESS"
-    Write-Host "`n✓ Alle Geräte haben bereits Group Tags!" -ForegroundColor Green
+    Write-Log "All devices already have Group Tags. No action required." "SUCCESS"
+    Write-Host "`n✓ All devices already have Group Tags!" -ForegroundColor Green
     exit 0
 }
 
-# Geräte ohne Tag auflisten
-Write-Host "`nGeräte OHNE Group Tag:" -ForegroundColor Yellow
+# List devices without tag
+Write-Host "`nDevices WITHOUT Group Tag:" -ForegroundColor Yellow
 foreach ($device in $devicesWithoutTag) {
     Write-Host "  • $($device.serialNumber) - $($device.model)" -ForegroundColor Gray
 }
 
-# Bestätigung für echte Änderungen
+# Confirmation for real changes
 if (-not $Test) {
-    Write-Host "`n=== BESTÄTIGUNG ERFORDERLICH ===" -ForegroundColor White -BackgroundColor Red
-    Write-Host "⚠️  ACHTUNG: Echte Änderungen werden durchgeführt!" -ForegroundColor Red
-    Write-Host "Group Tag '$GroupTag' wird für $($devicesWithoutTag.Count) Geräte gesetzt." -ForegroundColor Yellow
+    Write-Host "`n=== CONFIRMATION REQUIRED ===" -ForegroundColor White -BackgroundColor Red
+    Write-Host "⚠️  WARNING: Real changes will be made!" -ForegroundColor Red
+    Write-Host "Group Tag '$GroupTag' will be set for $($devicesWithoutTag.Count) device(s)." -ForegroundColor Yellow
 
     do {
-        $confirmation = Read-Host "`nFortfahren? Schreibe 'JA' zum Bestätigen oder 'NEIN' zum Abbrechen"
+        $confirmation = Read-Host "`nProceed? Type 'YES' to confirm or 'NO' to cancel"
         $confirmation = $confirmation.ToUpper()
-    } while ($confirmation -notin @("JA", "NEIN"))
+    } while ($confirmation -notin @("YES", "NO"))
 
-    if ($confirmation -eq "NEIN") {
-        Write-Log "Vorgang vom Benutzer abgebrochen." "WARN"
-        Write-Host "✓ Vorgang abgebrochen." -ForegroundColor Cyan
+    if ($confirmation -eq "NO") {
+        Write-Log "Operation cancelled by user." "WARN"
+        Write-Host "✓ Operation cancelled." -ForegroundColor Cyan
         exit 0
     }
-    Write-Log "Benutzer hat Änderungen bestätigt."
+    Write-Log "User confirmed changes."
 }
 
-# ===== GROUP TAGS SETZEN =====
-Write-Host "`n=== GROUP TAGS SETZEN ===" -ForegroundColor White -BackgroundColor DarkGreen
+# ===== SET GROUP TAGS =====
+Write-Host "`n=== SETTING GROUP TAGS ===" -ForegroundColor White -BackgroundColor DarkGreen
 if ($Test) {
-    Write-Log "TEST-MODUS aktiv: keine echten Änderungen." "WARN"
-    Write-Host "🧪 TEST-MODUS: Keine echten Änderungen!" -ForegroundColor Magenta
+    Write-Log "TEST MODE active: no real changes." "WARN"
+    Write-Host "🧪 TEST MODE: No real changes!" -ForegroundColor Magenta
 } else {
-    Write-Log "Starte Zuweisung von Group Tag '$GroupTag'..."
-    Write-Host "⚙️  Setze Group Tags..." -ForegroundColor Yellow
+    Write-Log "Starting assignment of Group Tag '$GroupTag'..."
+    Write-Host "⚙️  Setting Group Tags..." -ForegroundColor Yellow
 }
 
 $successCount = 0
@@ -280,7 +280,7 @@ foreach ($device in $devicesWithoutTag) {
             SerialNumber = $serialNumber
             Model        = $model
             GroupTag     = $GroupTag
-            Status       = "Erfolg"
+            Status       = "Success"
             Timestamp    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
             ErrorMessage = ""
         })
@@ -289,53 +289,53 @@ foreach ($device in $devicesWithoutTag) {
     }
     catch {
         $errMsg = $_.Exception.Message
-        Write-Log "FEHLER: $serialNumber - $errMsg" "ERROR"
-        Write-Host "✗ FEHLER: $serialNumber" -ForegroundColor Red
-        Write-Host "  Grund: $errMsg" -ForegroundColor Yellow
+        Write-Log "ERROR: $serialNumber - $errMsg" "ERROR"
+        Write-Host "✗ ERROR: $serialNumber" -ForegroundColor Red
+        Write-Host "  Reason: $errMsg" -ForegroundColor Yellow
         $errorCount++
 
         $csvResults.Add([PSCustomObject]@{
             SerialNumber = $serialNumber
             Model        = $model
             GroupTag     = $GroupTag
-            Status       = "Fehler"
+            Status       = "Error"
             Timestamp    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
             ErrorMessage = $errMsg
         })
     }
 }
 
-# ===== CSV-EXPORT =====
+# ===== CSV EXPORT =====
 try {
     $csvResults | Export-Csv -Path $ExportCsv -NoTypeInformation -Encoding UTF8
-    Write-Log "CSV-Ergebnisse exportiert: $ExportCsv" "SUCCESS"
-    Write-Host "`n📄 Ergebnisse exportiert nach: $ExportCsv" -ForegroundColor Cyan
+    Write-Log "CSV results exported: $ExportCsv" "SUCCESS"
+    Write-Host "`n📄 Results exported to: $ExportCsv" -ForegroundColor Cyan
 } catch {
-    Write-Log "Fehler beim CSV-Export: $($_.Exception.Message)" "WARN"
+    Write-Log "Error during CSV export: $($_.Exception.Message)" "WARN"
 }
 
-# ===== ERGEBNIS-ZUSAMMENFASSUNG =====
-Write-Host "`n=== ERGEBNIS ===" -ForegroundColor White -BackgroundColor Blue
-Write-Log "Zusammenfassung: Erfolgreich=$successCount | Fehler=$errorCount | Tag='$GroupTag'"
-Write-Host "✓ Erfolgreich: $successCount Geräte" -ForegroundColor Green
+# ===== RESULT SUMMARY =====
+Write-Host "`n=== RESULT ===" -ForegroundColor White -BackgroundColor Blue
+Write-Log "Summary: Successful=$successCount | Errors=$errorCount | Tag='$GroupTag'"
+Write-Host "✓ Successful: $successCount device(s)" -ForegroundColor Green
 if ($errorCount -gt 0) {
-    Write-Host "✗ Fehler: $errorCount Geräte" -ForegroundColor Red
+    Write-Host "✗ Errors: $errorCount device(s)" -ForegroundColor Red
 }
 Write-Host "📋 Group Tag: '$GroupTag'" -ForegroundColor Cyan
-Write-Host "📁 Log-File:  $LogPath" -ForegroundColor Gray
-Write-Host "📄 CSV-Export: $ExportCsv" -ForegroundColor Gray
+Write-Host "📁 Log file:  $LogPath" -ForegroundColor Gray
+Write-Host "📄 CSV export: $ExportCsv" -ForegroundColor Gray
 
 if ($Test) {
-    Write-Host "`n🧪 Das war nur ein TEST!" -ForegroundColor Magenta
-    Write-Host "Für echte Änderungen das Script ohne -Test Parameter starten." -ForegroundColor Yellow
+    Write-Host "`n🧪 This was a TEST only!" -ForegroundColor Magenta
+    Write-Host "Run the script without -Test to make real changes." -ForegroundColor Yellow
 } elseif ($successCount -gt 0) {
-    Write-Host "`n⏰ Wichtiger Hinweis:" -ForegroundColor Yellow
-    Write-Host "Group Tags werden in Intune nach 5-15 Minuten sichtbar." -ForegroundColor Cyan
-    Write-Host "Prüfe später im Intune Portal unter:" -ForegroundColor Gray
+    Write-Host "`n⏰ Important note:" -ForegroundColor Yellow
+    Write-Host "Group Tags become visible in Intune after 5-15 minutes." -ForegroundColor Cyan
+    Write-Host "Check later in the Intune portal under:" -ForegroundColor Gray
     Write-Host "Devices → Windows → Windows enrollment → Devices" -ForegroundColor Gray
 }
 
-Write-Host "`n🎉 Script abgeschlossen!" -ForegroundColor Green
-Write-Log "Script beendet."
+Write-Host "`n🎉 Script completed!" -ForegroundColor Green
+Write-Log "Script finished."
 
-# ===== SCRIPT ENDE =====
+# ===== SCRIPT END =====

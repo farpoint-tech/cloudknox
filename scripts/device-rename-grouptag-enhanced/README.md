@@ -1,65 +1,66 @@
 # Device Rename GroupTAG Enhanced v2.0
 
-## Beschreibung
+## Description
 
-Erweiterte PowerShell-Lösung für die dynamische Umbenennung von AAD-joined Intune-Geräten im Format "GroupTag-SerialTail" (≤15 Zeichen). Das Script bietet eine verbesserte Benutzeroberfläche, umfassendes Logging und mehrere Authentifizierungsoptionen.
+Enhanced PowerShell solution for dynamically renaming AAD-joined Intune devices in the format `GroupTag-SerialTail` (≤15 characters). The script provides an improved user interface, comprehensive logging and multiple authentication options.
 
-## Hauptfunktionen
+## Features
 
-### 🔐 Mehrere Authentifizierungsoptionen
-- **Interactive Authentication** (Empfohlen)
-- **Username/Password Authentication** 
+### Multiple Authentication Options
+- **Interactive Authentication** (Recommended)
+- **Username/Password Authentication**
 - **Client Credentials (App Registration)**
 - **Device Code Authentication**
 
-### 🎨 Erweiterte Benutzeroberfläche
-- Farbenfrohe, augenfreundliche PowerShell-Oberfläche
-- Fortschrittsanzeigen und Statusupdates
-- Klare Fehlermeldungen und Anleitungen
-- ISE-kompatibles Design
+### Enhanced User Interface
+- Colourful, easy-on-the-eye PowerShell interface
+- Progress indicators and status updates
+- Clear error messages and guidance
+- ISE-compatible design
 
-### 📊 Umfassendes Logging
-- Detaillierte Ausführungsprotokolle
-- Fehlerverfolgungs- und Debugging-Funktionen
-- Log-Rotation und -Verwaltung
-- Konfigurierbare Log-Level
+### Comprehensive Logging
+- Detailed execution logs
+- Error tracking and debugging functions
+- Log rotation and management
+- Configurable log levels
+- Log path: `C:\ProgramData\IntuneDeviceRenamer\logs\`
 
-### 🔔 Teams-Integration
-- Echtzeitbenachrichtigungen über Microsoft Teams Webhooks
-- Ausführungszusammenfassungen und Statusupdates
-- Fehlerwarnungen und -meldungen
-- Anpassbare Benachrichtigungsvorlagen
+### Teams Integration
+- Real-time notifications via Microsoft Teams webhooks
+- Execution summaries and status updates
+- Error warnings and alerts
+- Customisable notification templates
 
-## Geräte-Namenskonvention
+## Device Naming Convention
 
-- **Muster:** `GroupTag-SerialTail`
-- **Maximale Länge:** 15 Zeichen
-- **Beispiel:** `IT-DEPT-ABC123`
+- **Pattern:** `GroupTag-SerialTail`
+- **Maximum length:** 15 characters
+- **Example:** `IT-DEPT-ABC123`
 
-## Voraussetzungen
+## Prerequisites
 
-- PowerShell 5.1 oder höher
+- PowerShell 5.1 or higher
 - Microsoft Graph PowerShell SDK
-- Entsprechende Azure AD-Berechtigungen
-- Intune-verwaltete Geräte
+- Appropriate Azure AD permissions
+- Intune-managed devices
 
-## Schnellstart
+## Quick Start
 
-### Interaktive Authentifizierung (Empfohlen)
+### Interactive Authentication (Recommended)
 ```powershell
 .\DeviceRename-GroupTAG-Enhanced-v2.ps1 -Interactive
 ```
 
-### Mit Teams-Integration
+### With Teams Integration
 ```powershell
-# Teams-Modul importieren
+# Import Teams module
 Import-Module ".\modules\TeamsIntegrationModule.psm1" -Force
 
-# Script mit Teams-Benachrichtigungen ausführen
+# Run script with Teams notifications
 .\DeviceRename-GroupTAG-Enhanced-v2.ps1 -Interactive -TeamsWebhook "https://your-teams-webhook-url"
 ```
 
-## Projektstruktur
+## Project Structure
 
 ```
 project/
@@ -76,28 +77,30 @@ project/
 └── README.md
 ```
 
-## Erforderliche Azure AD RBAC-Rollen
+## Required Azure AD RBAC Roles
 
-### Für Username/Password-Authentifizierung:
-- **Intune Administrator** (Empfohlen)
-- **Global Administrator** (Vollzugriff)
-- **Cloud Device Administrator** (Geräteverwaltung)
+### For Username/Password Authentication:
+- **Intune Administrator** (Recommended)
+- **Global Administrator** (Full access)
+- **Cloud Device Administrator** (Device management)
 
-### Für App Registration (Client Credentials):
-- Keine spezifischen Benutzerrollen erforderlich (verwendet App-Berechtigungen)
+### For App Registration (Client Credentials):
+- No specific user roles required (uses app permissions)
 
-## Erforderliche Graph API-Berechtigungen
-- `Device.Read.All` (Application oder Delegated)
-- `DeviceManagementServiceConfig.Read.All` (Application oder Delegated)
-- `User.Read` (Delegated)
-- `DeviceManagementManagedDevices.Read.All` (Delegated - für Benutzerauthentifizierung)
+## Required Graph API Permissions
 
-## Autor
+| Permission | Type | Purpose |
+|-----------|------|---------|
+| `Device.Read.All` | Application or Delegated | Read device information |
+| `DeviceManagementServiceConfig.Read.All` | Application or Delegated | Read Intune configuration |
+| `User.Read` | Delegated | Read user profile |
+| `DeviceManagementManagedDevices.Read.All` | Delegated | Read managed devices |
 
-**Enhanced Version:** Philipp Schmidt - Farpoint Technologies  
-**Original Konzept:** AliAlame - CYBERSYSTEM (https://www.cybersystem.ca)
+## Authors
+
+**Enhanced Version:** Philipp Schmidt - Farpoint Technologies
+**Original Concept:** AliAlame - CYBERSYSTEM (https://www.cybersystem.ca)
 
 ## Version
 
-v2.0 - Erweiterte Version mit verbesserter UI, Teams-Integration und mehreren Authentifizierungsoptionen
-
+v2.0 - Enhanced version with improved UI, Teams integration and multiple authentication options

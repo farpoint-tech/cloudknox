@@ -1,85 +1,85 @@
 <#
 .SYNOPSIS
-    Erstellt automatisch eine App-Registrierung und Enterprise App in Microsoft Entra ID.
+    Automatically creates an app registration and enterprise app in Microsoft Entra ID.
 
 .DESCRIPTION
-    Dieses Skript automatisiert den Prozess der Erstellung einer App-Registrierung und der zugehörigen
-    Enterprise App (Service Principal) in Microsoft Entra ID. Es ermöglicht die Konfiguration von
-    API-Berechtigungen und generiert ein Client Secret für die Authentifizierung.
+    This script automates the process of creating an app registration and the associated
+    enterprise app (service principal) in Microsoft Entra ID. It enables configuration of
+    API permissions and generates a client secret for authentication.
 
-    Kann vollständig interaktiv ODER via Parameter (nicht-interaktiv/automatisiert) ausgeführt werden.
+    Can be run fully interactively OR via parameters (non-interactive/automated).
 
-    Rollback: Falls ein Schritt nach der App-Erstellung fehlschlägt, wird die bereits erstellte App
-    automatisch wieder gelöscht, um verwaiste Einträge zu vermeiden.
+    Rollback: If a step fails after app creation, the already-created app is automatically
+    deleted to avoid orphaned entries.
 
-    Secret-Sicherheit: Das Client Secret wird NUR in der Konsole angezeigt. Eine Datei-Export
-    erfordert explizite Zustimmung (-SaveToFile oder interaktive Bestätigung).
+    Secret security: The client secret is ONLY displayed in the console. A file export
+    requires explicit consent (-SaveToFile or interactive confirmation).
 
 .PARAMETER TenantId
-    Tenant-ID oder Tenant-Name (z.B. contoso.onmicrosoft.com). Falls nicht angegeben: interaktive Abfrage.
+    Tenant ID or tenant name (e.g. contoso.onmicrosoft.com). If not provided: interactive prompt.
 
 .PARAMETER AppName
-    Name der App-Registrierung. Falls nicht angegeben: interaktive Abfrage.
+    Name of the app registration. If not provided: interactive prompt.
 
 .PARAMETER OwnerName
-    Name des Autors/Owners (wird in App-Notizen gespeichert). Standard: aktueller Benutzername.
+    Name of the author/owner (stored in app notes). Default: current username.
 
 .PARAMETER SecretValidityYears
-    Gültigkeitsdauer des Client Secrets in Jahren. Standard: 1
+    Validity period of the client secret in years. Default: 1.
 
 .PARAMETER SaveToFile
-    Wenn angegeben: exportiert die App-Details (inkl. Secret) in eine Textdatei.
-    SICHERHEITSHINWEIS: Datei enthält Secret im Klartext – sicher aufbewahren!
+    If specified: exports the app details (including secret) to a text file.
+    SECURITY NOTE: File contains the secret in plaintext – store securely!
 
 .PARAMETER OutputPath
-    Pfad für den Datei-Export (nur relevant mit -SaveToFile). Standard: aktuelles Verzeichnis.
+    Path for the file export (only relevant with -SaveToFile). Default: current directory.
 
 .EXAMPLE
     .\Create-EntraIDApp.ps1
-    Vollständig interaktiver Modus.
+    Fully interactive mode.
 
 .EXAMPLE
-    .\Create-EntraIDApp.ps1 -TenantId "contoso.onmicrosoft.com" -AppName "MeinTool" -SecretValidityYears 2
-    Erstellt App nicht-interaktiv mit vordefinierten Werten (Permissions werden trotzdem interaktiv konfiguriert).
+    .\Create-EntraIDApp.ps1 -TenantId "contoso.onmicrosoft.com" -AppName "MyTool" -SecretValidityYears 2
+    Creates the app non-interactively with predefined values (permissions are still configured interactively).
 
 .EXAMPLE
-    .\Create-EntraIDApp.ps1 -TenantId "contoso.onmicrosoft.com" -AppName "MeinTool" -SaveToFile
-    Erstellt App und exportiert Details in eine Datei.
+    .\Create-EntraIDApp.ps1 -TenantId "contoso.onmicrosoft.com" -AppName "MyTool" -SaveToFile
+    Creates the app and exports details to a file.
 
 .NOTES
-    Erforderliche Berechtigungen:
-    - Global Administrator oder Application Administrator in Entra ID
-    - Die Microsoft Graph PowerShell-Module müssen installiert sein oder werden automatisch installiert
+    Required permissions:
+    - Global Administrator or Application Administrator in Entra ID
+    - The Microsoft Graph PowerShell modules must be installed or will be installed automatically.
 
-    Das generierte Client Secret sollte sicher aufbewahrt werden, da es nach der ersten Anzeige
-    nicht mehr abgerufen werden kann.
+    The generated client secret should be stored securely, as it cannot be retrieved
+    after the first display.
 
     Version: 2.0
-    Aktualisiert: 2026-03-05 - CLI-Parameter, Rollback, Secret-Sicherheit, Code-Refactoring
+    Updated: 2026-04-17 - Full English translation
 #>
 
 param(
-    [Parameter(HelpMessage="Tenant-ID oder Tenant-Name (z.B. contoso.onmicrosoft.com)")]
+    [Parameter(HelpMessage="Tenant ID or tenant name (e.g. contoso.onmicrosoft.com)")]
     [string]$TenantId,
 
-    [Parameter(HelpMessage="Name der App-Registrierung")]
+    [Parameter(HelpMessage="Name of the app registration")]
     [string]$AppName,
 
-    [Parameter(HelpMessage="Name des Owners (wird in App-Notizen gespeichert)")]
+    [Parameter(HelpMessage="Name of the owner (stored in app notes)")]
     [string]$OwnerName = $env:USERNAME,
 
-    [Parameter(HelpMessage="Gültigkeitsdauer des Client Secrets in Jahren")]
+    [Parameter(HelpMessage="Validity period of the client secret in years")]
     [ValidateRange(1, 2)]
     [int]$SecretValidityYears = 1,
 
-    [Parameter(HelpMessage="App-Details inkl. Secret in Datei exportieren (SICHERHEITSHINWEIS)")]
+    [Parameter(HelpMessage="Export app details including secret to file (SECURITY NOTE)")]
     [switch]$SaveToFile,
 
-    [Parameter(HelpMessage="Ausgabepfad für Datei-Export (Standard: aktuelles Verzeichnis)")]
+    [Parameter(HelpMessage="Output path for file export (default: current directory)")]
     [string]$OutputPath = "."
 )
 
-# ===== HILFSFUNKTION: GRAPH-BERECHTIGUNG HINZUFÜGEN =====
+# ===== HELPER FUNCTION: ADD GRAPH PERMISSION =====
 function Add-GraphPermissionToApp {
     param(
         [string]$AppObjectId,
@@ -95,7 +95,7 @@ function Add-GraphPermissionToApp {
     if ($PermType -eq "Application") {
         $role = $sp.AppRoles | Where-Object { $_.Value -eq $PermissionName }
         if (-not $role) {
-            Write-Host "   Warnung: Berechtigung '$PermissionName' nicht gefunden." -ForegroundColor Yellow
+            Write-Host "   Warning: Permission '$PermissionName' not found." -ForegroundColor Yellow
             return $CurrentAccess
         }
         $accessType = "Role"
@@ -103,14 +103,14 @@ function Add-GraphPermissionToApp {
     } else {
         $scope = $sp.OAuth2PermissionScopes | Where-Object { $_.Value -eq $PermissionName }
         if (-not $scope) {
-            Write-Host "   Warnung: Berechtigung '$PermissionName' nicht gefunden." -ForegroundColor Yellow
+            Write-Host "   Warning: Permission '$PermissionName' not found." -ForegroundColor Yellow
             return $CurrentAccess
         }
         $accessType = "Scope"
         $permId     = $scope.Id
     }
 
-    # Prüfen ob API bereits in der Liste ist
+    # Check if API is already in the list
     $existingApi = $CurrentAccess | Where-Object { $_.ResourceAppId -eq $ApiId }
     if ($existingApi) {
         $alreadyAdded = $existingApi.ResourceAccess | Where-Object { $_.Id -eq $permId }
@@ -125,13 +125,13 @@ function Add-GraphPermissionToApp {
     }
 
     Update-MgApplication -ApplicationId $AppObjectId -RequiredResourceAccess $CurrentAccess
-    Write-Host "   ✓ Berechtigung hinzugefügt: $PermissionName ($PermType)" -ForegroundColor Green
+    Write-Host "   ✓ Permission added: $PermissionName ($PermType)" -ForegroundColor Green
     return $CurrentAccess
 }
 
-# ===== MODULE PRÜFEN / INSTALLIEREN =====
+# ===== CHECK / INSTALL MODULES =====
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) {
-    Write-Host "Microsoft Graph PowerShell Modul wird installiert..." -ForegroundColor Yellow
+    Write-Host "Installing Microsoft Graph PowerShell module..." -ForegroundColor Yellow
     Install-Module -Name Microsoft.Graph -Scope CurrentUser -Force
 }
 
@@ -141,107 +141,107 @@ Import-Module Microsoft.Graph.Applications
 # ===== BANNER =====
 Write-Host @"
 ========================================================================
-  Microsoft Entra ID - App-Registrierung und Enterprise App Erstellung
+  Microsoft Entra ID - App Registration and Enterprise App Creation
 ========================================================================
 
-Dieses Skript erstellt automatisch:
-- Eine neue App-Registrierung in Entra ID
-- Ein Client Secret mit der gewünschten Gültigkeitsdauer
-- Eine Enterprise App (Service Principal)
-- Konfiguriert API-Berechtigungen nach Ihren Anforderungen
+This script automatically creates:
+- A new app registration in Entra ID
+- A client secret with the desired validity period
+- An enterprise app (service principal)
+- Configured API permissions per your requirements
 
-Am Ende erhalten Sie alle notwendigen Informationen für die Authentifizierung:
+At the end you will receive all the information needed for authentication:
 - Tenant ID
 - App (Client) ID
 - Client Secret
 
-Voraussetzungen:
-- Sie benötigen Global Administrator oder Application Administrator Rechte
-- Eine aktive Internetverbindung zu Microsoft Entra ID
+Prerequisites:
+- You need Global Administrator or Application Administrator rights
+- An active internet connection to Microsoft Entra ID
 
 "@ -ForegroundColor Cyan
 
-# ===== EINGABEN (interaktiv wenn Parameter fehlen) =====
+# ===== INPUTS (interactive if parameters are missing) =====
 if (-not $TenantId) {
-    $TenantId = Read-Host "Bitte geben Sie die Tenant-ID oder den Tenant-Namen ein (z.B. contoso.onmicrosoft.com)"
+    $TenantId = Read-Host "Please enter the Tenant ID or tenant name (e.g. contoso.onmicrosoft.com)"
 }
 
-# Verbindung herstellen
-Write-Host "`nBitte melden Sie sich mit einem Benutzer an, der ausreichende Berechtigungen hat (Global Admin oder App Administrator)." -ForegroundColor Cyan
+# Establish connection
+Write-Host "`nPlease sign in with an account that has sufficient permissions (Global Admin or App Administrator)." -ForegroundColor Cyan
 try {
     Connect-MgGraph -TenantId $TenantId -Scopes "Application.ReadWrite.All", "Directory.ReadWrite.All"
 
     $context = Get-MgContext
-    if ($null -eq $context) { throw "Anmeldung fehlgeschlagen." }
+    if ($null -eq $context) { throw "Sign-in failed." }
 
-    Write-Host "Erfolgreich angemeldet als: $($context.Account)" -ForegroundColor Green
-    Write-Host "Verbunden mit Tenant: $($context.TenantId)`n" -ForegroundColor Green
+    Write-Host "Successfully signed in as: $($context.Account)" -ForegroundColor Green
+    Write-Host "Connected to tenant: $($context.TenantId)`n" -ForegroundColor Green
 }
 catch {
-    Write-Host "Fehler bei der Anmeldung: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "Bitte stellen Sie sicher, dass Sie die richtigen Anmeldeinformationen verwenden und über ausreichende Berechtigungen verfügen." -ForegroundColor Yellow
+    Write-Host "Error during sign-in: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Please make sure you are using the correct credentials and have sufficient permissions." -ForegroundColor Yellow
     exit 1
 }
 
-# App-Details abfragen (wenn nicht via Parameter übergeben)
+# Request app details (if not passed via parameter)
 if (-not $AppName) {
-    Write-Host "Bitte geben Sie die Details für die neue App ein:" -ForegroundColor Cyan
-    $AppName = Read-Host "Name der App (wird sowohl für App-Registrierung als auch Enterprise App verwendet)"
+    Write-Host "Please enter the details for the new app:" -ForegroundColor Cyan
+    $AppName = Read-Host "App name (used for both app registration and enterprise app)"
 }
 
 if ($PSBoundParameters.ContainsKey('OwnerName') -eq $false -and $OwnerName -eq $env:USERNAME) {
-    $inputOwner = Read-Host "Name des Autors/Owners [Standard: $OwnerName]"
+    $inputOwner = Read-Host "Author/owner name [Default: $OwnerName]"
     if (-not [string]::IsNullOrWhiteSpace($inputOwner)) { $OwnerName = $inputOwner }
 }
 
 if (-not $PSBoundParameters.ContainsKey('SecretValidityYears')) {
-    $inputYears = Read-Host "Gültigkeitsdauer des Client Secrets in Jahren (1-2) [Standard: 1]"
+    $inputYears = Read-Host "Client secret validity in years (1-2) [Default: 1]"
     if ($inputYears -match '^[12]$') { $SecretValidityYears = [int]$inputYears }
 }
 
-# Berechtigungen konfigurieren
-$configurePermissions = Read-Host "Möchten Sie API-Berechtigungen für die App konfigurieren? (J/N) [Standard: N]"
+# Configure permissions
+$configurePermissions = Read-Host "Would you like to configure API permissions for the app? (Y/N) [Default: N]"
 $permissions = @()
 
-if ($configurePermissions -eq "J" -or $configurePermissions -eq "j") {
-    Write-Host "`n=== API-Berechtigungen konfigurieren ===" -ForegroundColor Cyan
+if ($configurePermissions -eq "Y" -or $configurePermissions -eq "y") {
+    Write-Host "`n=== Configure API Permissions ===" -ForegroundColor Cyan
 
     Write-Host @"
 
-Häufig verwendete Microsoft Graph Berechtigungen:
-------------------------------------------------
- 1. User.Read              - Lesen des Benutzerprofils (Delegated)
- 2. User.ReadBasic.All     - Lesen grundlegender Profile aller Benutzer (Delegated)
- 3. User.Read.All          - Lesen aller Benutzerprofile (Application)
- 4. Directory.Read.All     - Lesen von Verzeichnisdaten (Application)
- 5. Directory.ReadWrite.All- Lesen und Schreiben von Verzeichnisdaten (Application)
- 6. Group.Read.All         - Lesen aller Gruppenprofile (Application)
- 7. Group.ReadWrite.All    - Lesen und Schreiben von Gruppenprofilen (Application)
- 8. Mail.Read              - Lesen von E-Mails (Application)
- 9. Mail.Send              - Senden von E-Mails (Application)
-10. Sites.Read.All         - Lesen aller SharePoint-Websitesammlungen (Application)
-11. Sites.ReadWrite.All    - Lesen und Schreiben aller SharePoint-Websitesammlungen (Application)
+Commonly used Microsoft Graph permissions:
+------------------------------------------
+ 1. User.Read              - Read user profile (Delegated)
+ 2. User.ReadBasic.All     - Read basic profiles of all users (Delegated)
+ 3. User.Read.All          - Read all user profiles (Application)
+ 4. Directory.Read.All     - Read directory data (Application)
+ 5. Directory.ReadWrite.All- Read and write directory data (Application)
+ 6. Group.Read.All         - Read all group profiles (Application)
+ 7. Group.ReadWrite.All    - Read and write group profiles (Application)
+ 8. Mail.Read              - Read emails (Application)
+ 9. Mail.Send              - Send emails (Application)
+10. Sites.Read.All         - Read all SharePoint site collections (Application)
+11. Sites.ReadWrite.All    - Read and write all SharePoint site collections (Application)
 
-Benutzerdefinierte Berechtigung:
---------------------------------
-12. Benutzerdefinierte Berechtigung eingeben
+Custom permission:
+------------------
+12. Enter a custom permission
 
 "@ -ForegroundColor White
 
     $done = $false
     while (-not $done) {
-        Write-Host "`nNummer eingeben oder 'fertig' zum Abschließen:" -ForegroundColor Yellow
-        $choice = Read-Host "Auswahl"
+        Write-Host "`nEnter a number or 'done' to finish:" -ForegroundColor Yellow
+        $choice = Read-Host "Selection"
 
-        if ($choice -eq "fertig") {
+        if ($choice -eq "done") {
             $done = $true
         } elseif ($choice -eq "12") {
-            $apiId          = Read-Host "API-ID (z.B. 00000003-0000-0000-c000-000000000000 für Microsoft Graph)"
-            $permissionName = Read-Host "Berechtigungsname (z.B. User.Read)"
-            $permissionType = Read-Host "Berechtigungstyp (Application oder Delegated)"
+            $apiId          = Read-Host "API ID (e.g. 00000003-0000-0000-c000-000000000000 for Microsoft Graph)"
+            $permissionName = Read-Host "Permission name (e.g. User.Read)"
+            $permissionType = Read-Host "Permission type (Application or Delegated)"
 
             $permissions += @{ ApiId = $apiId; PermissionName = $permissionName; Type = $permissionType }
-            Write-Host "Benutzerdefinierte Berechtigung hinzugefügt: $permissionName ($permissionType)" -ForegroundColor Green
+            Write-Host "Custom permission added: $permissionName ($permissionType)" -ForegroundColor Green
         } elseif ($choice -in 1..11) {
             $permissionMap = @{
                 1  = @{ Name = "User.Read";               Type = "Delegated" }
@@ -258,36 +258,36 @@ Benutzerdefinierte Berechtigung:
             }
             $sel = $permissionMap[[int]$choice]
             $permissions += @{ ApiId = "00000003-0000-0000-c000-000000000000"; PermissionName = $sel.Name; Type = $sel.Type }
-            Write-Host "Berechtigung hinzugefügt: $($sel.Name) ($($sel.Type))" -ForegroundColor Green
+            Write-Host "Permission added: $($sel.Name) ($($sel.Type))" -ForegroundColor Green
         } else {
-            Write-Host "Ungültige Auswahl. Bitte 1-12 oder 'fertig'." -ForegroundColor Red
+            Write-Host "Invalid selection. Please enter 1-12 or 'done'." -ForegroundColor Red
         }
     }
 }
 
-# ===== ERSTELLUNGSPROZESS MIT ROLLBACK =====
+# ===== CREATION PROCESS WITH ROLLBACK =====
 $app             = $null
 $secret          = $null
 $servicePrincipal = $null
 
 try {
-    Write-Host "`nStarte den Erstellungsprozess..." -ForegroundColor Cyan
+    Write-Host "`nStarting creation process..." -ForegroundColor Cyan
 
-    # SCHRITT 1: App-Registrierung erstellen
-    Write-Host "1. Erstelle neue App-Registrierung: $AppName..." -ForegroundColor Cyan
+    # STEP 1: Create app registration
+    Write-Host "1. Creating new app registration: $AppName..." -ForegroundColor Cyan
 
     $appParams = @{
         DisplayName     = $AppName
         SignInAudience  = "AzureADMyOrg"
-        Notes           = "Erstellt von: $OwnerName am $(Get-Date -Format 'dd.MM.yyyy')"
+        Notes           = "Created by: $OwnerName on $(Get-Date -Format 'dd.MM.yyyy')"
     }
 
     $app = New-MgApplication @appParams
-    Write-Host "   ✓ App-Registrierung erfolgreich erstellt (Object ID: $($app.Id))" -ForegroundColor Green
+    Write-Host "   ✓ App registration created successfully (Object ID: $($app.Id))" -ForegroundColor Green
 
-    # SCHRITT 2: API-Berechtigungen
+    # STEP 2: API permissions
     if ($permissions.Count -gt 0) {
-        Write-Host "2. Konfiguriere API-Berechtigungen..." -ForegroundColor Cyan
+        Write-Host "2. Configuring API permissions..." -ForegroundColor Cyan
         $currentAccess = @()
         if ($app.RequiredResourceAccess) { $currentAccess = @($app.RequiredResourceAccess) }
 
@@ -300,26 +300,26 @@ try {
                     -PermType      $perm.Type `
                     -CurrentAccess $currentAccess
             } catch {
-                Write-Host "   Warnung: Berechtigung $($perm.PermissionName) konnte nicht gesetzt werden: $($_.Exception.Message)" -ForegroundColor Yellow
+                Write-Host "   Warning: Permission $($perm.PermissionName) could not be set: $($_.Exception.Message)" -ForegroundColor Yellow
             }
         }
     }
 
-    # SCHRITT 3: Client Secret erstellen
-    Write-Host "3. Generiere Client Secret ($SecretValidityYears Jahr(e))..." -ForegroundColor Cyan
+    # STEP 3: Create client secret
+    Write-Host "3. Generating client secret ($SecretValidityYears year(s))..." -ForegroundColor Cyan
     $endDate = (Get-Date).AddYears($SecretValidityYears)
 
     $secret = Add-MgApplicationPassword -ApplicationId $app.Id -PasswordCredential @{
-        displayName = "Auto-generiertes Secret"
+        displayName = "Auto-generated secret"
         endDateTime = $endDate
     }
-    Write-Host "   ✓ Client Secret erstellt (gültig bis: $($endDate.ToString('dd.MM.yyyy')))" -ForegroundColor Green
+    Write-Host "   ✓ Client secret created (valid until: $($endDate.ToString('dd.MM.yyyy')))" -ForegroundColor Green
 
-    # SCHRITT 4: Service Principal erstellen
-    Write-Host "4. Erstelle Enterprise App (Service Principal)..." -ForegroundColor Cyan
+    # STEP 4: Create service principal
+    Write-Host "4. Creating enterprise app (service principal)..." -ForegroundColor Cyan
     $servicePrincipal = New-MgServicePrincipal -AppId $app.AppId
 
-    Write-Host "   Warte auf Abschluss der Service Principal-Erstellung..." -ForegroundColor Yellow
+    Write-Host "   Waiting for service principal creation to complete..." -ForegroundColor Yellow
     Start-Sleep -Seconds 10
 
     $checkSP = Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'"
@@ -329,41 +329,41 @@ try {
     }
 
     if ($null -ne $checkSP) {
-        Write-Host "   ✓ Enterprise App erstellt (Object ID: $($checkSP.Id))" -ForegroundColor Green
+        Write-Host "   ✓ Enterprise app created (Object ID: $($checkSP.Id))" -ForegroundColor Green
     } else {
-        Write-Host "   Warnung: Enterprise App konnte nicht verifiziert werden (möglicherweise noch in Bearbeitung)." -ForegroundColor Yellow
+        Write-Host "   Warning: Enterprise app could not be verified (may still be processing)." -ForegroundColor Yellow
     }
 
-    # ===== ERGEBNISSE ANZEIGEN =====
+    # ===== DISPLAY RESULTS =====
     Write-Host @"
 
 ========================================================================
-                   ERSTELLUNGSPROZESS ABGESCHLOSSEN
+                   CREATION PROCESS COMPLETED
 ========================================================================
 
 "@ -ForegroundColor Green
 
     Write-Host @"
-### KOPIERBEREICH - APP-DETAILS ###
+### COPY AREA - APP DETAILS ###
 
-=== App-Registrierung ===
-Name:          $AppName
+=== App Registration ===
+Name:            $AppName
 App (Client) ID: $($app.AppId)
-Object ID:     $($app.Id)
+Object ID:       $($app.Id)
 
 === Client Secret ===
-Wert:          $($secret.SecretText)
-Gültig bis:    $($endDate.ToString('dd.MM.yyyy'))
+Value:           $($secret.SecretText)
+Valid until:     $($endDate.ToString('dd.MM.yyyy'))
 
 === Enterprise App ===
-Name:          $AppName
-Object ID:     $(if ($null -ne $checkSP) { $checkSP.Id } else { "Nicht verifiziert" })
+Name:            $AppName
+Object ID:       $(if ($null -ne $checkSP) { $checkSP.Id } else { "Not verified" })
 
 === Tenant Information ===
-Tenant ID:     $($context.TenantId)
-Tenant Name:   $($context.TenantDomain)
+Tenant ID:       $($context.TenantId)
+Tenant Name:     $($context.TenantDomain)
 
-### AUTHENTIFIZIERUNGSBEISPIELE ###
+### AUTHENTICATION EXAMPLES ###
 
 # Azure CLI
 az login --service-principal -u $($app.AppId) -p "$($secret.SecretText)" --tenant $($context.TenantId)
@@ -377,10 +377,10 @@ Connect-MgGraph -ClientId "$($app.AppId)" -TenantId "$($context.TenantId)" -Clie
 
 "@ -ForegroundColor White -BackgroundColor DarkBlue
 
-    # ===== DATEI-EXPORT (nur mit expliziter Zustimmung) =====
+    # ===== FILE EXPORT (only with explicit consent) =====
     if (-not $SaveToFile) {
-        $saveChoice = Read-Host "`n⚠️  Möchten Sie die Details (inkl. Secret) in eine Textdatei speichern? Das Secret ist danach sichtbar! (J/N) [Standard: N]"
-        $SaveToFile = ($saveChoice -eq "J" -or $saveChoice -eq "j")
+        $saveChoice = Read-Host "`n⚠️  Would you like to save the details (including secret) to a text file? The secret will be visible! (Y/N) [Default: N]"
+        $SaveToFile = ($saveChoice -eq "Y" -or $saveChoice -eq "y")
     }
 
     if ($SaveToFile) {
@@ -388,37 +388,37 @@ Connect-MgGraph -ClientId "$($app.AppId)" -TenantId "$($context.TenantId)" -Clie
         try {
             $exportContent = @"
 ========================================================================
-              MICROSOFT ENTRA ID APP-DETAILS
+              MICROSOFT ENTRA ID APP DETAILS
 ========================================================================
 
-⚠️  SICHERHEITSHINWEIS: Diese Datei enthält ein Client Secret im Klartext.
-    Bitte sichern oder löschen Sie diese Datei entsprechend Ihrer Sicherheitsrichtlinien.
+⚠️  SECURITY NOTE: This file contains a client secret in plaintext.
+    Please secure or delete this file according to your security policies.
 
-=== App-Registrierung ===
+=== App Registration ===
 Name:            $AppName
 App (Client) ID: $($app.AppId)
 Object ID:       $($app.Id)
-Erstellt von:    $OwnerName
-Erstellt am:     $(Get-Date)
+Created by:      $OwnerName
+Created on:      $(Get-Date)
 
 === Client Secret ===
-Wert:            $($secret.SecretText)
-Gültig bis:      $($endDate.ToString('dd.MM.yyyy'))
+Value:           $($secret.SecretText)
+Valid until:     $($endDate.ToString('dd.MM.yyyy'))
 
 === Enterprise App (Service Principal) ===
 Name:            $AppName
-Object ID:       $(if ($null -ne $checkSP) { $checkSP.Id } else { "Nicht verifiziert" })
+Object ID:       $(if ($null -ne $checkSP) { $checkSP.Id } else { "Not verified" })
 
 === Tenant Information ===
 Tenant ID:       $($context.TenantId)
 Tenant Name:     $($context.TenantDomain)
 
-=== Konfigurierte API-Berechtigungen ===
+=== Configured API Permissions ===
 $(if ($permissions.Count -gt 0) {
     ($permissions | ForEach-Object { "$($_.PermissionName) ($($_.Type))" }) -join "`n"
-} else { "Keine Berechtigungen konfiguriert" })
+} else { "No permissions configured" })
 
-=== Verwendung ===
+=== Usage ===
 
 # Azure CLI
 az login --service-principal -u $($app.AppId) -p "$($secret.SecretText)" --tenant $($context.TenantId)
@@ -427,11 +427,11 @@ az login --service-principal -u $($app.AppId) -p "$($secret.SecretText)" --tenan
 `$credential = New-Object System.Management.Automation.PSCredential("$($app.AppId)", (ConvertTo-SecureString "$($secret.SecretText)" -AsPlainText -Force))
 Connect-AzAccount -ServicePrincipal -Credential `$credential -Tenant "$($context.TenantId)"
 
-WICHTIG: Bewahren Sie diese Informationen sicher auf!
+IMPORTANT: Store this information securely!
 "@
             $exportContent | Out-File -FilePath $exportPath -Encoding UTF8
 
-            # Datei-Berechtigungen einschränken (nur aktueller Benutzer)
+            # Restrict file permissions to current user only
             try {
                 $acl = Get-Acl $exportPath
                 $acl.SetAccessRuleProtection($true, $false)
@@ -441,38 +441,38 @@ WICHTIG: Bewahren Sie diese Informationen sicher auf!
                 $acl.SetAccessRule($rule)
                 Set-Acl $exportPath $acl
             } catch {
-                Write-Warning "ACL-Einschränkung fehlgeschlagen (nicht kritisch): $($_.Exception.Message)"
+                Write-Warning "ACL restriction failed (non-critical): $($_.Exception.Message)"
             }
 
-            Write-Host "`n✓ Details gespeichert: $((Get-Item $exportPath).FullName)" -ForegroundColor Yellow
-            Write-Host "  ⚠️  Datei enthält Secret im Klartext – sicher aufbewahren oder sofort löschen!" -ForegroundColor Red
+            Write-Host "`n✓ Details saved: $((Get-Item $exportPath).FullName)" -ForegroundColor Yellow
+            Write-Host "  ⚠️  File contains secret in plaintext – store securely or delete immediately!" -ForegroundColor Red
         } catch {
-            Write-Host "`nFehler beim Speichern der Datei: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "Bitte notieren Sie sich die oben angezeigten Informationen manuell." -ForegroundColor Yellow
+            Write-Host "`nError saving file: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "Please note the secret from the copy area above manually." -ForegroundColor Yellow
         }
     } else {
-        Write-Host "`n✓ Kein Datei-Export. Bitte notieren Sie sich das Secret aus dem Kopierbereich oben." -ForegroundColor Cyan
+        Write-Host "`n✓ No file export. Please note the secret from the copy area above." -ForegroundColor Cyan
     }
 }
 catch {
-    Write-Host "`n❌ Fehler bei der Erstellung der App:" -ForegroundColor Red
+    Write-Host "`n❌ Error during app creation:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host "`nFehlerdetails:" -ForegroundColor Yellow
-    Write-Host "Typ:      $($_.Exception.GetType().Name)" -ForegroundColor Yellow
+    Write-Host "`nError details:" -ForegroundColor Yellow
+    Write-Host "Type:     $($_.Exception.GetType().Name)" -ForegroundColor Yellow
     Write-Host "Position: $($_.InvocationInfo.PositionMessage)" -ForegroundColor Yellow
 
-    # ===== ROLLBACK: App löschen wenn vorhanden =====
+    # ===== ROLLBACK: Delete app if it was created =====
     if ($null -ne $app) {
-        Write-Host "`n🔄 Rollback: Lösche bereits erstellte App-Registrierung '$AppName'..." -ForegroundColor Yellow
+        Write-Host "`n🔄 Rollback: Deleting already-created app registration '$AppName'..." -ForegroundColor Yellow
         try {
             Remove-MgApplication -ApplicationId $app.Id -Confirm:$false
-            Write-Host "   ✓ App-Registrierung wurde entfernt (Rollback erfolgreich)." -ForegroundColor Green
+            Write-Host "   ✓ App registration removed (rollback successful)." -ForegroundColor Green
         } catch {
-            Write-Host "   ⚠ Rollback fehlgeschlagen: App '$AppName' (ID: $($app.Id)) muss manuell gelöscht werden." -ForegroundColor Red
+            Write-Host "   ⚠ Rollback failed: App '$AppName' (ID: $($app.Id)) must be deleted manually." -ForegroundColor Red
             Write-Host "   Entra Portal: https://entra.microsoft.com → App registrations → All applications" -ForegroundColor Yellow
         }
     }
 }
 finally {
-    Write-Host "`nSkript abgeschlossen. Vielen Dank für die Verwendung des Entra ID App-Erstellungsskripts." -ForegroundColor Cyan
+    Write-Host "`nScript completed. Thank you for using the Entra ID App Creation script." -ForegroundColor Cyan
 }
