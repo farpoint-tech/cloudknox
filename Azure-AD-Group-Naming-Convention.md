@@ -1,6 +1,6 @@
 # Konzept zur Benennungslogik für Microsoft Entra ID Gruppen und Benutzerkonten
 
-**Version:** 4.1
+**Version:** 4.2
 **Organisation:** 365solution AG
 **Status:** Arbeitsstand / Entwurf
 
@@ -164,8 +164,15 @@ Die Function beschreibt, was die Gruppe konkret tut oder abbildet. Die Werte sin
 - `SPO` — SharePoint Online
 - `SMB` — Shared Mailbox
 - `DST` — Distribution List
+- `UPD` — Windows/macOS Update Ring
 
 **Enterprise Applications (EAP):** Wenn eine Gruppe im IAM-Bereich dazu dient, Benutzern den Zugriff auf eine Drittanwendung zu gewähren, wird die Function `EAP` genutzt. Der Name der Applikation folgt dann als Qualifier (z.B. `BASE_IAM-GLOB-DEF-EAP-Salesforce`).
+
+**Windows/macOS Update Rings (UPD):** Gruppen für Update Ringe erhalten die Function `UPD`. Die Ring-Stufe wird als Qualifier angefügt:
+- `BASE_MDM-GLOB-WIN-UPD-PILOT` — Windows Pilot-Ring (Early Adopter)
+- `BASE_MDM-GLOB-WIN-UPD-LAST` — Windows Last-Ring (konservativ, verzögert)
+- `BASE_MDM-GLOB-MAC-UPD-PILOT` — macOS Pilot-Ring
+- `BASE_MDM-GLOB-MAC-UPD-LAST` — macOS Last-Ring
 
 ---
 
@@ -175,9 +182,11 @@ Die Function beschreibt, was die Gruppe konkret tut oder abbildet. Die Werte sin
 - `BASE_IAM-DE-PIM-ELG-GlobalAdmin`
 - `BASE_IAM-GLOB-DEF-EAP-Workday`
 
-**TEST und PILOT:** Wenn eine Gruppe nicht produktiv im Regelbetrieb steht, wird dies am Ende des Namens mit einem Unterstrich sichtbar gemacht.
-- `BASE_MDM-MUCx-WIN-DEF_TEST`
+**PILOT als Umgebungs-Suffix:** Wenn eine Gruppe nicht produktiv im Regelbetrieb steht, wird dies am Ende des Namens mit einem Unterstrich sichtbar gemacht.
+- `BASE_MDM-MUCx-WIN-DEF_PILOT`
 - `BAEX_365-DE-HRx-SPO_PILOT`
+
+> **Hinweis:** `PILOT` und `LAST` als **Qualifier** (mit Bindestrich) kennzeichnen feste Update-Ring-Stufen, z.B. `BASE_MDM-GLOB-WIN-UPD-PILOT`. Als **Suffix** (mit Unterstrich) kennzeichnen sie temporäre Pilotgruppen außerhalb des Regelbetriebs. `_TEST` entfällt — gültige Suffixe sind ausschließlich `_PILOT`.
 
 ---
 
@@ -338,7 +347,13 @@ Dieses Naming-Konzept definiert, wie Objekte heißen. Die folgenden Fragestellun
 
 ---
 
-**Version:** 4.1 | **Autor:** IAM Team — 365solution AG
+**Version:** 4.2 | **Autor:** IAM Team — 365solution AG
+
+**Änderungen (4.1 → 4.2)**
+- Ergänzung von `UPD` als Function-Code für Windows/macOS Update Ringe
+- Update Ring Qualifier: `PILOT` und `LAST` als Bindestrich-Qualifier (feste Ring-Stufen)
+- `_TEST` als Umgebungs-Suffix entfernt — gültiges Suffix ist ausschließlich `_PILOT`
+- Klarstellung: Qualifier (Bindestrich) vs. Umgebungs-Suffix (Unterstrich) für PILOT/LAST
 
 **Änderungen (4.0 → 4.1)**
 - Reintegration von Kapitel 14 (Einordnung als Zielbild)
