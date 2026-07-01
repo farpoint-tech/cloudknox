@@ -212,6 +212,19 @@ function Convert-ToMailboxAlias {
     return $alias
 }
 
+# -- Sicherer Eigenschaftszugriff auf PSObjects (Strict-Mode-sicher) --
+function Get-RowProp {
+    param(
+        [Parameter(Mandatory)][object]$Row,
+        [Parameter(Mandatory)][string]$Name,
+        [object]$Default = $null
+    )
+    if ($null -eq $Row) { return $Default }
+    $prop = $Row.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $Default }
+    return $prop.Value
+}
+
 # -- Empfänger-Existenzprüfung --
 function Get-ExistingRecipient {
     param([Parameter(Mandatory)][string]$Identity)
@@ -326,9 +339,12 @@ function Connect-ExchangeCustom {
             -ShowBanner:$false `
             -ErrorAction Stop
     }
-    else {
+    elseif ($mode -eq 'interactive' -or [string]::IsNullOrWhiteSpace($mode)) {
         Write-Log "Authentifizierungsmodus: Interaktiver Web-Login"
         Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+    }
+    else {
+        throw "Unbekannter Authentifizierungsmodus: '$mode'. Gültige Werte: 'interactive', 'app'."
     }
 }
 
@@ -345,17 +361,18 @@ function Test-RowsBeforeProvisioning {
 
     $delimiter     = if ((Get-SafeTrim $Config.general.delimiter)) { Get-SafeTrim $Config.general.delimiter } else { ';' }
     $defaultDomain = Get-SafeTrim $Config.general.domain
-    $issues        = @()
-    $validRows     = @()
+    $issues           = @()
+    $validRows        = @()
+    $invalidRowCount  = 0
 
     for ($i = 0; $i -lt $Rows.Count; $i++) {
         $Row           = $Rows[$i]
         $rowLabel      = "$Type Zeile $($i + 1)"
         $rowHasIssue   = $false
 
-        $vorname  = Get-SafeTrim $Row.Vorname
-        $nachname = Get-SafeTrim $Row.Nachname
-        $zusatz   = Get-SafeTrim $Row.Zusatz
+        $vorname  = Get-SafeTrim (Get-RowProp $Row 'Vorname')
+        $nachname = Get-SafeTrim (Get-RowProp $Row 'Nachname')
+        $zusatz   = Get-SafeTrim (Get-RowProp $Row 'Zusatz')
 
         # Leere Zeile überspringen
         if ([string]::IsNullOrWhiteSpace($vorname) -and
@@ -376,7 +393,7 @@ function Test-RowsBeforeProvisioning {
             try {
                 $generatedAlias = Convert-ToMailboxAlias -Value "$vorname.$nachname.$zusatz"
                 $primaryAddress = Get-EffectivePrimaryAddress `
-                    -ExplicitAddress (Get-SafeTrim $Row.PrimaereAdresse) `
+                    -ExplicitAddress (Get-SafeTrim (Get-RowProp $Row 'PrimaereAdresse')) `
                     -GeneratedAlias $generatedAlias `
                     -DefaultDomain $defaultDomain
                 $alias = Get-AliasFromAddress -Address $primaryAddress
@@ -391,15 +408,15 @@ function Test-RowsBeforeProvisioning {
                 $fieldsToValidate = @()
                 if ($Type -eq 'SharedMailbox') {
                     $fieldsToValidate += @(
-                        @{ Name = 'Weiterleitung'; Values = @(Get-SafeTrim $Row.Weiterleitung) | Where-Object { $_ } },
-                        @{ Name = 'FullAccess';    Values = Split-MultiValue -Value $Row.FullAccess -Delimiter $delimiter },
-                        @{ Name = 'SendAs';        Values = Split-MultiValue -Value $Row.SendAs -Delimiter $delimiter }
+                        @{ Name = 'Weiterleitung'; Values = @(Get-SafeTrim (Get-RowProp $Row 'Weiterleitung')) | Where-Object { $_ } },
+                        @{ Name = 'FullAccess';    Values = Split-MultiValue -Value (Get-RowProp $Row 'FullAccess') -Delimiter $delimiter },
+                        @{ Name = 'SendAs';        Values = Split-MultiValue -Value (Get-RowProp $Row 'SendAs') -Delimiter $delimiter }
                     )
                 }
                 elseif ($Type -eq 'DistributionGroup') {
                     $fieldsToValidate += @(
-                        @{ Name = 'Mitglieder'; Values = Split-MultiValue -Value $Row.Mitglieder -Delimiter $delimiter },
-                        @{ Name = 'Besitzer';   Values = Split-MultiValue -Value $Row.Besitzer -Delimiter $delimiter }
+                        @{ Name = 'Mitglieder'; Values = Split-MultiValue -Value (Get-RowProp $Row 'Mitglieder') -Delimiter $delimiter },
+                        @{ Name = 'Besitzer';   Values = Split-MultiValue -Value (Get-RowProp $Row 'Besitzer') -Delimiter $delimiter }
                     )
                 }
 
@@ -421,11 +438,15 @@ function Test-RowsBeforeProvisioning {
         if (-not $rowHasIssue) {
             $validRows += $Row
         }
+        else {
+            $invalidRowCount++
+        }
     }
 
     return [PSCustomObject]@{
-        Issues    = $issues
-        ValidRows = $validRows
+        Issues          = $issues
+        ValidRows       = $validRows
+        InvalidRowCount = $invalidRowCount
     }
 }
 
@@ -443,23 +464,23 @@ function New-SharedMailboxFromRow {
     $displayNamePrefix  = Get-SafeTrim $Config.general.displayNamePrefixSharedMailbox
     $defaultHiddenGAL   = Get-SafeBool $Config.general.defaultHiddenFromGAL $false
 
-    $vorname      = Get-SafeTrim $Row.Vorname
-    $nachname     = Get-SafeTrim $Row.Nachname
-    $zusatz       = Get-SafeTrim $Row.Zusatz
-    $anzeigename  = Get-SafeTrim $Row.Anzeigename
-    $weiterleitung = Get-SafeTrim $Row.Weiterleitung
-    $hiddenGAL    = Get-SafeBool $Row.HiddenFromGAL $defaultHiddenGAL
+    $vorname       = Get-SafeTrim (Get-RowProp $Row 'Vorname')
+    $nachname      = Get-SafeTrim (Get-RowProp $Row 'Nachname')
+    $zusatz        = Get-SafeTrim (Get-RowProp $Row 'Zusatz')
+    $anzeigename   = Get-SafeTrim (Get-RowProp $Row 'Anzeigename')
+    $weiterleitung = Get-SafeTrim (Get-RowProp $Row 'Weiterleitung')
+    $hiddenGAL     = Get-SafeBool (Get-RowProp $Row 'HiddenFromGAL') $defaultHiddenGAL
 
     $generatedAlias = Convert-ToMailboxAlias -Value "$vorname.$nachname.$zusatz"
-    $primaryAddress = Get-EffectivePrimaryAddress -ExplicitAddress $Row.PrimaereAdresse -GeneratedAlias $generatedAlias -DefaultDomain $defaultDomain
+    $primaryAddress = Get-EffectivePrimaryAddress -ExplicitAddress (Get-RowProp $Row 'PrimaereAdresse') -GeneratedAlias $generatedAlias -DefaultDomain $defaultDomain
     $alias          = Get-AliasFromAddress -Address $primaryAddress
 
     if ([string]::IsNullOrWhiteSpace($anzeigename)) {
         $anzeigename = "$displayNamePrefix$vorname.$nachname.$zusatz"
     }
 
-    $fullAccessUsers = Split-MultiValue -Value $Row.FullAccess -Delimiter $delimiter
-    $sendAsUsers     = Split-MultiValue -Value $Row.SendAs -Delimiter $delimiter
+    $fullAccessUsers = Split-MultiValue -Value (Get-RowProp $Row 'FullAccess') -Delimiter $delimiter
+    $sendAsUsers     = Split-MultiValue -Value (Get-RowProp $Row 'SendAs') -Delimiter $delimiter
 
     Assert-RecipientDoesNotExist -PrimaryAddress $primaryAddress -Alias $alias
 
@@ -526,22 +547,22 @@ function New-DistributionGroupFromRow {
     $displayNamePrefix = Get-SafeTrim $Config.general.displayNamePrefixDistributionGroup
     $defaultHiddenGAL  = Get-SafeBool $Config.general.defaultHiddenFromGAL $false
 
-    $vorname     = Get-SafeTrim $Row.Vorname
-    $nachname    = Get-SafeTrim $Row.Nachname
-    $zusatz      = Get-SafeTrim $Row.Zusatz
-    $anzeigename = Get-SafeTrim $Row.Anzeigename
-    $hiddenGAL   = Get-SafeBool $Row.HiddenFromGAL $defaultHiddenGAL
+    $vorname     = Get-SafeTrim (Get-RowProp $Row 'Vorname')
+    $nachname    = Get-SafeTrim (Get-RowProp $Row 'Nachname')
+    $zusatz      = Get-SafeTrim (Get-RowProp $Row 'Zusatz')
+    $anzeigename = Get-SafeTrim (Get-RowProp $Row 'Anzeigename')
+    $hiddenGAL   = Get-SafeBool (Get-RowProp $Row 'HiddenFromGAL') $defaultHiddenGAL
 
     $generatedAlias = Convert-ToMailboxAlias -Value "$vorname.$nachname.$zusatz"
-    $primaryAddress = Get-EffectivePrimaryAddress -ExplicitAddress $Row.PrimaereAdresse -GeneratedAlias $generatedAlias -DefaultDomain $defaultDomain
+    $primaryAddress = Get-EffectivePrimaryAddress -ExplicitAddress (Get-RowProp $Row 'PrimaereAdresse') -GeneratedAlias $generatedAlias -DefaultDomain $defaultDomain
     $alias          = Get-AliasFromAddress -Address $primaryAddress
 
     if ([string]::IsNullOrWhiteSpace($anzeigename)) {
         $anzeigename = "$displayNamePrefix$vorname.$nachname.$zusatz"
     }
 
-    $members = Split-MultiValue -Value $Row.Mitglieder -Delimiter $delimiter
-    $owners  = Split-MultiValue -Value $Row.Besitzer -Delimiter $delimiter
+    $members = Split-MultiValue -Value (Get-RowProp $Row 'Mitglieder') -Delimiter $delimiter
+    $owners  = Split-MultiValue -Value (Get-RowProp $Row 'Besitzer') -Delimiter $delimiter
 
     Assert-RecipientDoesNotExist -PrimaryAddress $primaryAddress -Alias $alias
 
@@ -611,10 +632,9 @@ $CreatedCount = 0
 $SkippedCount = 0
 $FailedCount  = 0
 
-Write-Log "Scriptstart"
-Write-Log "Config: $ConfigFile"
-
 try {
+    Write-Log "Scriptstart"
+    Write-Log "Config: $ConfigFile"
     # -- Module --
     Ensure-Module -ModuleName "ExchangeOnlineManagement"
     Ensure-Module -ModuleName "ImportExcel"
@@ -628,6 +648,12 @@ try {
         throw "Config-Datei nicht gefunden: $ConfigFile"
     }
     $Config = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+
+    # -- Domain-Pflichtfeld prüfen --
+    $defaultDomain = Get-SafeTrim $Config.general.domain
+    if ([string]::IsNullOrWhiteSpace($defaultDomain)) {
+        throw "general.domain in config.json ist leer. Eine Standarddomain ist erforderlich."
+    }
 
     # -- Excel-Datei bestimmen --
     if ($PSBoundParameters.ContainsKey('ExcelFileName') -and -not [string]::IsNullOrWhiteSpace($ExcelFileName)) {
@@ -648,8 +674,20 @@ try {
     }
 
     # -- Tabellen aus Excel lesen --
-    $smRows = @(Import-Excel -Path $ExcelFile -TableName "SharedMailboxes" -ErrorAction SilentlyContinue)
-    $dgRows = @(Import-Excel -Path $ExcelFile -TableName "DistributionGroups" -ErrorAction SilentlyContinue)
+    try {
+        $smRows = @(Import-Excel -Path $ExcelFile -TableName "SharedMailboxes")
+    }
+    catch {
+        Write-Log "Tabelle 'SharedMailboxes' nicht gefunden oder nicht lesbar: $($_.Exception.Message)" "WARN"
+        $smRows = @()
+    }
+    try {
+        $dgRows = @(Import-Excel -Path $ExcelFile -TableName "DistributionGroups")
+    }
+    catch {
+        Write-Log "Tabelle 'DistributionGroups' nicht gefunden oder nicht lesbar: $($_.Exception.Message)" "WARN"
+        $dgRows = @()
+    }
 
     if ($smRows.Count -eq 0 -and $dgRows.Count -eq 0) {
         throw "Keine Daten gefunden. Stelle sicher, dass die Excel-Tabellen 'SharedMailboxes' und/oder 'DistributionGroups' existieren."
@@ -678,7 +716,7 @@ try {
             Write-Log $issue "ERROR"
         }
 
-        $SkippedCount = $allIssues.Count
+        $SkippedCount = $smValidation.InvalidRowCount + $dgValidation.InvalidRowCount
 
         if ($totalValid -eq 0) {
             throw "Keine gültigen Zeilen verfügbar. Abbruch."
@@ -707,18 +745,19 @@ try {
                 $result = New-SharedMailboxFromRow -Row $row -Config $Config
                 if ($null -ne $result) {
                     $Results.Add($result)
-                    $CreatedCount++
+                    if ($result.Action -eq 'Created') { $CreatedCount++ }
                 }
             }
             catch {
                 $errMsg = $_.Exception.Message
                 Write-Log "Fehler bei Shared Mailbox (Zeile $TotalCount): $errMsg" "ERROR"
                 $FailedCount++
+                $rawAlias = "$(Get-RowProp $row 'Vorname').$(Get-RowProp $row 'Nachname').$(Get-RowProp $row 'Zusatz')"
                 $Results.Add([PSCustomObject]@{
                     Type        = "SharedMailbox"
-                    Alias       = Get-SafeTrim $row.Vorname
-                    PrimarySmtp = ""
-                    DisplayName = Get-SafeTrim $row.Anzeigename
+                    Alias       = $rawAlias
+                    PrimarySmtp = Get-SafeTrim (Get-RowProp $row 'PrimaereAdresse')
+                    DisplayName = Get-SafeTrim (Get-RowProp $row 'Anzeigename')
                     Action      = "Failed"
                     Error       = $errMsg
                 })
@@ -735,18 +774,19 @@ try {
                 $result = New-DistributionGroupFromRow -Row $row -Config $Config
                 if ($null -ne $result) {
                     $Results.Add($result)
-                    $CreatedCount++
+                    if ($result.Action -eq 'Created') { $CreatedCount++ }
                 }
             }
             catch {
                 $errMsg = $_.Exception.Message
                 Write-Log "Fehler bei Distribution Group (Zeile $TotalCount): $errMsg" "ERROR"
                 $FailedCount++
+                $rawAlias = "$(Get-RowProp $row 'Vorname').$(Get-RowProp $row 'Nachname').$(Get-RowProp $row 'Zusatz')"
                 $Results.Add([PSCustomObject]@{
                     Type        = "DistributionGroup"
-                    Alias       = Get-SafeTrim $row.Vorname
-                    PrimarySmtp = ""
-                    DisplayName = Get-SafeTrim $row.Anzeigename
+                    Alias       = $rawAlias
+                    PrimarySmtp = Get-SafeTrim (Get-RowProp $row 'PrimaereAdresse')
+                    DisplayName = Get-SafeTrim (Get-RowProp $row 'Anzeigename')
                     Action      = "Failed"
                     Error       = $errMsg
                 })
