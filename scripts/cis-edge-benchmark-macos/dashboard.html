@@ -256,6 +256,7 @@ function updateStats() {
   const fail = r.filter(x => x.status === 'FAIL').length;
   const notcfg = r.filter(x => x.status === 'NOT CONFIGURED').length;
   const total = r.length;
+  if (total === 0) return;
   const l1 = r.filter(x => x.level === 'L1').length;
   const l2 = r.filter(x => x.level === 'L2').length;
 
@@ -322,6 +323,7 @@ function drawLevelChart() {
   let html = '';
   levels.forEach(lv => {
     const items = r.filter(x => x.level === lv);
+    if (items.length === 0) return;
     const pass = items.filter(x => x.status === 'PASS').length;
     const fail = items.filter(x => x.status === 'FAIL').length;
     const notcfg = items.filter(x => x.status === 'NOT CONFIGURED').length;
@@ -396,7 +398,7 @@ function renderTable() {
   tbody.innerHTML = filteredResults.map(r => {
     const statusClass = r.status === 'PASS' ? 'badge-pass' : r.status === 'FAIL' ? 'badge-fail' : 'badge-notcfg';
     const levelClass = r.level === 'L1' ? 'badge-l1' : 'badge-l2';
-    const cur = r.currentValue !== null && r.currentValue !== undefined ? r.currentValue : '<em style="color:var(--text2)">not set</em>';
+    const cur = r.currentValue !== null && r.currentValue !== undefined ? esc(String(r.currentValue)) : '<em style="color:var(--text2)">not set</em>';
     const canEnforce = r.status !== 'PASS';
     return `<tr>
       <td style="font-weight:600;white-space:nowrap">${esc(r.id)}</td>
@@ -404,14 +406,14 @@ function renderTable() {
       <td title="${esc(r.detail || '')}">${esc(r.title)}</td>
       <td class="val-cell" title="${esc(r.regPath)}">${esc(r.valueName)}</td>
       <td class="val-cell">${cur}</td>
-      <td class="val-cell">${r.recommendedValue !== null ? esc(String(r.recommendedDisplay || r.recommendedValue)) : '-'}</td>
+      <td class="val-cell">${r.recommendedValue !== null && r.recommendedValue !== undefined ? esc(String(r.recommendedDisplay || r.recommendedValue)) : '-'}</td>
       <td><span class="badge ${statusClass}">${r.status}</span></td>
       <td><button class="enforce-btn" ${canEnforce ? '' : 'disabled'} onclick="showEnforce('${esc(r.id)}')">Enforce</button></td>
     </tr>`;
   }).join('');
 }
 
-function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function esc(s) { if (s == null || s === '') return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 const API_PORT = 18989;
 const API_URL = 'http://localhost:' + API_PORT;
@@ -441,7 +443,7 @@ function openModal(title, desc, codeText, actions) {
 function handleEnforceResult(result, title, fallbackCmd) {
   if (result && result.status === 'ok') {
     // Auto-refresh dashboard with updated audit data
-    if (result.updatedData) {
+    if (result.updatedData && Array.isArray(result.updatedData.results)) {
       auditData = result.updatedData;
       render();
     }
@@ -480,6 +482,7 @@ async function showEnforce(id) {
 
 async function doEnforce(id) {
   const r = auditData.results.find(x => x.id === id);
+  if (!r) { closeModal(); return; }
   const title = 'Enforce: ' + r.id + ' - ' + r.title;
   openModal(title, '<span style="color:var(--notcfg)">Enforcing... check PowerShell window.</span>', null, '');
   const result = await enforceViaServer({checkIds: [id]});
@@ -530,6 +533,7 @@ function exportCSV() {
   a.href = URL.createObjectURL(blob);
   a.download = `CIS_Edge_Audit_${auditData.computer || 'report'}_${(auditData.timestamp || '').replace(/[: ]/g, '-')}.csv`;
   a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 100);
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
