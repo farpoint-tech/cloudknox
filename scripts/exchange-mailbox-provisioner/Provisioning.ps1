@@ -18,6 +18,10 @@
 .PARAMETER ExcelFileName
     Überschreibt den in der config.json hinterlegten Excel-Dateinamen.
 
+.PARAMETER Force
+    Unterdrückt alle interaktiven Rückfragen (Modulinstallation, Validierungsprobleme).
+    Empfohlen für Scheduled Tasks und unbeaufsichtigte Ausführung.
+
 .EXAMPLE
     .\Provisioning.ps1
     Standardlauf mit config.json und interaktivem Login.
@@ -29,16 +33,22 @@
 .EXAMPLE
     .\Provisioning.ps1 -ExcelFileName "Test.xlsx"
     Verwendet eine andere Excel-Datei.
+
+.EXAMPLE
+    .\Provisioning.ps1 -Force
+    Unbeaufsichtigter Lauf ohne Rückfragen (Scheduled Task / CI-Pipeline).
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
     [string]$ConfigFileName = "config.json",
-    [string]$ExcelFileName
+    [string]$ExcelFileName,
+    [switch]$Force
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:SkipConfirmations = $Force.IsPresent
 
 # ============================================================
 # PFADE
@@ -83,6 +93,11 @@ function Confirm-Action {
         [string]$Message
     )
 
+    if ($script:SkipConfirmations) {
+        Write-Log "Automatische Bestätigung (Force-Modus): $Message" "WARN"
+        return $true
+    }
+
     do {
         $answer = Read-Host "$Message [J/N]"
     } until ($answer -match '^(J|N|j|n|Y|y)$')
@@ -108,7 +123,10 @@ function Ensure-Module {
 
     Write-Log "Modul fehlt: $ModuleName" "WARN"
 
-    if (-not (Confirm-Action -Message "Das Modul '$ModuleName' ist nicht installiert. Jetzt installieren?")) {
+    if ($script:SkipConfirmations) {
+        Write-Log "Installiere Modul ohne Rückfrage (Force-Modus): $ModuleName" "WARN"
+    }
+    elseif (-not (Confirm-Action -Message "Das Modul '$ModuleName' ist nicht installiert. Jetzt installieren?")) {
         throw "Benötigtes Modul '$ModuleName' wurde nicht installiert. Script wird beendet."
     }
 
@@ -320,6 +338,15 @@ function Connect-ExchangeCustom {
 
     $mode = (Get-SafeTrim $Config.authentication.mode).ToLowerInvariant()
 
+    $requiredCmdlets = @(
+        'New-Mailbox', 'Set-Mailbox', 'Get-Mailbox',
+        'New-DistributionGroup', 'Set-DistributionGroup',
+        'Add-DistributionGroupMember', 'Get-DistributionGroup',
+        'Add-MailboxPermission', 'Get-MailboxPermission',
+        'Add-RecipientPermission', 'Get-RecipientPermission',
+        'Get-Recipient'
+    )
+
     if ($mode -eq 'app') {
         $appId    = Get-SafeTrim $Config.authentication.appId
         $org      = Get-SafeTrim $Config.authentication.organization
@@ -336,12 +363,16 @@ function Connect-ExchangeCustom {
             -AppId $appId `
             -CertificateThumbprint $certHash `
             -Organization $org `
+            -CommandName $requiredCmdlets `
             -ShowBanner:$false `
             -ErrorAction Stop
     }
     elseif ($mode -eq 'interactive' -or [string]::IsNullOrWhiteSpace($mode)) {
         Write-Log "Authentifizierungsmodus: Interaktiver Web-Login"
-        Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+        Connect-ExchangeOnline `
+            -CommandName $requiredCmdlets `
+            -ShowBanner:$false `
+            -ErrorAction Stop
     }
     else {
         throw "Unbekannter Authentifizierungsmodus: '$mode'. Gültige Werte: 'interactive', 'app'."
@@ -479,6 +510,9 @@ function New-SharedMailboxFromRow {
         $anzeigename = "$displayNamePrefix$vorname.$nachname.$zusatz"
     }
 
+    # Anzeigename: AD-ungültige Zeichen ersetzen
+    $anzeigename = $anzeigename -replace '[/\\:\*\?"<>\|]', '-'
+
     $fullAccessUsers = Split-MultiValue -Value (Get-RowProp $Row 'FullAccess') -Delimiter $delimiter
     $sendAsUsers     = Split-MultiValue -Value (Get-RowProp $Row 'SendAs') -Delimiter $delimiter
 
@@ -495,6 +529,10 @@ function New-SharedMailboxFromRow {
             -ErrorAction Stop | Out-Null
 
         if (-not [string]::IsNullOrWhiteSpace($weiterleitung)) {
+            $fwdDomain = $weiterleitung.Split('@')[-1].ToLowerInvariant()
+            if ($fwdDomain -ne $defaultDomain.ToLowerInvariant()) {
+                Write-Log "  SICHERHEITSHINWEIS: Weiterleitung zu externer Domain '$fwdDomain' ($weiterleitung) - bitte prüfen!" "WARN"
+            }
             Set-Mailbox -Identity $alias `
                 -ForwardingSmtpAddress $weiterleitung `
                 -DeliverToMailboxAndForward $true `
@@ -560,6 +598,9 @@ function New-DistributionGroupFromRow {
     if ([string]::IsNullOrWhiteSpace($anzeigename)) {
         $anzeigename = "$displayNamePrefix$vorname.$nachname.$zusatz"
     }
+
+    # Anzeigename: AD-ungültige Zeichen ersetzen
+    $anzeigename = $anzeigename -replace '[/\\:\*\?"<>\|]', '-'
 
     $members = Split-MultiValue -Value (Get-RowProp $Row 'Mitglieder') -Delimiter $delimiter
     $owners  = Split-MultiValue -Value (Get-RowProp $Row 'Besitzer') -Delimiter $delimiter
@@ -635,6 +676,17 @@ $FailedCount  = 0
 try {
     Write-Log "Scriptstart"
     Write-Log "Config: $ConfigFile"
+
+    if ($WhatIfPreference) {
+        Write-Log "╔══════════════════════════════════════════════════════════╗" "WARN"
+        Write-Log "║  WHATIF-MODUS AKTIV - Keine Objekte werden erstellt/     ║" "WARN"
+        Write-Log "║  geändert. Nur Simulation.                               ║" "WARN"
+        Write-Log "╚══════════════════════════════════════════════════════════╝" "WARN"
+    }
+    if ($script:SkipConfirmations) {
+        Write-Log "Force-Modus aktiv: Alle Rückfragen werden automatisch bestätigt." "WARN"
+    }
+
     # -- Module --
     Ensure-Module -ModuleName "ExchangeOnlineManagement"
     Ensure-Module -ModuleName "ImportExcel"
@@ -648,6 +700,26 @@ try {
         throw "Config-Datei nicht gefunden: $ConfigFile"
     }
     $Config = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+
+    # -- Config-Struktur prüfen --
+    $requiredConfigKeys = @(
+        'general.domain', 'general.excelFile', 'general.delimiter',
+        'general.displayNamePrefixSharedMailbox', 'general.displayNamePrefixDistributionGroup',
+        'general.defaultHiddenFromGAL', 'authentication.mode'
+    )
+    foreach ($keyPath in $requiredConfigKeys) {
+        $parts  = $keyPath -split '\.'
+        $obj    = $Config
+        $found  = $true
+        foreach ($part in $parts) {
+            $p = $obj.PSObject.Properties[$part]
+            if ($null -eq $p) { $found = $false; break }
+            $obj = $p.Value
+        }
+        if (-not $found) {
+            throw "Pflichtfeld '$keyPath' fehlt in config.json."
+        }
+    }
 
     # -- Domain-Pflichtfeld prüfen --
     $defaultDomain = Get-SafeTrim $Config.general.domain
@@ -753,12 +825,20 @@ try {
                 Write-Log "Fehler bei Shared Mailbox (Zeile $TotalCount): $errMsg" "ERROR"
                 $FailedCount++
                 $rawAlias = "$(Get-RowProp $row 'Vorname').$(Get-RowProp $row 'Nachname').$(Get-RowProp $row 'Zusatz')"
+                $partialAction = "Failed"
+                if ($errMsg -notmatch "existiert bereits") {
+                    $partialCheck = Get-Mailbox -Identity $rawAlias -ErrorAction SilentlyContinue
+                    if ($partialCheck) {
+                        Write-Log "  TEILFEHLER: Mailbox '$rawAlias' wurde angelegt aber nicht vollständig konfiguriert. Manuelle Prüfung und ggf. Bereinigung erforderlich." "WARN"
+                        $partialAction = "PartiallyCreated"
+                    }
+                }
                 $Results.Add([PSCustomObject]@{
                     Type        = "SharedMailbox"
                     Alias       = $rawAlias
                     PrimarySmtp = Get-SafeTrim (Get-RowProp $row 'PrimaereAdresse')
                     DisplayName = Get-SafeTrim (Get-RowProp $row 'Anzeigename')
-                    Action      = "Failed"
+                    Action      = $partialAction
                     Error       = $errMsg
                 })
             }
@@ -782,12 +862,20 @@ try {
                 Write-Log "Fehler bei Distribution Group (Zeile $TotalCount): $errMsg" "ERROR"
                 $FailedCount++
                 $rawAlias = "$(Get-RowProp $row 'Vorname').$(Get-RowProp $row 'Nachname').$(Get-RowProp $row 'Zusatz')"
+                $partialAction = "Failed"
+                if ($errMsg -notmatch "existiert bereits") {
+                    $partialCheck = Get-DistributionGroup -Identity $rawAlias -ErrorAction SilentlyContinue
+                    if ($partialCheck) {
+                        Write-Log "  TEILFEHLER: Distribution Group '$rawAlias' wurde angelegt aber nicht vollständig konfiguriert. Manuelle Prüfung und ggf. Bereinigung erforderlich." "WARN"
+                        $partialAction = "PartiallyCreated"
+                    }
+                }
                 $Results.Add([PSCustomObject]@{
                     Type        = "DistributionGroup"
                     Alias       = $rawAlias
                     PrimarySmtp = Get-SafeTrim (Get-RowProp $row 'PrimaereAdresse')
                     DisplayName = Get-SafeTrim (Get-RowProp $row 'Anzeigename')
-                    Action      = "Failed"
+                    Action      = $partialAction
                     Error       = $errMsg
                 })
             }
