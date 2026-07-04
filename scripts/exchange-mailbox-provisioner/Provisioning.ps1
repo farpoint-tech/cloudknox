@@ -59,6 +59,7 @@ $TimeStamp  = Get-Date -Format "yyyyMMdd_HHmmss"
 $ConfigFile         = Join-Path $ScriptPath $ConfigFileName
 $script:LogFile     = Join-Path $ScriptPath "Provisioning_$TimeStamp.log"
 $script:ResultsFile = Join-Path $ScriptPath "Provisioning_Results_$TimeStamp.csv"
+$script:AclProtectionFailed = $false
 
 # ============================================================
 # HILFSFUNKTIONEN
@@ -74,6 +75,13 @@ function Write-Log {
         [string]$Level = 'INFO'
     )
 
+    # Logging darf nie von -WhatIf/-Confirm unterdrückt werden
+    $WhatIfPreference  = $false
+    $ConfirmPreference = 'None'
+
+    # Log-Forging verhindern: Zeilenumbrüche und Steuerzeichen aus Fremddaten entfernen
+    $Message = ($Message -replace "`r`n", ' | ' -replace "`n", ' | ' -replace "`r", ' | ') -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', ''
+
     $ts   = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $line = "$ts [$Level] $Message"
     Add-Content -LiteralPath $script:LogFile -Value $line -Encoding UTF8
@@ -84,6 +92,75 @@ function Write-Log {
         'ERROR'   { Write-Host $line -ForegroundColor Red }
         'SUCCESS' { Write-Host $line -ForegroundColor Green }
     }
+}
+
+# -- Zugriffsschutz für Ausgabedateien (Log/CSV enthalten Berechtigungsstruktur) --
+function Protect-OutputFile {
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Infrastruktur-Schreibvorgänge nie von -WhatIf/-Confirm unterdrücken lassen
+    $WhatIfPreference  = $false
+    $ConfirmPreference = 'None'
+
+    # ACLs nur unter Windows; unter PS7/Linux keine NTFS-Rechte
+    if ($env:OS -ne 'Windows_NT') { return }
+
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) {
+            New-Item -ItemType File -Path $Path -Force | Out-Null
+        }
+
+        $acl = Get-Acl -LiteralPath $Path
+        # Vererbung kappen: nur explizite Berechtigungen gelten
+        $acl.SetAccessRuleProtection($true, $false)
+
+        # Sprachneutrale SIDs: aktueller Benutzer, SYSTEM, lokale Administratoren
+        $identities = @(
+            [System.Security.Principal.WindowsIdentity]::GetCurrent().User,
+            [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18'),
+            [System.Security.Principal.SecurityIdentifier]::new(
+                [System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
+        )
+        foreach ($id in $identities) {
+            $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+                $id,
+                [System.Security.AccessControl.FileSystemRights]::FullControl,
+                [System.Security.AccessControl.AccessControlType]::Allow)
+            $acl.AddAccessRule($rule)
+        }
+
+        Set-Acl -LiteralPath $Path -AclObject $acl
+    }
+    catch {
+        $script:AclProtectionFailed = $true
+        Write-Log "SICHERHEITSHINWEIS: Zugriffsschutz für '$Path' konnte nicht gesetzt werden - Datei erbt Standardberechtigungen: $($_.Exception.Message)" "ERROR"
+    }
+}
+
+# -- Ergebnis-CSV schreiben (immer, auch im WhatIf-Lauf; mit CSV-Injection-Schutz) --
+function Write-ResultsFile {
+    param(
+        [Parameter(Mandatory)][object[]]$Data,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    # Reporting ist nicht Ziel der WhatIf-Simulation - immer schreiben
+    $WhatIfPreference  = $false
+    $ConfirmPreference = 'None'
+
+    # Formel-Injection neutralisieren: führende = + - @ Tab/CR beim Öffnen in Excel entschärfen
+    $safe = foreach ($item in $Data) {
+        $clone = [ordered]@{}
+        foreach ($p in $item.PSObject.Properties) {
+            $v = $p.Value
+            if ($v -is [string] -and $v -match '^[=+\-@\t\r]') { $v = "'" + $v }
+            $clone[$p.Name] = $v
+        }
+        [PSCustomObject]$clone
+    }
+
+    Protect-OutputFile -Path $Path
+    $safe | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8
 }
 
 # -- Benutzerbestätigung --
@@ -166,9 +243,10 @@ function Split-MultiValue {
     )
 
     $text = Get-SafeTrim $Value
-    if ([string]::IsNullOrWhiteSpace($text)) { return @() }
+    # Unäres Komma: Array übersteht die Funktionsgrenze auch bei 0/1 Elementen
+    if ([string]::IsNullOrWhiteSpace($text)) { return ,@() }
 
-    return @(
+    return ,@(
         $text -split [regex]::Escape($Delimiter) |
         ForEach-Object { $_.Trim() } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
@@ -233,7 +311,7 @@ function Convert-ToMailboxAlias {
 # -- Sicherer Eigenschaftszugriff auf PSObjects (Strict-Mode-sicher) --
 function Get-RowProp {
     param(
-        [Parameter(Mandatory)][object]$Row,
+        [AllowNull()][object]$Row,
         [Parameter(Mandatory)][string]$Name,
         [object]$Default = $null
     )
@@ -241,6 +319,52 @@ function Get-RowProp {
     $prop = $Row.PSObject.Properties[$Name]
     if ($null -eq $prop) { return $Default }
     return $prop.Value
+}
+
+# -- Benannte Excel-Tabelle (ListObject) über EPPlus lesen --
+# Import-Excel kennt keinen -TableName Parameter; benannte Tabellen sind nur
+# über das EPPlus-Objektmodell des ImportExcel-Moduls erreichbar.
+function Get-ExcelTableData {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$TableName
+    )
+
+    $pkg = Open-ExcelPackage -Path $Path
+    try {
+        foreach ($ws in $pkg.Workbook.Worksheets) {
+            $table = $ws.Tables | Where-Object { $_.Name -eq $TableName }
+            if (-not $table) { continue }
+
+            $startRow = $table.Address.Start.Row
+            $endRow   = $table.Address.End.Row
+            $startCol = $table.Address.Start.Column
+            $endCol   = $table.Address.End.Column
+
+            $headers = @()
+            for ($col = $startCol; $col -le $endCol; $col++) {
+                $headers += $ws.Cells[$startRow, $col].Text
+            }
+
+            $rows = @()
+            for ($row = $startRow + 1; $row -le $endRow; $row++) {
+                $obj = [ordered]@{}
+                for ($col = $startCol; $col -le $endCol; $col++) {
+                    $header = $headers[$col - $startCol]
+                    if (-not [string]::IsNullOrWhiteSpace($header)) {
+                        $obj[$header] = $ws.Cells[$row, $col].Text
+                    }
+                }
+                $rows += [PSCustomObject]$obj
+            }
+            return ,$rows
+        }
+
+        throw "Tabelle '$TableName' wurde auf keinem Worksheet gefunden."
+    }
+    finally {
+        Close-ExcelPackage -ExcelPackage $pkg -NoSave
+    }
 }
 
 # -- Empfänger-Existenzprüfung --
@@ -348,9 +472,9 @@ function Connect-ExchangeCustom {
     )
 
     if ($mode -eq 'app') {
-        $appId    = Get-SafeTrim $Config.authentication.appId
-        $org      = Get-SafeTrim $Config.authentication.organization
-        $certHash = Get-SafeTrim $Config.authentication.certificateThumbprint
+        $appId    = Get-SafeTrim (Get-RowProp $Config.authentication 'appId')
+        $org      = Get-SafeTrim (Get-RowProp $Config.authentication 'organization')
+        $certHash = Get-SafeTrim (Get-RowProp $Config.authentication 'certificateThumbprint')
 
         if ([string]::IsNullOrWhiteSpace($appId) -or
             [string]::IsNullOrWhiteSpace($org) -or
@@ -459,6 +583,19 @@ function Test-RowsBeforeProvisioning {
                         }
                     }
                 }
+
+                # Externe Weiterleitung nur wenn per Config freigegeben (Datenabfluss-Prävention)
+                if ($Type -eq 'SharedMailbox') {
+                    $fwd = Get-SafeTrim (Get-RowProp $Row 'Weiterleitung')
+                    if (-not [string]::IsNullOrWhiteSpace($fwd) -and (Test-EmailAddress -EmailAddress $fwd)) {
+                        $allowExternalFwd = Get-SafeBool (Get-RowProp $Config.general 'allowExternalForwarding') $false
+                        $fwdDomain = $fwd.Split('@')[-1].ToLowerInvariant()
+                        if ($fwdDomain -ne $defaultDomain.ToLowerInvariant() -and -not $allowExternalFwd) {
+                            $issues += "$rowLabel : Externe Weiterleitung zu '$fwdDomain' ist nicht erlaubt (general.allowExternalForwarding=false)."
+                            $rowHasIssue = $true
+                        }
+                    }
+                }
             }
             catch {
                 $issues += "$rowLabel : $($_.Exception.Message)"
@@ -485,6 +622,7 @@ function Test-RowsBeforeProvisioning {
 # PROVISIONING-FUNKTIONEN
 # ============================================================
 function New-SharedMailboxFromRow {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory)][object]$Row,
         [Parameter(Mandatory)][pscustomobject]$Config
@@ -564,17 +702,19 @@ function New-SharedMailboxFromRow {
         }
     }
 
+    # ShouldProcess=false: entweder WhatIf-Lauf oder Benutzer hat bei -Confirm abgelehnt
     return [PSCustomObject]@{
         Type        = "SharedMailbox"
         Alias       = $alias
         PrimarySmtp = $primaryAddress
         DisplayName = $anzeigename
-        Action      = "WhatIf"
+        Action      = $(if ($WhatIfPreference) { "WhatIf" } else { "Declined" })
         Error       = ""
     }
 }
 
 function New-DistributionGroupFromRow {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory)][object]$Row,
         [Parameter(Mandatory)][pscustomobject]$Config
@@ -618,9 +758,9 @@ function New-DistributionGroupFromRow {
             -Type Distribution `
             -ErrorAction Stop | Out-Null
 
-        if ($owners.Count -gt 0) {
+        if (@($owners).Count -gt 0) {
             Set-DistributionGroup -Identity $alias `
-                -ManagedBy $owners `
+                -ManagedBy @($owners) `
                 -BypassSecurityGroupManagerCheck `
                 -ErrorAction Stop
             Write-Log "  Besitzer gesetzt: $($owners -join ', ')"
@@ -651,12 +791,13 @@ function New-DistributionGroupFromRow {
         }
     }
 
+    # ShouldProcess=false: entweder WhatIf-Lauf oder Benutzer hat bei -Confirm abgelehnt
     return [PSCustomObject]@{
         Type        = "DistributionGroup"
         Alias       = $alias
         PrimarySmtp = $primaryAddress
         DisplayName = $anzeigename
-        Action      = "WhatIf"
+        Action      = $(if ($WhatIfPreference) { "WhatIf" } else { "Declined" })
         Error       = ""
     }
 }
@@ -674,6 +815,7 @@ $SkippedCount = 0
 $FailedCount  = 0
 
 try {
+    Protect-OutputFile -Path $script:LogFile
     Write-Log "Scriptstart"
     Write-Log "Config: $ConfigFile"
 
@@ -712,6 +854,7 @@ try {
         $obj    = $Config
         $found  = $true
         foreach ($part in $parts) {
+            if ($null -eq $obj) { $found = $false; break }
             $p = $obj.PSObject.Properties[$part]
             if ($null -eq $p) { $found = $false; break }
             $obj = $p.Value
@@ -745,16 +888,16 @@ try {
         throw "Excel-Datei nicht gefunden: $ExcelFile"
     }
 
-    # -- Tabellen aus Excel lesen --
+    # -- Tabellen aus Excel lesen (benannte ListObjects über EPPlus) --
     try {
-        $smRows = @(Import-Excel -Path $ExcelFile -TableName "SharedMailboxes")
+        $smRows = @(Get-ExcelTableData -Path $ExcelFile -TableName "SharedMailboxes")
     }
     catch {
         Write-Log "Tabelle 'SharedMailboxes' nicht gefunden oder nicht lesbar: $($_.Exception.Message)" "WARN"
         $smRows = @()
     }
     try {
-        $dgRows = @(Import-Excel -Path $ExcelFile -TableName "DistributionGroups")
+        $dgRows = @(Get-ExcelTableData -Path $ExcelFile -TableName "DistributionGroups")
     }
     catch {
         Write-Log "Tabelle 'DistributionGroups' nicht gefunden oder nicht lesbar: $($_.Exception.Message)" "WARN"
@@ -827,10 +970,17 @@ try {
                 $rawAlias = "$(Get-RowProp $row 'Vorname').$(Get-RowProp $row 'Nachname').$(Get-RowProp $row 'Zusatz')"
                 $partialAction = "Failed"
                 if ($errMsg -notmatch "existiert bereits") {
-                    $partialCheck = Get-Mailbox -Identity $rawAlias -ErrorAction SilentlyContinue
-                    if ($partialCheck) {
-                        Write-Log "  TEILFEHLER: Mailbox '$rawAlias' wurde angelegt aber nicht vollständig konfiguriert. Manuelle Prüfung und ggf. Bereinigung erforderlich." "WARN"
-                        $partialAction = "PartiallyCreated"
+                    # Lookup mit der tatsächlich verwendeten Identität (explizite Adresse oder normalisierter Alias)
+                    $lookupId = Get-SafeTrim (Get-RowProp $row 'PrimaereAdresse')
+                    if ([string]::IsNullOrWhiteSpace($lookupId)) {
+                        try { $lookupId = Convert-ToMailboxAlias -Value $rawAlias } catch { $lookupId = '' }
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($lookupId)) {
+                        $partialCheck = Get-Mailbox -Identity $lookupId -ErrorAction SilentlyContinue
+                        if ($partialCheck) {
+                            Write-Log "  TEILFEHLER: Mailbox '$lookupId' wurde angelegt aber nicht vollständig konfiguriert. Manuelle Prüfung und ggf. Bereinigung erforderlich." "WARN"
+                            $partialAction = "PartiallyCreated"
+                        }
                     }
                 }
                 $Results.Add([PSCustomObject]@{
@@ -864,10 +1014,17 @@ try {
                 $rawAlias = "$(Get-RowProp $row 'Vorname').$(Get-RowProp $row 'Nachname').$(Get-RowProp $row 'Zusatz')"
                 $partialAction = "Failed"
                 if ($errMsg -notmatch "existiert bereits") {
-                    $partialCheck = Get-DistributionGroup -Identity $rawAlias -ErrorAction SilentlyContinue
-                    if ($partialCheck) {
-                        Write-Log "  TEILFEHLER: Distribution Group '$rawAlias' wurde angelegt aber nicht vollständig konfiguriert. Manuelle Prüfung und ggf. Bereinigung erforderlich." "WARN"
-                        $partialAction = "PartiallyCreated"
+                    # Lookup mit der tatsächlich verwendeten Identität (explizite Adresse oder normalisierter Alias)
+                    $lookupId = Get-SafeTrim (Get-RowProp $row 'PrimaereAdresse')
+                    if ([string]::IsNullOrWhiteSpace($lookupId)) {
+                        try { $lookupId = Convert-ToMailboxAlias -Value $rawAlias } catch { $lookupId = '' }
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($lookupId)) {
+                        $partialCheck = Get-DistributionGroup -Identity $lookupId -ErrorAction SilentlyContinue
+                        if ($partialCheck) {
+                            Write-Log "  TEILFEHLER: Distribution Group '$lookupId' wurde angelegt aber nicht vollständig konfiguriert. Manuelle Prüfung und ggf. Bereinigung erforderlich." "WARN"
+                            $partialAction = "PartiallyCreated"
+                        }
                     }
                 }
                 $Results.Add([PSCustomObject]@{
@@ -892,8 +1049,12 @@ try {
     Write-Log "============================================================"
 
     if ($Results.Count -gt 0) {
-        $Results | Export-Csv -LiteralPath $script:ResultsFile -NoTypeInformation -Encoding UTF8
+        Write-ResultsFile -Data $Results.ToArray() -Path $script:ResultsFile
         Write-Log "Ergebnis-CSV: $script:ResultsFile" "SUCCESS"
+    }
+
+    if ($script:AclProtectionFailed) {
+        Write-Log "SICHERHEITSHINWEIS: Mindestens eine Ausgabedatei konnte nicht ACL-geschützt werden. Log/CSV enthalten Berechtigungsdaten - bitte manuell absichern." "WARN"
     }
 
     Write-Log "Logdatei: $script:LogFile"
