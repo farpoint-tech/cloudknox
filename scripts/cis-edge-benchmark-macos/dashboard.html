@@ -420,12 +420,18 @@ const API_URL = 'http://localhost:' + API_PORT;
 
 async function enforceViaServer(body) {
   try {
+    const headers = {'Content-Type': 'application/json'};
+    // CSRF capability token embedded into audit_results.js by the audit run.
+    // The server rejects /enforce requests that do not present it.
+    if (window.ENFORCE_TOKEN) headers['X-Enforce-Token'] = window.ENFORCE_TOKEN;
     const r = await fetch(API_URL + '/enforce', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: headers,
       body: JSON.stringify(body)
     });
     if (r.ok) return await r.json();
+    if (r.status === 403) return { status: 'error', message: 'Enforcement token rejected. Re-run Invoke-CISEdgeAudit and reload the dashboard it opens.' };
+    return { status: 'error', message: 'Server returned HTTP ' + r.status + '.' };
   } catch(e) {}
   return null;
 }
