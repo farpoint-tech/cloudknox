@@ -408,7 +408,7 @@ function renderTable() {
       <td class="val-cell">${cur}</td>
       <td class="val-cell">${r.recommendedValue !== null && r.recommendedValue !== undefined ? esc(String(r.recommendedDisplay || r.recommendedValue)) : '-'}</td>
       <td><span class="badge ${statusClass}">${r.status}</span></td>
-      <td><button class="enforce-btn" ${canEnforce ? '' : 'disabled'} onclick="showEnforce('${esc(r.id)}')">Enforce</button></td>
+      <td><button class="enforce-btn" ${canEnforce ? '' : 'disabled'} data-enforce-id="${esc(r.id)}">Enforce</button></td>
     </tr>`;
   }).join('');
 }
@@ -482,7 +482,7 @@ async function showEnforce(id) {
     'Apply CIS recommended setting for <strong>' + esc(r.id) + '</strong>?<br>' +
     '<span style="color:var(--text2)">Registry: ' + esc(r.regPath) + '\\' + esc(r.valueName) + '</span>',
     null,
-    '<button class="btn btn-red" id="confirmEnforceBtn" onclick="doEnforce(\'' + esc(r.id) + '\')">Enforce</button>' +
+    '<button class="btn btn-red" id="confirmEnforceBtn" data-enforce-id="' + esc(r.id) + '">Enforce</button>' +
     '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>');
 }
 
@@ -543,6 +543,20 @@ function exportCSV() {
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// Event delegation for Enforce buttons. Using data-enforce-id + delegation
+// (instead of inline onclick="showEnforce('id')") avoids an XSS sink: an id
+// containing a single quote would break out of an inline handler because the
+// HTML parser decodes &#39; back to ' before the JS parser runs. dataset reads
+// the value with no JS interpretation, so it is safe for any id.
+document.getElementById('tableBody').addEventListener('click', e => {
+  const btn = e.target.closest('.enforce-btn');
+  if (btn && !btn.disabled && btn.dataset.enforceId != null) showEnforce(btn.dataset.enforceId);
+});
+document.getElementById('modalActions').addEventListener('click', e => {
+  const btn = e.target.closest('[data-enforce-id]');
+  if (btn) doEnforce(btn.dataset.enforceId);
+});
 </script>
 </body>
 </html>
