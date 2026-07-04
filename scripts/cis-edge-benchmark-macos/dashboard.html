@@ -280,6 +280,7 @@ function drawDonut() {
   const fail = r.filter(x => x.status === 'FAIL').length;
   const notcfg = r.filter(x => x.status === 'NOT CONFIGURED').length;
   const total = r.length;
+  if (total === 0) return;
 
   const canvas = document.getElementById('donutCanvas');
   const ctx = canvas.getContext('2d');
@@ -378,8 +379,8 @@ function sortResults() {
   filteredResults.sort((a, b) => {
     let va = a[k], vb = b[k];
     if (k === 'id') {
-      const pa = a.id.split('.').map(Number);
-      const pb = b.id.split('.').map(Number);
+      const pa = String(a.id || '').split('.').map(Number);
+      const pb = String(b.id || '').split('.').map(Number);
       for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
         const d = (pa[i] || 0) - (pb[i] || 0);
         if (d !== 0) return d * dir;
@@ -402,12 +403,12 @@ function renderTable() {
     const canEnforce = r.status !== 'PASS';
     return `<tr>
       <td style="font-weight:600;white-space:nowrap">${esc(r.id)}</td>
-      <td><span class="badge ${levelClass}">${r.level}</span></td>
+      <td><span class="badge ${levelClass}">${esc(r.level)}</span></td>
       <td title="${esc(r.detail || '')}">${esc(r.title)}</td>
       <td class="val-cell" title="${esc(r.regPath)}">${esc(r.valueName)}</td>
       <td class="val-cell">${cur}</td>
       <td class="val-cell">${r.recommendedValue !== null && r.recommendedValue !== undefined ? esc(String(r.recommendedDisplay || r.recommendedValue)) : '-'}</td>
-      <td><span class="badge ${statusClass}">${r.status}</span></td>
+      <td><span class="badge ${statusClass}">${esc(r.status)}</span></td>
       <td><button class="enforce-btn" ${canEnforce ? '' : 'disabled'} data-enforce-id="${esc(r.id)}">Enforce</button></td>
     </tr>`;
   }).join('');
@@ -530,7 +531,7 @@ function exportCSV() {
   const rows = [['ID','Level','Title','Registry Path','Value Name','Reg Type','Current Value','Recommended Value','Recommended Display','Status','Detail']];
   auditData.results.forEach(r => {
     rows.push([r.id, r.level, r.title, r.regPath, r.valueName, r.regType,
-      r.currentValue !== null ? r.currentValue : '', r.recommendedValue !== null ? r.recommendedValue : '',
+      r.currentValue != null ? r.currentValue : '', r.recommendedValue != null ? r.recommendedValue : '',
       r.recommendedDisplay || '', r.status, r.detail || '']);
   });
   const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
