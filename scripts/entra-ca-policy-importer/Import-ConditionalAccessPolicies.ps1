@@ -411,9 +411,10 @@ function Get-DirectoryObjectGuidReference {
     # Sub-Objekt -> zu prüfende GUID-Felder. Jedes dieser Felder kann Directory-
     # Objekt-IDs enthalten, die tenant-spezifisch sind.
     $sections = @{
-        'users'        = @('includeUsers', 'excludeUsers', 'includeGroups', 'excludeGroups', 'includeRoles', 'excludeRoles')
-        'locations'    = @('includeLocations', 'excludeLocations')
-        'applications' = @('includeApplications', 'excludeApplications')
+        'users'              = @('includeUsers', 'excludeUsers', 'includeGroups', 'excludeGroups', 'includeRoles', 'excludeRoles')
+        'locations'          = @('includeLocations', 'excludeLocations')
+        'applications'       = @('includeApplications', 'excludeApplications')
+        'clientApplications' = @('includeServicePrincipals', 'excludeServicePrincipals')
     }
 
     foreach ($sectionName in $sections.Keys) {
@@ -824,11 +825,13 @@ foreach ($policy in $policies) {
                 #  der Status hier zwingend auf 'disabled' gesetzt, egal welcher
                 #  Live-Status zuvor bewahrt wurde.
                 # ----------------------------------------------------------------
+                $forcedDisabledOnUpdate = $false
                 $guidRefs = Get-DirectoryObjectGuidReference -PolicyBody $policyBody
                 if ($isCrossTenant -and ($guidRefs.Count -gt 0)) {
                     Write-Log "  ACHTUNG  : '$displayName' (Update) referenziert nicht-remappte Directory-GUIDs ($($guidRefs -join ', ')). Bei tenant-übergreifendem Import wird der Status zur Lockout-Vermeidung auf 'disabled' erzwungen. GUIDs manuell prüfen/remappen, bevor die Policy wieder aktiviert wird!" -Level WARNING
                     $effectiveState = 'disabled'
                     $policyBody['state'] = 'disabled'
+                    $forcedDisabledOnUpdate = $true
                     if (-not $forceDisabledForCrossTenant.Contains($displayName)) {
                         $forceDisabledForCrossTenant.Add($displayName)
                     }
@@ -844,7 +847,9 @@ foreach ($policy in $policies) {
                         -ErrorAction Stop | Out-Null
                 }
 
-                $stateNote = if ($AllowDisableExisting) { "gemäss -AllowDisableExisting" } else { "Live-Status bewahrt" }
+                $stateNote = if ($forcedDisabledOnUpdate) { "zwangsweise deaktiviert (Cross-Tenant-Lockout-Schutz)" }
+                             elseif ($AllowDisableExisting) { "gemäss -AllowDisableExisting" }
+                             else { "Live-Status bewahrt" }
                 Write-Log "  UPDATED  : '$displayName' (State: $effectiveState, $stateNote)" -Level SUCCESS
                 $counters.Updated++
             }
