@@ -32,6 +32,18 @@
 .PARAMETER Force
     Wenn angegeben, werden bestehende Policies mit gleichem DisplayName überschrieben (PATCH).
     Standard: Policies mit gleichem Namen werden übersprungen.
+    Hinweis: Beim Update wird der aktuelle Live-Status der bestehenden Policy bewahrt.
+    Der -TargetState gilt nur für NEU erstellte Policies (Lockout-/MFA-Schutz).
+
+.PARAMETER AllowDisableExisting
+    Erlaubt beim Update (-Force), eine aktuell aktive ("enabled") oder Report-Only Policy
+    auf "disabled" zu setzen. Ohne diesen Schalter wird der Live-Status niemals still
+    geschwächt, sondern bewahrt. ACHTUNG: Kann MFA-/CA-Enforcement deaktivieren!
+
+.PARAMETER IgnoreDuplicateCheck
+    Fährt fort, auch wenn die Duplikat-Prüfung (Laden bestehender Policies) fehlschlägt
+    (z.B. Throttling/Berechtigung). Standard: Import wird abgebrochen, damit ein
+    fehlgeschlagener GET nicht zu Massen-Duplikaten führt. Nicht empfohlen.
 
 .PARAMETER SkipModuleInstall
     Überspringt die automatische Modul-Prüfung und Installation.
@@ -102,6 +114,12 @@ param(
 
     [Parameter(Mandatory = $false, HelpMessage = "Bestehende Policies mit gleichem DisplayName überschreiben.")]
     [switch]$Force,
+
+    [Parameter(Mandatory = $false, HelpMessage = "Erlaubt beim Update das Deaktivieren einer aktuell aktiven/Report-Only Policy. Ohne diesen Schalter wird der Live-Status bewahrt.")]
+    [switch]$AllowDisableExisting,
+
+    [Parameter(Mandatory = $false, HelpMessage = "Ignoriert einen Fehler bei der Duplikat-Prüfung und fährt trotzdem fort (nicht empfohlen – Risiko von Massen-Duplikaten).")]
+    [switch]$IgnoreDuplicateCheck,
 
     [Parameter(Mandatory = $false, HelpMessage = "Modul-Prüfung und Installation überspringen.")]
     [switch]$SkipModuleInstall
@@ -322,6 +340,11 @@ function ConvertTo-PolicyHashtable {
 
 function Get-ExistingPolicyNames {
     # Lädt alle bestehenden CA-Policy-Namen aus dem Tenant (für Duplikat-Prüfung).
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [switch]$IgnoreDuplicateCheck
+    )
     try {
         $existing = Invoke-MgGraphRequest -Method GET `
             -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies?`$select=id,displayName" `
@@ -345,9 +368,55 @@ function Get-ExistingPolicyNames {
         return $nameMap
     }
     catch {
-        Write-Log "Bestehende Policies konnten nicht geladen werden: $($_.Exception.Message)" -Level WARNING
-        return @{}
+        # WICHTIG: Bei einem Fehler (Throttling/transient/Berechtigung) darf die
+        # Duplikat-Prüfung NICHT stillschweigend deaktiviert werden – sonst würde
+        # ein erneuter Lauf jede Policy erneut per POST anlegen (Massen-Duplikate).
+        if ($IgnoreDuplicateCheck) {
+            Write-Log "Bestehende Policies konnten nicht geladen werden: $($_.Exception.Message). Duplikat-Prüfung wird auf Wunsch übersprungen (-IgnoreDuplicateCheck)." -Level WARNING
+            return @{}
+        }
+        throw "Duplikat-Prüfung fehlgeschlagen: $($_.Exception.Message). Import wird abgebrochen, um Massen-Duplikate zu vermeiden. Mit -IgnoreDuplicateCheck kann die Prüfung bewusst übersprungen werden (nicht empfohlen)."
     }
+}
+
+function Get-DirectoryObjectGuidReference {
+    # Prüft, ob eine (bereinigte) Policy-Hashtable Verweise auf Directory-Objekte
+    # (GUIDs) in includeUsers/excludeUsers/includeGroups/excludeGroups/
+    # includeRoles/excludeRoles enthält. Diese wären nach einem Tenant-Wechsel
+    # ungültig (Break-Glass-Ausschlüsse tot -> Lockout-Risiko).
+    # Sonderwerte All/None/GuestsOrExternalUsers werden ignoriert.
+    # Rückgabe: Liste der gefundenen "feld=guid"-Referenzen (leer wenn keine).
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        $PolicyBody
+    )
+
+    $guidPattern   = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    $specialValues = @('All', 'None', 'GuestsOrExternalUsers')
+    $found         = [System.Collections.Generic.List[string]]::new()
+
+    if ($null -eq $PolicyBody -or $PolicyBody -isnot [System.Collections.IDictionary]) { return $found }
+    if (-not $PolicyBody.Contains('conditions')) { return $found }
+    $conditions = $PolicyBody['conditions']
+    if ($null -eq $conditions -or $conditions -isnot [System.Collections.IDictionary]) { return $found }
+    if (-not $conditions.Contains('users')) { return $found }
+    $users = $conditions['users']
+    if ($null -eq $users -or $users -isnot [System.Collections.IDictionary]) { return $found }
+
+    $fieldsToCheck = @('includeUsers', 'excludeUsers', 'includeGroups', 'excludeGroups', 'includeRoles', 'excludeRoles')
+    foreach ($field in $fieldsToCheck) {
+        if (-not $users.Contains($field)) { continue }
+        $values = $users[$field]
+        if ($null -eq $values) { continue }
+        foreach ($v in @($values)) {
+            if (($v -is [string]) -and ($v -match $guidPattern) -and ($v -notin $specialValues)) {
+                $found.Add("$field=$v")
+            }
+        }
+    }
+
+    return $found
 }
 
 #endregion
@@ -572,7 +641,14 @@ catch {
 #region Load Existing
 
 Write-Log "Lade bestehende Policies aus dem Tenant (Duplikat-Prüfung)..." -Level INFO
-$existingPolicies = Get-ExistingPolicyNames
+try {
+    $existingPolicies = Get-ExistingPolicyNames -IgnoreDuplicateCheck:$IgnoreDuplicateCheck
+}
+catch {
+    Write-Log $_.Exception.Message -Level ERROR
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    exit 1
+}
 Write-Log "$($existingPolicies.Count) bestehende Policies im Tenant gefunden." -Level INFO
 
 #endregion
@@ -592,6 +668,44 @@ $counters = @{
     Skipped  = 0
     Failed   = 0
 }
+
+# ------------------------------------------------------------
+#  Cross-Tenant-Erkennung (Schutz gegen Lockout durch nicht
+#  remappte Directory-GUIDs, z.B. Break-Glass-Ausschlüsse)
+# ------------------------------------------------------------
+$currentTenantId = [string]$context.TenantId
+
+# Quell-Tenant-ID aus dem Backup ermitteln, falls hinterlegt.
+# HINWEIS: Der aktuelle Exporter schreibt die Quell-Tenant-ID NICHT in das
+# JSON-Backup (das Backup ist ein reines Policy-Array). Sie ist daher i.d.R.
+# unbekannt und wird bewusst als "möglicherweise abweichend" behandelt
+# (sicherer Default gegen Lockout).
+$sourceTenantId = $null
+foreach ($p in $policies) {
+    foreach ($propName in @('SourceTenantId', 'sourceTenantId')) {
+        if (($p.PSObject.Properties.Name -contains $propName) -and $p.$propName) {
+            $sourceTenantId = [string]$p.$propName
+            break
+        }
+    }
+    if ($sourceTenantId) { break }
+}
+
+if (-not $sourceTenantId) {
+    $isCrossTenant = $true
+    Write-Log "Quell-Tenant-ID im Backup nicht hinterlegt – Import wird als tenant-übergreifend (unbekannt) behandelt. Policies mit Directory-GUID-Referenzen werden geschützt (kein Enable)." -Level WARNING
+}
+elseif ($sourceTenantId -ne $currentTenantId) {
+    $isCrossTenant = $true
+    Write-Log "Tenant-übergreifender Import erkannt: Quelle '$sourceTenantId' != Ziel '$currentTenantId'. Directory-GUID-Referenzen werden NICHT remappt und Policies deshalb nicht aktiviert." -Level WARNING
+}
+else {
+    $isCrossTenant = $false
+    Write-Log "Import in denselben Tenant (Quelle == Ziel: '$currentTenantId'). Kein GUID-Remapping erforderlich." -Level INFO
+}
+
+# Policies, die wegen Cross-Tenant-Import zwangsweise deaktiviert wurden
+$forceDisabledForCrossTenant = [System.Collections.Generic.List[string]]::new()
 
 foreach ($policy in $policies) {
     $displayName = $policy.DisplayName ?? $policy.displayName ?? "(kein Name)"
@@ -621,13 +735,62 @@ foreach ($policy in $policies) {
     $policyBody.Remove('createdDateTime')
     $policyBody.Remove('modifiedDateTime')
 
-    $bodyJson = $policyBody | ConvertTo-Json -Depth 50 -Compress
-
     try {
         if ($existingPolicies.ContainsKey($displayName)) {
             # Policy existiert bereits
             if ($Force) {
                 $existingId = $existingPolicies[$displayName]
+
+                # ----------------------------------------------------------------
+                #  Ein Update darf den Live-Status einer bestehenden Policy NIEMALS
+                #  still schwächen (z.B. aktive MFA-Enforcement -> disabled).
+                #  Aktuellen Status der Ziel-Policy lesen und bewahren.
+                #  Der -TargetState gilt bewusst nur für NEU erstellte Policies.
+                # ----------------------------------------------------------------
+                $existingState = $null
+                try {
+                    $existingPolicyObj = Invoke-MgGraphRequest -Method GET `
+                        -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/$($existingId)?`$select=id,state" `
+                        -ErrorAction Stop
+                    if (($existingPolicyObj -is [System.Collections.IDictionary]) -and $existingPolicyObj.Contains('state')) {
+                        $existingState = [string]$existingPolicyObj['state']
+                    }
+                    elseif ($existingPolicyObj -and ($existingPolicyObj.PSObject.Properties.Name -contains 'state')) {
+                        $existingState = [string]$existingPolicyObj.state
+                    }
+                }
+                catch {
+                    Write-Log "  WARNUNG  : Aktueller Status von '$displayName' konnte nicht gelesen werden: $($_.Exception.Message)" -Level WARNING
+                }
+
+                if ($AllowDisableExisting) {
+                    # Operator hat explizit zugestimmt: TargetState auch beim Update anwenden
+                    $effectiveState = $stateToApply
+                    if ($existingState -and ($existingState -in @('enabled', 'enabledForReportingButNotEnforced')) -and ($stateToApply -eq 'disabled')) {
+                        Write-Log "  WARNUNG  : '$displayName' wird von '$existingState' auf 'disabled' gesetzt (-AllowDisableExisting aktiv – Live-Enforcement wird deaktiviert!)." -Level WARNING
+                    }
+                    $policyBody['state'] = $effectiveState
+                }
+                elseif ($existingState) {
+                    # Standard: bestehenden Live-Status bewahren, nie still schwächen
+                    $effectiveState = $existingState
+                    if (($existingState -in @('enabled', 'enabledForReportingButNotEnforced')) -and ($stateToApply -eq 'disabled')) {
+                        Write-Log "  WARNUNG  : '$displayName' ist aktuell '$existingState'. Import wollte 'disabled' setzen – Live-Status wird BEWAHRT (kein stilles Deaktivieren). Für explizites Deaktivieren -AllowDisableExisting verwenden." -Level WARNING
+                    }
+                    elseif ($stateToApply -ne $existingState) {
+                        Write-Log "  INFO     : '$displayName' – bestehender Status '$existingState' wird beim Update bewahrt (TargetState '$stateToApply' gilt nur für neue Policies)." -Level INFO
+                    }
+                    $policyBody['state'] = $effectiveState
+                }
+                else {
+                    # Aktueller Status konnte nicht gelesen werden -> 'state' NICHT mitsenden,
+                    # damit Graph den bestehenden Status beibehält (kein stilles Schwächen).
+                    $effectiveState = "unverändert (nicht gelesen)"
+                    $policyBody.Remove('state')
+                    Write-Log "  WARNUNG  : '$displayName' – aktueller Status unbekannt. 'state' wird beim PATCH ausgelassen, damit der Live-Status erhalten bleibt." -Level WARNING
+                }
+
+                $bodyJson = $policyBody | ConvertTo-Json -Depth 50 -Compress
 
                 if ($PSCmdlet.ShouldProcess($displayName, "Bestehende Policy aktualisieren (PATCH)")) {
                     Invoke-MgGraphRequest -Method PATCH `
@@ -637,7 +800,8 @@ foreach ($policy in $policies) {
                         -ErrorAction Stop | Out-Null
                 }
 
-                Write-Log "  UPDATED  : '$displayName' (State: $stateToApply)" -Level SUCCESS
+                $stateNote = if ($AllowDisableExisting) { "gemäss -AllowDisableExisting" } else { "Live-Status bewahrt" }
+                Write-Log "  UPDATED  : '$displayName' (State: $effectiveState, $stateNote)" -Level SUCCESS
                 $counters.Updated++
             }
             else {
@@ -646,7 +810,23 @@ foreach ($policy in $policies) {
             }
         }
         else {
-            # Neue Policy erstellen
+            # ----------------------------------------------------------------
+            #  Neue Policy erstellen. Bei tenant-übergreifendem Import werden
+            #  Directory-GUIDs (User/Gruppen/Rollen) NICHT remappt. Enthält die
+            #  Policy solche GUIDs (z.B. Break-Glass-Ausschlüsse), würde eine
+            #  aktive Policy zum Lockout führen -> zwangsweise 'disabled'.
+            # ----------------------------------------------------------------
+            $effectiveState = $stateToApply
+            $guidRefs = Get-DirectoryObjectGuidReference -PolicyBody $policyBody
+            if ($isCrossTenant -and ($guidRefs.Count -gt 0) -and ($effectiveState -ne 'disabled')) {
+                Write-Log "  ACHTUNG  : '$displayName' referenziert nicht-remappte Directory-GUIDs ($($guidRefs -join ', ')). Bei tenant-übergreifendem Import wird der Status zur Lockout-Vermeidung auf 'disabled' erzwungen. GUIDs (inkl. Break-Glass-Ausschlüsse) manuell im Ziel-Tenant prüfen/remappen, bevor die Policy aktiviert wird!" -Level WARNING
+                $effectiveState = 'disabled'
+                $forceDisabledForCrossTenant.Add($displayName)
+            }
+
+            $policyBody['state'] = $effectiveState
+            $bodyJson = $policyBody | ConvertTo-Json -Depth 50 -Compress
+
             if ($PSCmdlet.ShouldProcess($displayName, "Neue Policy erstellen (POST)")) {
                 Invoke-MgGraphRequest -Method POST `
                     -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies" `
@@ -655,7 +835,7 @@ foreach ($policy in $policies) {
                     -ErrorAction Stop | Out-Null
             }
 
-            Write-Log "  CREATED  : '$displayName' (State: $stateToApply)" -Level SUCCESS
+            Write-Log "  CREATED  : '$displayName' (State: $effectiveState)" -Level SUCCESS
             $counters.Created++
         }
     }
@@ -699,6 +879,17 @@ Write-Log "  Aktualisiert (Updated) : $($counters.Updated)" -Level INFO
 Write-Log "  Übersprungen (Skipped) : $($counters.Skipped)" -Level INFO
 Write-Log "  Fehlgeschlagen (Failed): $($counters.Failed)" -Level INFO
 Write-Log "" -Level INFO
+
+if ($forceDisabledForCrossTenant.Count -gt 0) {
+    Write-Log "TENANT-ÜBERGREIFENDER IMPORT – folgende neu erstellte Policies wurden zur" -Level WARNING
+    Write-Log "Lockout-Vermeidung ZWANGSWEISE auf 'disabled' gesetzt (Directory-GUIDs NICHT remappt):" -Level WARNING
+    foreach ($n in $forceDisabledForCrossTenant) {
+        Write-Log "   - $n" -Level WARNING
+    }
+    Write-Log "Bitte User-/Gruppen-/Rollen-GUIDs (inkl. Break-Glass-Ausschlüsse) manuell im" -Level WARNING
+    Write-Log "Ziel-Tenant prüfen und remappen, bevor diese Policies aktiviert werden." -Level WARNING
+    Write-Log "" -Level WARNING
+}
 
 if ($TargetState -ne "enabled") {
     Write-Log "WICHTIG: Alle importierten Policies haben den Status '$TargetState'." -Level WARNING
