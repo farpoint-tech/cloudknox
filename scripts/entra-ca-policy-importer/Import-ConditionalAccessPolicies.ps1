@@ -121,6 +121,10 @@ param(
     [Parameter(Mandatory = $false, HelpMessage = "Ignoriert einen Fehler bei der Duplikat-Prüfung und fährt trotzdem fort (nicht empfohlen – Risiko von Massen-Duplikaten).")]
     [switch]$IgnoreDuplicateCheck,
 
+    [Parameter(Mandatory = $false, HelpMessage = "Quell-Tenant-ID des Backups. Wird sie angegeben und stimmt mit dem Ziel-Tenant überein, gilt der Import als Restore in denselben Tenant und Directory-GUIDs werden NICHT zwangsdeaktiviert. Ohne diese Angabe wird der Import sicherheitshalber als tenant-übergreifend behandelt.")]
+    [ValidatePattern('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')]
+    [string]$SourceTenantId,
+
     [Parameter(Mandatory = $false, HelpMessage = "Modul-Prüfung und Installation überspringen.")]
     [switch]$SkipModuleInstall
 )
@@ -381,10 +385,13 @@ function Get-ExistingPolicyNames {
 
 function Get-DirectoryObjectGuidReference {
     # Prüft, ob eine (bereinigte) Policy-Hashtable Verweise auf Directory-Objekte
-    # (GUIDs) in includeUsers/excludeUsers/includeGroups/excludeGroups/
-    # includeRoles/excludeRoles enthält. Diese wären nach einem Tenant-Wechsel
-    # ungültig (Break-Glass-Ausschlüsse tot -> Lockout-Risiko).
-    # Sonderwerte All/None/GuestsOrExternalUsers werden ignoriert.
+    # (GUIDs) enthält, die nach einem Tenant-Wechsel ungültig wären und damit
+    # ein Lockout-Risiko darstellen (tote Break-Glass-Ausschlüsse, tote
+    # Trusted-Location-Ausschlüsse etc.). Geprüft werden:
+    #   conditions.users.{include|exclude}{Users,Groups,Roles}
+    #   conditions.locations.{include|exclude}Locations
+    #   conditions.applications.{include|exclude}Applications
+    # Sonderwerte (All/None/GuestsOrExternalUsers/AllTrusted) werden ignoriert.
     # Rückgabe: Liste der gefundenen "feld=guid"-Referenzen (leer wenn keine).
     [CmdletBinding()]
     param(
@@ -393,25 +400,35 @@ function Get-DirectoryObjectGuidReference {
     )
 
     $guidPattern   = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-    $specialValues = @('All', 'None', 'GuestsOrExternalUsers')
+    $specialValues = @('All', 'None', 'GuestsOrExternalUsers', 'AllTrusted', 'Office365', 'MicrosoftAdminPortals')
     $found         = [System.Collections.Generic.List[string]]::new()
 
     if ($null -eq $PolicyBody -or $PolicyBody -isnot [System.Collections.IDictionary]) { return $found }
     if (-not $PolicyBody.Contains('conditions')) { return $found }
     $conditions = $PolicyBody['conditions']
     if ($null -eq $conditions -or $conditions -isnot [System.Collections.IDictionary]) { return $found }
-    if (-not $conditions.Contains('users')) { return $found }
-    $users = $conditions['users']
-    if ($null -eq $users -or $users -isnot [System.Collections.IDictionary]) { return $found }
 
-    $fieldsToCheck = @('includeUsers', 'excludeUsers', 'includeGroups', 'excludeGroups', 'includeRoles', 'excludeRoles')
-    foreach ($field in $fieldsToCheck) {
-        if (-not $users.Contains($field)) { continue }
-        $values = $users[$field]
-        if ($null -eq $values) { continue }
-        foreach ($v in @($values)) {
-            if (($v -is [string]) -and ($v -match $guidPattern) -and ($v -notin $specialValues)) {
-                $found.Add("$field=$v")
+    # Sub-Objekt -> zu prüfende GUID-Felder. Jedes dieser Felder kann Directory-
+    # Objekt-IDs enthalten, die tenant-spezifisch sind.
+    $sections = @{
+        'users'        = @('includeUsers', 'excludeUsers', 'includeGroups', 'excludeGroups', 'includeRoles', 'excludeRoles')
+        'locations'    = @('includeLocations', 'excludeLocations')
+        'applications' = @('includeApplications', 'excludeApplications')
+    }
+
+    foreach ($sectionName in $sections.Keys) {
+        if (-not $conditions.Contains($sectionName)) { continue }
+        $section = $conditions[$sectionName]
+        if ($null -eq $section -or $section -isnot [System.Collections.IDictionary]) { continue }
+
+        foreach ($field in $sections[$sectionName]) {
+            if (-not $section.Contains($field)) { continue }
+            $values = $section[$field]
+            if ($null -eq $values) { continue }
+            foreach ($v in @($values)) {
+                if (($v -is [string]) -and ($v -match $guidPattern) -and ($v -notin $specialValues)) {
+                    $found.Add("$sectionName.$field=$v")
+                }
             }
         }
     }
@@ -675,25 +692,33 @@ $counters = @{
 # ------------------------------------------------------------
 $currentTenantId = [string]$context.TenantId
 
-# Quell-Tenant-ID aus dem Backup ermitteln, falls hinterlegt.
+# Quell-Tenant-ID bestimmen. Vorrang hat der explizite Parameter -SourceTenantId
+# (vom Operator zugesichert). Andernfalls wird versucht, sie aus dem Backup zu
+# lesen.
 # HINWEIS: Der aktuelle Exporter schreibt die Quell-Tenant-ID NICHT in das
-# JSON-Backup (das Backup ist ein reines Policy-Array). Sie ist daher i.d.R.
-# unbekannt und wird bewusst als "möglicherweise abweichend" behandelt
-# (sicherer Default gegen Lockout).
+# JSON-Backup (das Backup ist ein reines Policy-Array). Ohne -SourceTenantId ist
+# sie daher i.d.R. unbekannt und wird bewusst als "möglicherweise abweichend"
+# behandelt (sicherer Default gegen Lockout).
 $sourceTenantId = $null
-foreach ($p in $policies) {
-    foreach ($propName in @('SourceTenantId', 'sourceTenantId')) {
-        if (($p.PSObject.Properties.Name -contains $propName) -and $p.$propName) {
-            $sourceTenantId = [string]$p.$propName
-            break
+if ($PSBoundParameters.ContainsKey('SourceTenantId') -and $SourceTenantId) {
+    $sourceTenantId = [string]$SourceTenantId
+    Write-Log "Quell-Tenant-ID explizit angegeben: '$sourceTenantId'." -Level INFO
+}
+else {
+    foreach ($p in $policies) {
+        foreach ($propName in @('SourceTenantId', 'sourceTenantId')) {
+            if (($p.PSObject.Properties.Name -contains $propName) -and $p.$propName) {
+                $sourceTenantId = [string]$p.$propName
+                break
+            }
         }
+        if ($sourceTenantId) { break }
     }
-    if ($sourceTenantId) { break }
 }
 
 if (-not $sourceTenantId) {
     $isCrossTenant = $true
-    Write-Log "Quell-Tenant-ID im Backup nicht hinterlegt – Import wird als tenant-übergreifend (unbekannt) behandelt. Policies mit Directory-GUID-Referenzen werden geschützt (kein Enable)." -Level WARNING
+    Write-Log "Quell-Tenant-ID unbekannt (weder -SourceTenantId angegeben noch im Backup hinterlegt) – Import wird sicherheitshalber als tenant-übergreifend behandelt. Policies mit Directory-GUID-Referenzen werden geschützt (kein Enable). Für einen bestätigten Restore in denselben Tenant -SourceTenantId angeben." -Level WARNING
 }
 elseif ($sourceTenantId -ne $currentTenantId) {
     $isCrossTenant = $true
@@ -788,6 +813,25 @@ foreach ($policy in $policies) {
                     $effectiveState = "unverändert (nicht gelesen)"
                     $policyBody.Remove('state')
                     Write-Log "  WARNUNG  : '$displayName' – aktueller Status unbekannt. 'state' wird beim PATCH ausgelassen, damit der Live-Status erhalten bleibt." -Level WARNING
+                }
+
+                # ----------------------------------------------------------------
+                #  Lockout-Schutz beim UPDATE: Ein PATCH überschreibt die
+                #  'conditions' der Ziel-Policy mit den (nicht remappten) GUIDs aus
+                #  dem Backup. Bei tenant-übergreifendem Import sind diese GUIDs im
+                #  Ziel ungültig – eine weiterhin AKTIVE Policy mit toten
+                #  Break-Glass-Ausschlüssen würde zum Lockout führen. Deshalb wird
+                #  der Status hier zwingend auf 'disabled' gesetzt, egal welcher
+                #  Live-Status zuvor bewahrt wurde.
+                # ----------------------------------------------------------------
+                $guidRefs = Get-DirectoryObjectGuidReference -PolicyBody $policyBody
+                if ($isCrossTenant -and ($guidRefs.Count -gt 0)) {
+                    Write-Log "  ACHTUNG  : '$displayName' (Update) referenziert nicht-remappte Directory-GUIDs ($($guidRefs -join ', ')). Bei tenant-übergreifendem Import wird der Status zur Lockout-Vermeidung auf 'disabled' erzwungen. GUIDs manuell prüfen/remappen, bevor die Policy wieder aktiviert wird!" -Level WARNING
+                    $effectiveState = 'disabled'
+                    $policyBody['state'] = 'disabled'
+                    if (-not $forceDisabledForCrossTenant.Contains($displayName)) {
+                        $forceDisabledForCrossTenant.Add($displayName)
+                    }
                 }
 
                 $bodyJson = $policyBody | ConvertTo-Json -Depth 50 -Compress

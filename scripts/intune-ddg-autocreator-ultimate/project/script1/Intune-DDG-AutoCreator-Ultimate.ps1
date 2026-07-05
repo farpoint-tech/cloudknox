@@ -2519,16 +2519,54 @@ try {
         Write-ColorOutput "📄 JSON report exported: $jsonPath" "Green"
     }
     
+    $failedGroups = $Global:DDGStatistics.FailedGroups
+
     # Send completion notification
     if ($Global:DDGConfig.Teams.EnableNotifications -and $Global:DDGConfig.Teams.NotifyOnCompletion) {
-        $message = "🎉 DDG processing completed successfully!"
-        $color = if ($Global:DDGStatistics.FailedGroups -eq 0) { "107C10" } else { "FF8C00" }
+        $message = if ($failedGroups -eq 0) {
+            "🎉 DDG processing completed successfully!"
+        } else {
+            "⚠️ DDG processing completed WITH ERRORS: $failedGroups group(s) failed."
+        }
+        $color = if ($failedGroups -eq 0) { "107C10" } else { "FF8C00" }
         Send-TeamsNotification -WebhookUrl $Global:DDGConfig.Teams.WebhookUrl -Title "DDG AutoCreator Completed" -Message $message -Color $color -Statistics $Global:DDGStatistics
     }
-    
+
     Write-Host ""
-    Write-ColorOutput "🚀 DDG AutoCreator Ultimate Enterprise Edition completed successfully!" "Green"
-    
+    if ($failedGroups -eq 0) {
+        Write-ColorOutput "🚀 DDG AutoCreator Ultimate Enterprise Edition completed successfully!" "Green"
+    } else {
+        # Partial failure: per-group errors do NOT raise an exception, so the
+        # top-level catch/rollback is never reached. Warn explicitly and surface
+        # the groups created before the failure so orphans are not left silently.
+        Write-ColorOutput "⚠️  DDG AutoCreator completed WITH ERRORS: $failedGroups group(s) failed." "Yellow"
+        $createdTracked = @($Global:DDGCreatedGroupIds)
+        if (($createdTracked.Count -gt 0) -and (-not $DryRun)) {
+            Write-ColorOutput "⚠️  $($createdTracked.Count) group(s) were created during this run and may need review or rollback:" "Yellow"
+            foreach ($gid in $createdTracked) {
+                Write-ColorOutput "   • $gid" "Gray"
+            }
+            if (-not $ScheduledMode) {
+                $rbAnswer = Read-Host "Roll back (delete) the $($createdTracked.Count) group(s) created in THIS run? (y/N)"
+                if ($rbAnswer -match '^[Yy]$') {
+                    foreach ($gid in $createdTracked) {
+                        try {
+                            Remove-MgGroup -GroupId $gid -Confirm:$false -ErrorAction Stop
+                            Write-ColorOutput "   ✅ Rolled back: $gid" "Green"
+                        }
+                        catch {
+                            Write-ColorOutput "   ❌ Could not remove $gid : $($_.Exception.Message) — remove manually." "Red"
+                        }
+                    }
+                } else {
+                    Write-ColorOutput "   Rollback skipped. Review the group IDs above in Entra ID." "Yellow"
+                }
+            } else {
+                Write-ColorOutput "   Unattended run: review the group IDs above in Entra ID (no automatic rollback in scheduled mode)." "Yellow"
+            }
+        }
+    }
+
     if ($DryRun) {
         Write-ColorOutput "💡 This was a DRY RUN. No actual changes were made." "Cyan"
         Write-ColorOutput "💡 Remove -DryRun parameter to perform actual group creation." "Cyan"
