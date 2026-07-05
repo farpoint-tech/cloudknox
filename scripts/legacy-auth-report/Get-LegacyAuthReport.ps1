@@ -21,7 +21,8 @@
 .PARAMETER OutputPath
     HTML output file path  (default: platform-appropriate temp dir)
 .PARAMETER TopCount
-    Max records to fetch   (default: 2000)
+    Optional hard cap on records fetched. Omit to fetch ALL matching legacy
+    sign-ins via automatic pagination (recommended — a cap under-reports exposure).
 .PARAMETER SkipAutoOpen
     Suppress automatic browser launch after report generation
 
@@ -124,35 +125,53 @@ Write-Host "[+] Connected: $TenantName ($TenantId)" -ForegroundColor Green
 #endregion
 
 #region ── LEGACY PROTOCOL LIST ──────────────────────────────────────────────────
+# Official Entra ID legacy-authentication clientAppUsed values.
+# Source: Microsoft "Sign-in activity - legacy authentication clients" list.
+# NOTE: values such as 'MAPI', 'SMTP', 'Exchange RPC' are NOT valid clientAppUsed
+# values and were silently matching nothing; the real protocols below replace them.
 $LegacyProtocols = @(
-    'Exchange ActiveSync',
-    'IMAP4',
-    'MAPI',
-    'POP3',
-    'SMTP',
     'Authenticated SMTP',
-    'Exchange Web Services',
     'Autodiscover',
-    'Exchange RPC',
+    'Exchange ActiveSync',
     'Exchange Online PowerShell',
+    'Exchange Web Services',
+    'IMAP4',
+    'MAPI Over HTTP',
+    'Offline Address Book',
+    'Outlook Anywhere (RPC over HTTP)',
+    'Outlook Service',
+    'POP3',
+    'Reporting Web Services',
     'Other clients'
 )
 #endregion
 
 #region ── QUERY SIGN-IN LOGS ────────────────────────────────────────────────────
-Write-Host "[*] Querying sign-in logs (last $Days days, up to $TopCount records)..." -ForegroundColor Cyan
-
 $StartDate    = (Get-Date).AddDays(-$Days).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $ProtoFilter  = ($LegacyProtocols | ForEach-Object { "clientAppUsed eq '$_'" }) -join ' or '
 $FilterString = "createdDateTime ge $StartDate and ($ProtoFilter)"
 
-$SignIns = Get-MgAuditLogSignIn `
-    -Filter $FilterString `
-    -Top $TopCount `
-    -Property id,createdDateTime,userPrincipalName,userDisplayName,
-              clientAppUsed,ipAddress,location,status,
-              appDisplayName,conditionalAccessStatus,
-              riskLevelDuringSignIn,riskState
+$SignInParams = @{
+    Filter   = $FilterString
+    Property = 'id,createdDateTime,userPrincipalName,userDisplayName,' +
+               'clientAppUsed,ipAddress,location,status,' +
+               'appDisplayName,conditionalAccessStatus,' +
+               'riskLevelDuringSignIn,riskState'
+}
+
+# Default: fetch ALL matching records via automatic @odata.nextLink pagination.
+# A hard -Top cap silently truncates large tenants and makes the report under-report
+# exposure, so -TopCount is only honoured when the caller explicitly sets it.
+if ($PSBoundParameters.ContainsKey('TopCount') -and $TopCount -gt 0) {
+    Write-Host "[*] Querying sign-in logs (last $Days days, capped at $TopCount records)..." -ForegroundColor Cyan
+    Write-Warning "TopCount is set to $TopCount; results may be truncated. Omit -TopCount to fetch ALL legacy sign-ins."
+    $SignInParams['Top'] = $TopCount
+} else {
+    Write-Host "[*] Querying sign-in logs (last $Days days, all matching records)..." -ForegroundColor Cyan
+    $SignInParams['All'] = $true
+}
+
+$SignIns = @(Get-MgAuditLogSignIn @SignInParams)
 
 Write-Host "[+] $($SignIns.Count) legacy auth sign-in records found" -ForegroundColor Green
 
