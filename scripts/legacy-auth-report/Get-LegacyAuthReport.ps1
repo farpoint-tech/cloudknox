@@ -153,10 +153,12 @@ $FilterString = "createdDateTime ge $StartDate and ($ProtoFilter)"
 
 $SignInParams = @{
     Filter   = $FilterString
-    Property = 'id,createdDateTime,userPrincipalName,userDisplayName,' +
-               'clientAppUsed,ipAddress,location,status,' +
-               'appDisplayName,conditionalAccessStatus,' +
-               'riskLevelDuringSignIn,riskState'
+    Property = @(
+        'id','createdDateTime','userPrincipalName','userDisplayName',
+        'clientAppUsed','ipAddress','location','status',
+        'appDisplayName','conditionalAccessStatus',
+        'riskLevelDuringSignIn','riskState'
+    )
 }
 
 # Default: fetch ALL matching records via automatic @odata.nextLink pagination.
