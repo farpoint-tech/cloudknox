@@ -152,7 +152,10 @@ param(
     
     [Parameter(Mandatory = $false, ParameterSetName = "Cleanup")]
     [switch]$CleanupMode,
-    
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ForceCleanup,
+
     [Parameter(Mandatory = $false)]
     [switch]$AuditMode,
     
@@ -196,6 +199,7 @@ $Global:DDGResults = @()
 $Global:DDGStatistics = @{}
 $Global:DDGRunspaces = @()
 $Global:DDGBackupData = @{}
+$Global:DDGCreatedGroupIds = @()
 
 #region ISE-Compatible Color Functions
 
@@ -801,7 +805,12 @@ function Start-ParallelProcessing {
                         $result = $job.PowerShell.EndInvoke($job.Handle)
                         $results += $result
                         $completed++
-                        
+
+                        # Track newly created group IDs for rollback support
+                        if ($result.Status -eq "Created" -and $result.GroupId) {
+                            $Global:DDGCreatedGroupIds += $result.GroupId
+                        }
+
                         # ISE-friendly progress display
                         $percent = [math]::Round(($completed / $total) * 100, 1)
                         Write-ColorOutput "✅ Completed: $($job.Item.Name) ($completed/$total - $percent%)" "Green"
@@ -1016,9 +1025,15 @@ function Start-CleanupMode {
         Advanced cleanup mode for obsolete groups
     #>
     param([array]$CurrentOUs)
-    
+
     Write-ColorOutput "🧹 Starting Cleanup Mode..." "Yellow"
-    
+
+    # SAFETY GUARD: never treat "no input" as "everything is obsolete".
+    # An empty current-OU list would mark every prefixed group as obsolete and delete them all.
+    if (@($CurrentOUs).Count -eq 0) {
+        throw "Cleanup aborted: no current OUs provided. Supply -InputFilePath with the list of OUs that should be KEPT. Refusing to treat an empty list as 'delete everything'."
+    }
+
     try {
         # Get all DDG groups
         $prefix = if ($GroupPrefix) { $GroupPrefix } else { $Global:DDGConfig.General.DefaultGroupPrefix }
@@ -1037,21 +1052,18 @@ function Start-CleanupMode {
             return @()
         }
         
-        # Identify obsolete groups
+        # Identify obsolete groups.
+        # Build the exact set of group names that SHOULD exist for the current OUs and match
+        # by exact name. A wildcard substring match ("*$ouName*") mis-classifies overlapping
+        # OU names (e.g. "Berlin" would protect "Berlin-Ost") and corrupts delete decisions.
         $obsoleteGroups = @()
-        $currentOUNames = $CurrentOUs | ForEach-Object { $_.Name }
-        
+        $currentGroupNames = @()
+        foreach ($ou in $CurrentOUs) {
+            $currentGroupNames += Get-EstimatedGroupName -OU $ou.Name
+        }
+
         foreach ($group in $allGroups) {
-            $isObsolete = $true
-            
-            foreach ($ouName in $currentOUNames) {
-                if ($group.DisplayName -like "*$ouName*") {
-                    $isObsolete = $false
-                    break
-                }
-            }
-            
-            if ($isObsolete) {
+            if ($currentGroupNames -notcontains $group.DisplayName) {
                 $obsoleteGroups += $group
             }
         }
@@ -1073,18 +1085,56 @@ function Start-CleanupMode {
             Write-ColorOutput "🔍 DRY RUN: No groups will be deleted" "Cyan"
             return $obsoleteGroups
         }
-        
-        # Confirm deletion
-        if (-not $ScheduledMode) {
-            Write-ColorOutput "⚠️  WARNING: This will permanently delete $($obsoleteGroups.Count) groups!" "Red"
+
+        # MANDATORY BACKUP: export the obsolete group objects before deleting anything.
+        # If the backup cannot be written, abort - never delete without a recoverable record.
+        try {
+            $backupDir = Join-Path $PWD "DDGBackups"
+            if (-not (Test-Path $backupDir)) {
+                New-Item -Path $backupDir -ItemType Directory -Force | Out-Null
+            }
+            $cleanupBackupPath = Join-Path $backupDir "cleanup_$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+
+            $backupObjects = @()
+            foreach ($group in $obsoleteGroups) {
+                $backupObjects += @{
+                    Id = $group.Id
+                    DisplayName = $group.DisplayName
+                    Description = $group.Description
+                    MembershipRule = $group.MembershipRule
+                    GroupTypes = $group.GroupTypes
+                }
+            }
+
+            $backupObjects | ConvertTo-Json -Depth 10 | Set-Content -Path $cleanupBackupPath -Encoding UTF8
+            Write-ColorOutput "💾 Backup of $(@($obsoleteGroups).Count) obsolete group(s) saved: $cleanupBackupPath" "Green"
+        }
+        catch {
+            Write-ColorOutput "❌ Failed to create cleanup backup: $($_.Exception.Message)" "Red"
+            throw "Cleanup aborted: backup could not be created, refusing to delete groups"
+        }
+
+        # Confirm deletion. Unattended (-ScheduledMode) MUST NOT delete silently:
+        # it requires an explicit -ForceCleanup switch, and always logs exactly what will be deleted.
+        if ($ScheduledMode) {
+            if (-not $ForceCleanup) {
+                throw "Cleanup aborted: unattended cleanup (-ScheduledMode) requires the explicit -ForceCleanup switch to permanently delete groups."
+            }
+            Write-ColorOutput "⚠️  -ForceCleanup enabled: the following $(@($obsoleteGroups).Count) group(s) WILL be permanently deleted:" "Red"
+            foreach ($group in $obsoleteGroups) {
+                Write-ColorOutput "   • $($group.DisplayName) [$($group.Id)]" "Red"
+            }
+        }
+        else {
+            Write-ColorOutput "⚠️  WARNING: This will permanently delete $(@($obsoleteGroups).Count) groups!" "Red"
             $confirm = Read-Host "Type 'DELETE' to confirm"
-            
+
             if ($confirm -ne "DELETE") {
                 Write-ColorOutput "❌ Cleanup cancelled by user" "Yellow"
                 return @()
             }
         }
-        
+
         # Delete obsolete groups
         $deletedGroups = @()
         foreach ($group in $obsoleteGroups) {
@@ -1199,24 +1249,51 @@ function Start-RollbackProcess {
             }
         }
         
-        # Perform rollback operations
+        # Perform rollback operations - delete groups that were created during this run
         $rollbackResults = @{
             RestoredGroups = 0
             DeletedGroups = 0
             Errors = 0
         }
-        
-        # TODO: Implement specific rollback logic based on backup data
-        # This would involve:
-        # 1. Restoring original group configurations
-        # 2. Deleting newly created groups
-        # 3. Updating modified groups back to original state
-        
-        Write-ColorOutput "🎉 Rollback completed successfully" "Green"
-        Write-ColorOutput "   Restored groups: $($rollbackResults.RestoredGroups)" "Green"
+
+        $createdIds = @($Global:DDGCreatedGroupIds)
+        $remainingIds = @()
+
+        if ($createdIds.Count -eq 0) {
+            Write-ColorOutput "ℹ️  No groups were tracked as created during this run - nothing to roll back automatically." "Yellow"
+            Write-ColorOutput "   If groups were created in a previous session, review them manually against the backup file:" "Yellow"
+            Write-ColorOutput "   $RollbackFilePath" "Yellow"
+            return $true
+        }
+
+        Write-ColorOutput "🗑️  Rolling back $($createdIds.Count) group(s) created during this run..." "Yellow"
+
+        foreach ($groupId in $createdIds) {
+            try {
+                Remove-MgGroup -GroupId $groupId -Confirm:$false -ErrorAction Stop
+                $rollbackResults.DeletedGroups++
+                Write-ColorOutput "   ✅ Removed created group: $groupId" "Green"
+            }
+            catch {
+                $rollbackResults.Errors++
+                $remainingIds += $groupId
+                Write-ColorOutput "   ❌ Failed to remove group $groupId : $($_.Exception.Message)" "Red"
+            }
+        }
+
+        Write-ColorOutput "📋 Rollback summary:" "Cyan"
         Write-ColorOutput "   Deleted groups: $($rollbackResults.DeletedGroups)" "Green"
         Write-ColorOutput "   Errors: $($rollbackResults.Errors)" "Red"
-        
+
+        if (@($remainingIds).Count -gt 0) {
+            Write-ColorOutput "⚠️  Rollback INCOMPLETE. The following group IDs still exist and MUST be removed manually:" "Red"
+            foreach ($remId in $remainingIds) {
+                Write-ColorOutput "   • $remId" "Red"
+            }
+            return $false
+        }
+
+        Write-ColorOutput "🎉 Rollback completed successfully. All tracked groups were removed." "Green"
         return $true
     }
     catch {
@@ -2175,12 +2252,15 @@ function Process-SingleGroup {
                 $newGroup = New-MgGroup @groupParams
                 $result.Status = "Created"
                 $result.GroupId = $newGroup.Id
+
+                # Track newly created group ID for rollback support
+                $Global:DDGCreatedGroupIds += $newGroup.Id
             }
         }
-        
+
         $result.EndTime = Get-Date
         $result.Duration = ($result.EndTime - $result.StartTime).TotalSeconds
-        
+
         return $result
     }
     catch {
