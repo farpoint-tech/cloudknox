@@ -20,6 +20,16 @@ $script:LogFile             = Join-Path $script:ModuleRoot "enforcement_log.txt"
 $script:DashPath            = Join-Path $script:ModuleRoot "dashboard.html"
 $script:ServerPort          = 18989
 
+# CSRF capability token. Generated once per PowerShell session (on first use)
+# and embedded into audit_results.js so only the locally-opened dashboard can
+# read it. Re-audits in the same session reuse the same token.
+# The /enforce endpoint rejects any request lacking this exact token,
+# which prevents a malicious website (that the user happens to visit
+# while the root-privileged server is running) from triggering
+# enforcement via a cross-site fetch.
+$script:EnforceToken        = $null
+$script:MaxRequestBytes     = 65536   # reject oversized POST bodies
+
 # macOS Edge policy domains (defaults command domains / plist paths)
 $script:EdgeManagedDomain   = "/Library/Managed Preferences/com.microsoft.Edge"
 $script:EdgeSystemDomain    = "/Library/Preferences/com.microsoft.Edge"
@@ -90,6 +100,59 @@ function Get-MacComputerName {
     return $name
 }
 
+# Returns the per-session CSRF capability token, generating a fresh
+# cryptographically-random 256-bit value on first use. Embedded into
+# audit_results.js and required by the /enforce endpoint.
+function Get-CISEnforceToken {
+    if ([string]::IsNullOrEmpty($script:EnforceToken)) {
+        $bytes = [byte[]]::new(32)
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+        $script:EnforceToken = ([System.BitConverter]::ToString($bytes) -replace '-', '').ToLower()
+    }
+    return $script:EnforceToken
+}
+
+# Writes audit JSON to disk and the JS data file consumed by the dashboard,
+# embedding the current CSRF token alongside the audit data. Centralizes the
+# two write sites so the token is always present. The JS file holds the
+# capability token, so it is restricted to the owner (chmod 600) to keep
+# other local users from reading it and forging enforcement requests.
+function Write-CISResultFiles {
+    param([Parameter(Mandatory)][string]$Json)
+    $token = Get-CISEnforceToken
+    $Json | Out-File -FilePath $script:OutputPath -Encoding UTF8 -Force
+    "window.AUDIT_DATA = $Json;`r`nwindow.ENFORCE_TOKEN = `"$token`";" |
+        Out-File -FilePath $script:JsPath -Encoding UTF8 -Force
+    foreach ($p in @($script:OutputPath, $script:JsPath)) {
+        try { & /bin/chmod 600 $p 2>$null } catch {}
+    }
+}
+
+# Constant-time string comparison to avoid leaking the token via timing.
+function Test-CISTokenEqual {
+    param([string]$A, [string]$B)
+    if ([string]::IsNullOrEmpty($A) -or [string]::IsNullOrEmpty($B)) { return $false }
+    if ($A.Length -ne $B.Length) { return $false }
+    $diff = 0
+    for ($i = 0; $i -lt $A.Length; $i++) {
+        $diff = $diff -bor ([int][char]$A[$i] -bxor [int][char]$B[$i])
+    }
+    return ($diff -eq 0)
+}
+
+# Numeric equality that tolerates non-numeric `defaults read` output. A
+# misconfigured policy can return a string/dict where an integer is expected;
+# a bare [int] cast would throw and abort the whole audit loop. Falls back to
+# a trimmed string comparison when either side is not an integer.
+function Test-CISNumericEqual {
+    param($Current, $Expected)
+    $c = 0; $e = 0
+    if ([int]::TryParse("$Current", [ref]$c) -and [int]::TryParse("$Expected", [ref]$e)) {
+        return ($c -eq $e)
+    }
+    return ("$Current".Trim() -eq "$Expected".Trim())
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # PRIVATE: Silent re-audit (updates JSON/JS after enforcement)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -119,7 +182,7 @@ function Update-AuditResults {
             }
         }
         else {
-            if ([int]$currentVal -eq [int]$expected) {
+            if (Test-CISNumericEqual $currentVal $expected) {
                 $status = "PASS"; $detail = "Matches recommendation"
             } else {
                 $status = "FAIL"; $detail = "Current '$currentVal' != recommended '$expected'"
@@ -162,8 +225,7 @@ function Update-AuditResults {
     }
 
     $json = $output | ConvertTo-Json -Depth 5
-    $json | Out-File -FilePath $script:OutputPath -Encoding UTF8 -Force
-    "window.AUDIT_DATA = $json;" | Out-File -FilePath $script:JsPath -Encoding UTF8 -Force
+    Write-CISResultFiles -Json $json
 
     return $json
 }
@@ -205,9 +267,13 @@ function Start-CISEnforceServer {
             $context = $listener.EndGetContext($async)
 
             $resp = $context.Response
+            # CORS stays permissive so the file:// dashboard (Origin "null")
+            # can call the API, but the X-Enforce-Token requirement below is
+            # the actual access control: a cross-site attacker can pass the
+            # preflight yet cannot read the token, so /enforce rejects it.
             $resp.Headers.Add("Access-Control-Allow-Origin", "*")
             $resp.Headers.Add("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-            $resp.Headers.Add("Access-Control-Allow-Headers", "Content-Type")
+            $resp.Headers.Add("Access-Control-Allow-Headers", "Content-Type, X-Enforce-Token")
 
             if ($context.Request.HttpMethod -eq "OPTIONS") {
                 $resp.StatusCode = 204; $resp.Close(); continue
@@ -216,9 +282,11 @@ function Start-CISEnforceServer {
             $path = $context.Request.Url.AbsolutePath
 
             # --- /ping ---
+            # Liveness only. Deliberately does NOT report the admin/root status:
+            # with CORS "*", any visited website could otherwise read it and
+            # fingerprint that the root-privileged tool is running.
             if ($path -eq "/ping") {
-                $adminStr = if ($isAdmin) { "true" } else { "false" }
-                $body = "{`"status`":`"ok`",`"admin`":$adminStr}"
+                $body = "{`"status`":`"ok`"}"
                 $buf  = [System.Text.Encoding]::UTF8.GetBytes($body)
                 $resp.ContentType = "application/json"
                 $resp.StatusCode  = 200
@@ -229,6 +297,37 @@ function Start-CISEnforceServer {
 
             # --- /enforce ---
             if ($path -eq "/enforce" -and $context.Request.HttpMethod -eq "POST") {
+
+                # CSRF protection: require the capability token that was
+                # embedded into audit_results.js for this run. A malicious
+                # website cannot read that token, so it cannot forge a valid
+                # enforcement request against this root-privileged server.
+                $reqToken = $context.Request.Headers["X-Enforce-Token"]
+                if (-not (Test-CISTokenEqual $reqToken $script:EnforceToken)) {
+                    $jsonResp = '{"status":"error","message":"Forbidden: invalid or missing enforcement token. Reload the dashboard opened by Invoke-CISEdgeAudit."}'
+                    $buf = [System.Text.Encoding]::UTF8.GetBytes($jsonResp)
+                    $resp.ContentType = "application/json"
+                    $resp.StatusCode  = 403
+                    $resp.OutputStream.Write($buf, 0, $buf.Length)
+                    $resp.Close()
+                    Write-CISLog "Rejected /enforce request with invalid token from $($context.Request.RemoteEndPoint)"
+                    continue
+                }
+
+                # Reject oversized bodies before reading them into memory.
+                # ContentLength64 is -1 for chunked/unknown-length requests,
+                # which would otherwise bypass the size cap, so reject those too.
+                $clen = $context.Request.ContentLength64
+                if ($clen -lt 0 -or $clen -gt $script:MaxRequestBytes) {
+                    $jsonResp = '{"status":"error","message":"Request body too large or missing Content-Length."}'
+                    $buf = [System.Text.Encoding]::UTF8.GetBytes($jsonResp)
+                    $resp.ContentType = "application/json"
+                    $resp.StatusCode  = 413
+                    $resp.OutputStream.Write($buf, 0, $buf.Length)
+                    $resp.Close()
+                    continue
+                }
+
                 $reader  = New-Object System.IO.StreamReader($context.Request.InputStream)
                 $reqBody = $reader.ReadToEnd()
                 $reader.Close()
@@ -257,8 +356,10 @@ function Start-CISEnforceServer {
 
                         $jsonResp = "{`"status`":`"ok`",`"message`":`"Enforcement completed.`",`"updatedData`":$updatedJson}"
                     } catch {
-                        $errMsg   = $_.Exception.Message -replace '"','\"' -replace '[\r\n]',' '
-                        $jsonResp = "{`"status`":`"error`",`"message`":`"$errMsg`"}"
+                        # Log full detail locally; return a generic message so
+                        # internal paths/state are not leaked over HTTP.
+                        Write-CISLog "Enforce handler error: $($_.Exception.Message)"
+                        $jsonResp = '{"status":"error","message":"Enforcement failed. See the PowerShell window and enforcement_log.txt for details."}'
                     }
                 }
 
@@ -370,7 +471,7 @@ function Invoke-CISEdgeAudit {
             }
         }
         else {
-            if ([int]$currentVal -eq [int]$expected) {
+            if (Test-CISNumericEqual $currentVal $expected) {
                 $status = "PASS"; $detail = "Matches recommendation"
             } else {
                 $status = "FAIL"; $detail = "Current '$currentVal' != recommended '$expected'"
@@ -429,8 +530,7 @@ function Invoke-CISEdgeAudit {
 
     try {
         $json = $output | ConvertTo-Json -Depth 5
-        $json | Out-File -FilePath $script:OutputPath -Encoding UTF8 -Force
-        "window.AUDIT_DATA = $json;" | Out-File -FilePath $script:JsPath -Encoding UTF8 -Force
+        Write-CISResultFiles -Json $json
     } catch {
         Write-Host "ERROR: Failed to write results: $_" -ForegroundColor Red
         return
