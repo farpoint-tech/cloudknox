@@ -12,6 +12,9 @@ export const GRAPH_SCOPES = [
   "AuditLog.Read.All",
   "RoleManagement.Read.Directory",
   "Organization.Read.All",
+  // Intune (device compliance) — read-only.
+  "DeviceManagementConfiguration.Read.All",
+  "DeviceManagementManagedDevices.Read.All",
 ];
 
 const clientId = process.env.NEXT_PUBLIC_AAD_CLIENT_ID ?? "";

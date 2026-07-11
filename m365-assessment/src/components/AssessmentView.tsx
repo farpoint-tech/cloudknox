@@ -1,5 +1,5 @@
-import { AssessmentResult } from "@/lib/assessment/iam";
-import { CheckStatus } from "@/lib/engine/types";
+import { AssessmentResult } from "@/lib/assessment";
+import { CheckStatus, Domain, Finding, sortFindings } from "@/lib/engine/types";
 import { FindingCard } from "./FindingCard";
 
 const COUNT_ORDER: CheckStatus[] = ["fail", "warning", "manual", "error", "pass"];
@@ -13,11 +13,28 @@ const COUNT_STYLE: Record<CheckStatus, string> = {
   "not-applicable": "text-slate-300",
 };
 
+const DOMAIN_ORDER: Domain[] = ["iam", "intune", "defender", "exchange", "dlp"];
+const DOMAIN_LABEL: Record<Domain, string> = {
+  iam: "Identity & Access (IAM)",
+  intune: "Intune — Device Compliance",
+  defender: "Defender",
+  exchange: "Exchange",
+  dlp: "Data Loss Prevention",
+};
+
 export function AssessmentView({ result }: { result: AssessmentResult }) {
   const counts = result.findings.reduce<Record<string, number>>((acc, f) => {
     acc[f.status] = (acc[f.status] ?? 0) + 1;
     return acc;
   }, {});
+
+  const byDomain = new Map<Domain, Finding[]>();
+  for (const f of result.findings) {
+    const list = byDomain.get(f.domain) ?? [];
+    list.push(f);
+    byDomain.set(f.domain, list);
+  }
+  const domains = DOMAIN_ORDER.filter((d) => byDomain.has(d));
 
   return (
     <section className="mt-6">
@@ -27,9 +44,7 @@ export function AssessmentView({ result }: { result: AssessmentResult }) {
             <div className={`text-2xl font-semibold ${COUNT_STYLE[status]}`}>
               {counts[status] ?? 0}
             </div>
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              {status}
-            </div>
+            <div className="text-xs uppercase tracking-wide text-slate-500">{status}</div>
           </div>
         ))}
       </div>
@@ -45,11 +60,18 @@ export function AssessmentView({ result }: { result: AssessmentResult }) {
         </div>
       )}
 
-      <div className="mt-4 grid gap-3">
-        {result.findings.map((f) => (
-          <FindingCard key={f.id} finding={f} />
-        ))}
-      </div>
+      {domains.map((domain) => (
+        <div key={domain} className="mt-6">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+            {DOMAIN_LABEL[domain]}
+          </h2>
+          <div className="grid gap-3">
+            {sortFindings(byDomain.get(domain) ?? []).map((f) => (
+              <FindingCard key={f.id} finding={f} />
+            ))}
+          </div>
+        </div>
+      ))}
     </section>
   );
 }

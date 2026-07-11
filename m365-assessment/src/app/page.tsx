@@ -8,7 +8,7 @@ import {
 } from "@azure/msal-react";
 import { GRAPH_SCOPES, isMsalConfigured } from "@/lib/auth/msalConfig";
 import { useGraphClient } from "@/lib/auth/useGraphClient";
-import { AssessmentResult, runIamAssessment } from "@/lib/assessment/iam";
+import { AssessmentResult, runAssessment } from "@/lib/assessment";
 import { AssessmentView } from "@/components/AssessmentView";
 
 export default function Home() {
@@ -33,7 +33,7 @@ export default function Home() {
     setRunning(true);
     setError(null);
     try {
-      setResult(await runIamAssessment(graph));
+      setResult(await runAssessment(graph));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -100,7 +100,7 @@ export default function Home() {
                 disabled={running || !graph}
                 className="rounded-lg bg-sky-600 px-4 py-2 font-medium text-white hover:bg-sky-500 disabled:opacity-50"
               >
-                {running ? "Running assessment…" : "Run IAM assessment"}
+                {running ? "Running assessment…" : "Run assessment"}
               </button>
               {accounts[0] && (
                 <span className="text-sm text-slate-400">{accounts[0].username}</span>
@@ -113,8 +113,9 @@ export default function Home() {
       )}
 
       <footer className="mt-10 border-t border-slate-800 pt-4 text-xs text-slate-500">
-        Domain covered: IAM (identity, MFA, Conditional Access, PIM/licensing).
-        Defender, Exchange, DLP and Intune are on the roadmap.
+        Domains covered: IAM (identity, MFA, Conditional Access, PIM/licensing)
+        and Intune (device compliance). Defender, Exchange and DLP are on the
+        roadmap.
       </footer>
     </main>
   );
