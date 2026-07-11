@@ -17,6 +17,7 @@
 
 .PARAMETER Mode
     Execution mode: "WhatIf" for dry-run (default) or "Apply" for live execution.
+    Only the exact value "Apply" performs changes; anything else runs as dry-run.
 
 .EXAMPLE
     .\Import-EnterpriseAppOwners.ps1 -ExcelPath ".\EnterpriseApp_OwnerAssignment_20260408.xlsx"
@@ -35,9 +36,11 @@
     - Microsoft.Graph
     - ImportExcel
 
-    Version: 1.0
+    Version: 1.1
     Author: Farpoint Technologies
-    Created: 2026-04-08
+    Created:  2026-04-08
+    Modified: 2026-04-09 - Fix: fail-safe dry-run logic, ValidateSet on -Mode,
+                           Test-Path on -ExcelPath, OData filter quote escaping
 #>
 
 #Requires -Modules Microsoft.Graph, ImportExcel
@@ -49,10 +52,17 @@
 
 param(
     [Parameter(Mandatory)]
-    [string]$ExcelPath,          # Pfad zur zurueckgesendeten .xlsx
+    [string]$ExcelPath,          # Path to the returned .xlsx
 
+    [ValidateSet("WhatIf", "Apply")]
     [string]$Mode = "WhatIf"     # "WhatIf" (dry-run) | "Apply" (live)
 )
+
+# Validate input file before connecting to Graph
+if (-not (Test-Path -Path $ExcelPath -PathType Leaf)) {
+    Write-Error "Excel file not found: $ExcelPath"
+    exit 1
+}
 
 # Requires ImportExcel module
 Import-Module ImportExcel
@@ -62,7 +72,8 @@ Connect-MgGraph -Scopes "Application.ReadWrite.All", "Directory.ReadWrite.All"
 Write-Host "`n📥 Reading: $ExcelPath" -ForegroundColor Cyan
 $Data = Import-Excel -Path $ExcelPath -WorksheetName "App Owner Assignment"
 
-$Assigned = 0; $Skipped = 0; $Errors = 0; $DryRun = ($Mode -eq "WhatIf")
+# Fail-safe: only the exact value "Apply" performs live changes
+$Assigned = 0; $Skipped = 0; $Errors = 0; $DryRun = ($Mode -ne "Apply")
 
 if ($DryRun) { Write-Host "⚠️  DRY-RUN MODE – no changes will be made.`n" -ForegroundColor Yellow }
 
@@ -78,8 +89,9 @@ foreach ($Row in $Data) {
         continue
     }
 
-    # Resolve user
-    $User = Get-MgUser -Filter "userPrincipalName eq '$($NewOwnerUPN.Trim())'" -ErrorAction SilentlyContinue
+    # Resolve user (escape single quotes to keep the OData filter intact)
+    $SafeUPN = $NewOwnerUPN.Trim().Replace("'", "''")
+    $User = Get-MgUser -Filter "userPrincipalName eq '$SafeUPN'" -ErrorAction SilentlyContinue
     if (-not $User) {
         Write-Warning "ERROR – User '$NewOwnerUPN' not found. Skipping '$DisplayName'."
         $Errors++
