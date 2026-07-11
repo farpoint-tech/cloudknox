@@ -5,7 +5,8 @@
     "delimiter": ";",
     "displayNamePrefixSharedMailbox": "SM - ",
     "displayNamePrefixDistributionGroup": "DG - ",
-    "defaultHiddenFromGAL": false
+    "defaultHiddenFromGAL": false,
+    "allowExternalForwarding": false
   },
   "authentication": {
     "mode": "interactive",
