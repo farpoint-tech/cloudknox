@@ -43,6 +43,26 @@ export interface Finding {
   docsUrl?: string;
 }
 
+/** Context about a completed assessment run, shown in the report header. */
+export interface AssessmentMetadata {
+  /** ISO timestamp when the run completed. */
+  generatedAt: string;
+  tenantName?: string;
+  tenantId?: string;
+  /** Signed-in account (UPN) that ran the assessment. */
+  account?: string;
+}
+
+export const DOMAIN_ORDER: Domain[] = ["iam", "intune", "defender", "exchange", "dlp"];
+
+export const DOMAIN_LABEL: Record<Domain, string> = {
+  iam: "Identity & Access (IAM)",
+  intune: "Intune — Device Compliance",
+  defender: "Defender",
+  exchange: "Exchange",
+  dlp: "Data Loss Prevention",
+};
+
 export const SEVERITY_ORDER: Record<Severity, number> = {
   critical: 0,
   high: 1,

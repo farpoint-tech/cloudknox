@@ -10,6 +10,8 @@ import { GRAPH_SCOPES, isMsalConfigured } from "@/lib/auth/msalConfig";
 import { useGraphClient } from "@/lib/auth/useGraphClient";
 import { AssessmentResult, runAssessment } from "@/lib/assessment";
 import { AssessmentView } from "@/components/AssessmentView";
+import { toJson, toMarkdown } from "@/lib/engine/report";
+import { downloadText, timestampSlug } from "@/lib/engine/download";
 
 export default function Home() {
   const { instance, accounts } = useMsal();
@@ -33,11 +35,21 @@ export default function Home() {
     setRunning(true);
     setError(null);
     try {
-      setResult(await runAssessment(graph));
+      setResult(await runAssessment(graph, { account: accounts[0]?.username }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setRunning(false);
+    }
+  };
+
+  const exportReport = (format: "json" | "md") => {
+    if (!result) return;
+    const slug = timestampSlug(result.meta.generatedAt);
+    if (format === "json") {
+      downloadText(`m365-assessment-${slug}.json`, toJson(result), "application/json");
+    } else {
+      downloadText(`m365-assessment-${slug}.md`, toMarkdown(result), "text/markdown");
     }
   };
 
@@ -104,6 +116,22 @@ export default function Home() {
               </button>
               {accounts[0] && (
                 <span className="text-sm text-slate-400">{accounts[0].username}</span>
+              )}
+              {result && (
+                <div className="ml-auto flex gap-2">
+                  <button
+                    onClick={() => exportReport("md")}
+                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+                  >
+                    Export Markdown
+                  </button>
+                  <button
+                    onClick={() => exportReport("json")}
+                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+                  >
+                    Export JSON
+                  </button>
+                </div>
               )}
             </div>
 

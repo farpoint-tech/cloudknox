@@ -1,5 +1,12 @@
 import { AssessmentResult } from "@/lib/assessment";
-import { CheckStatus, Domain, Finding, sortFindings } from "@/lib/engine/types";
+import {
+  CheckStatus,
+  DOMAIN_LABEL,
+  DOMAIN_ORDER,
+  Domain,
+  Finding,
+  sortFindings,
+} from "@/lib/engine/types";
 import { FindingCard } from "./FindingCard";
 
 const COUNT_ORDER: CheckStatus[] = ["fail", "warning", "manual", "error", "pass"];
@@ -11,15 +18,6 @@ const COUNT_STYLE: Record<CheckStatus, string> = {
   error: "text-fuchsia-300",
   pass: "text-emerald-300",
   "not-applicable": "text-slate-300",
-};
-
-const DOMAIN_ORDER: Domain[] = ["iam", "intune", "defender", "exchange", "dlp"];
-const DOMAIN_LABEL: Record<Domain, string> = {
-  iam: "Identity & Access (IAM)",
-  intune: "Intune — Device Compliance",
-  defender: "Defender",
-  exchange: "Exchange",
-  dlp: "Data Loss Prevention",
 };
 
 export function AssessmentView({ result }: { result: AssessmentResult }) {
@@ -38,15 +36,24 @@ export function AssessmentView({ result }: { result: AssessmentResult }) {
 
   return (
     <section className="mt-6">
-      <div className="flex flex-wrap gap-4 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-        {COUNT_ORDER.map((status) => (
-          <div key={status} className="min-w-[72px]">
-            <div className={`text-2xl font-semibold ${COUNT_STYLE[status]}`}>
-              {counts[status] ?? 0}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+        <div className="mb-3 text-xs text-slate-400">
+          {result.meta.tenantName && (
+            <span className="text-slate-300">{result.meta.tenantName}</span>
+          )}
+          {result.meta.tenantId && <span> · {result.meta.tenantId}</span>}
+          <span> · {new Date(result.meta.generatedAt).toLocaleString()}</span>
+        </div>
+        <div className="flex flex-wrap gap-4">
+          {COUNT_ORDER.map((status) => (
+            <div key={status} className="min-w-[72px]">
+              <div className={`text-2xl font-semibold ${COUNT_STYLE[status]}`}>
+                {counts[status] ?? 0}
+              </div>
+              <div className="text-xs uppercase tracking-wide text-slate-500">{status}</div>
             </div>
-            <div className="text-xs uppercase tracking-wide text-slate-500">{status}</div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
       {result.errors.length > 0 && (
