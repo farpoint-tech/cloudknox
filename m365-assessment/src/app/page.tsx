@@ -141,9 +141,10 @@ export default function Home() {
       )}
 
       <footer className="mt-10 border-t border-slate-800 pt-4 text-xs text-slate-500">
-        Domains covered: IAM (identity, MFA, Conditional Access, PIM/licensing)
-        and Intune (device compliance). Defender, Exchange and DLP are on the
-        roadmap.
+        Domains covered: IAM (identity, MFA, Conditional Access, PIM/licensing),
+        Intune (device compliance) and Defender (Microsoft Secure Score). Deep
+        Exchange/DLP configuration needs data outside the browser sandbox — see
+        the README.
       </footer>
     </main>
   );

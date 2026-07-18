@@ -2,6 +2,7 @@ import { AssessmentMetadata, Finding } from "../engine/types";
 import { GraphClient } from "../graph/graphClient";
 import { runIamAssessment } from "./iam";
 import { runIntuneAssessment } from "./intune";
+import { runDefenderAssessment } from "./defender";
 
 export interface AssessmentResult {
   meta: AssessmentMetadata;
@@ -21,9 +22,10 @@ export async function runAssessment(
   graph: GraphClient,
   opts: RunOptions = {},
 ): Promise<AssessmentResult> {
-  const [iam, intune] = await Promise.all([
+  const [iam, intune, defender] = await Promise.all([
     runIamAssessment(graph),
     runIntuneAssessment(graph),
+    runDefenderAssessment(graph),
   ]);
 
   let tenantName: string | undefined;
@@ -46,7 +48,7 @@ export async function runAssessment(
 
   return {
     meta,
-    findings: [...iam.findings, ...intune.findings],
-    errors: [...iam.errors, ...intune.errors],
+    findings: [...iam.findings, ...intune.findings, ...defender.findings],
+    errors: [...iam.errors, ...intune.errors, ...defender.errors],
   };
 }

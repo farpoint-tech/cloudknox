@@ -8,8 +8,9 @@ secret, no tenant data leaves the browser — tokens live in `sessionStorage` on
 Installable as a **PWA** (Windows/macOS/any browser) and deployable to **Vercel**
 as a static site.
 
-## What it checks today (IAM / Identity)
+## What it checks today
 
+### IAM / Identity
 | Area | Checks |
 |------|--------|
 | Baseline enforcement | Security Defaults on/off; if off, whether Conditional Access covers the gap |
@@ -18,15 +19,37 @@ as a static site.
 | Privileged access | Entra ID P2 availability, PIM usage, standing privileged access, P2 license coverage for admins |
 | Best-practice settings | User app-registration disabled, guest-invite restrictions, directory-read restrictions |
 
+### Intune / Device Compliance
+| Area | Checks |
+|------|--------|
+| Tenant settings | "Mark devices with no compliance policy as not compliant" (secureByDefault), compliance status validity period |
+| Policies | Compliance policies exist, per-platform coverage |
+| Devices | Managed-device compliance summary (% compliant / noncompliant / grace) |
+
+### Defender (Microsoft Secure Score)
+| Area | Checks |
+|------|--------|
+| Posture | Overall Secure Score vs the all-tenants average |
+| Improvement actions | The highest-impact open Secure Score controls (Defender for Office 365 = email/Teams, endpoint, identity), largest gap first |
+
 Each result is a **Finding** with a status (pass/fail/warning/manual/error), a
 severity, a recommendation, and a link to Microsoft docs.
 
-### Roadmap
-Defender (email/Teams, endpoint), Exchange Online configuration, DLP baseline,
-and Intune compliance are planned as additional domains. Some of those rely on
-data that is **not** exposed via Graph/CORS from a browser (e.g. Exchange Online
-management, parts of Purview) — those will need either a thin serverless proxy or
-a desktop (Tauri) build.
+### Roadmap and the browser boundary
+Verified empirically (CORS preflight probe): **all Microsoft Graph endpoints —
+including `/security/secureScores` and `/security/alerts_v2` — return
+`Access-Control-Allow-Origin: *`, so they are reachable from the browser.** What
+is **not** reachable from a pure PWA:
+
+- Exchange Online management config (anti-spam/anti-phish policies, mail flow,
+  connectors) — served by `outlook.office365.com/adminapi`, **no CORS**.
+- Microsoft Defender for Endpoint machine/vuln API (`api.security.microsoft.com`)
+  — **no CORS**.
+- Purview DLP policy detail (Security & Compliance PowerShell) — **no CORS**.
+
+Those three need either a thin serverless proxy (Vercel function) or a desktop
+(Tauri) build that can call the APIs without a browser origin. Everything
+Graph-based keeps extending the PWA with zero new architecture.
 
 ## Prerequisites: app registration
 
@@ -41,6 +64,9 @@ a desktop (Tauri) build.
    - `AuditLog.Read.All`
    - `RoleManagement.Read.Directory`
    - `Organization.Read.All`
+   - `DeviceManagementConfiguration.Read.All`
+   - `DeviceManagementManagedDevices.Read.All`
+   - `SecurityEvents.Read.All`
 4. Copy the **Application (client) ID** into `.env.local` (see
    `.env.local.example`).
 

@@ -15,6 +15,8 @@ export const GRAPH_SCOPES = [
   // Intune (device compliance) — read-only.
   "DeviceManagementConfiguration.Read.All",
   "DeviceManagementManagedDevices.Read.All",
+  // Defender / Microsoft Secure Score — read-only.
+  "SecurityEvents.Read.All",
 ];
 
 const clientId = process.env.NEXT_PUBLIC_AAD_CLIENT_ID ?? "";
