@@ -23,10 +23,17 @@ export const GRAPH_SCOPES = [
  * Per-resource scope sets. The Defender for Endpoint API is a SEPARATE resource
  * from Microsoft Graph (the WindowsDefenderATP API), so it needs its own token
  * with a different audience. Used only by the desktop build.
+ *
+ * NOTE: the DfE API is served from the host api.security.microsoft.com, but it
+ * validates the token AUDIENCE against the LEGACY resource
+ * api.securityCENTER.microsoft.com — a mismatch returns 403. So the scope must
+ * target securitycenter, not security. The app registration needs the
+ * WindowsDefenderATP *delegated* permission "Machine.Read" admin-consented, and
+ * the signed-in user needs the Defender "View Data" RBAC role.
  */
 export const RESOURCE_SCOPES = {
   graph: GRAPH_SCOPES,
-  defenderEndpoint: ["https://api.security.microsoft.com/.default"],
+  defenderEndpoint: ["https://api.securitycenter.microsoft.com/.default"],
 };
 
 const clientId = process.env.NEXT_PUBLIC_AAD_CLIENT_ID ?? "";

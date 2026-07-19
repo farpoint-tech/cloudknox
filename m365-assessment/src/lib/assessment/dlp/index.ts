@@ -11,8 +11,12 @@ export interface DomainResult {
 
 // Security & Compliance PowerShell (Connect-IPPSSession) handles its own
 // interactive sign-in. Only the read cmdlet Get-DlpCompliancePolicy is used.
+// $WarningPreference/$ProgressPreference keep connect noise off the streams so
+// only the ConvertTo-Json payload reaches stdout for parsing.
 const SCRIPT = [
-  "Connect-IPPSSession | Out-Null",
+  "$WarningPreference='SilentlyContinue'",
+  "$ProgressPreference='SilentlyContinue'",
+  "Connect-IPPSSession -WarningAction SilentlyContinue | Out-Null",
   "Get-DlpCompliancePolicy | Select-Object Name,Mode,Enabled,Workload | ConvertTo-Json -Depth 3",
 ].join("; ");
 

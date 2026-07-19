@@ -11,8 +11,12 @@ export interface DomainResult {
 
 // Runs in the admin's local PowerShell; the ExchangeOnlineManagement module
 // handles its own interactive sign-in. Only read cmdlets are used.
+// $WarningPreference/$ProgressPreference keep connect noise off the streams so
+// only the ConvertTo-Json payload reaches stdout for parsing.
 const SCRIPT = [
-  "Connect-ExchangeOnline -ShowBanner:$false | Out-Null",
+  "$WarningPreference='SilentlyContinue'",
+  "$ProgressPreference='SilentlyContinue'",
+  "Connect-ExchangeOnline -ShowBanner:$false -WarningAction SilentlyContinue | Out-Null",
   "Get-AntiPhishPolicy | Select-Object Name,IsDefault,Enabled,EnableSpoofIntelligence,EnableMailboxIntelligence,EnableMailboxIntelligenceProtection,PhishThresholdLevel,EnableTargetedUserProtection,EnableTargetedDomainsProtection,EnableOrganizationDomainsProtection,HonorDmarcPolicy | ConvertTo-Json -Depth 3",
 ].join("; ");
 

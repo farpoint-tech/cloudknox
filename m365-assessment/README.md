@@ -57,8 +57,9 @@ so everything Graph-based stays in the PWA with zero extra architecture.
 
 The desktop app reuses the exact same UI; only the runtime differs. Requires the
 [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/) (Rust
-toolchain + platform WebView libraries), plus the admin's
-`ExchangeOnlineManagement` PowerShell module for the Exchange/DLP domains.
+toolchain + platform WebView libraries), plus PowerShell 7 (`pwsh`) and the
+admin's `ExchangeOnlineManagement` module (which also provides
+`Connect-IPPSSession` for the DLP domain).
 
 ```bash
 npm install
@@ -69,10 +70,26 @@ npm run tauri icon public/icon-512.png   # one-time: generate platform icons
 npm run tauri:build
 ```
 
-**Security model:** the desktop app requests only read scopes and read cmdlets.
-Native HTTP is scoped (in `src-tauri/capabilities/default.json`) to the Microsoft
-endpoints only. Tenant data never leaves the local machine — same privacy
+### Extra app-registration permission for Defender for Endpoint
+The DfE API is a **separate resource** from Graph. On the app registration add
+**APIs my organization uses → WindowsDefenderATP → Delegated → `Machine.Read`**
+(the delegated permission — *not* the app-only `Machine.Read.All`) and grant
+admin consent. The signed-in user also needs the Defender **View Data** RBAC
+role. Because the token is acquired mid-run, pre-consenting avoids an
+interactive popup during the assessment.
+
+**Security model:** the desktop app requests only read scopes and read cmdlets;
+the `run_powershell` scripts are hardcoded constants (no user input reaches the
+shell). Native HTTP is scoped (in `src-tauri/capabilities/default.json`) to the
+Microsoft endpoints only, and a Content-Security-Policy is set in
+`tauri.conf.json`. Tenant data never leaves the local machine — same privacy
 property as the PWA.
+
+> The desktop build's Rust/Tauri layer and the interactive PowerShell sign-in
+> could not be compiled/run in the authoring environment. If desktop sign-in
+> fails, relax the `connect-src`/`frame-src` hosts in the `tauri.conf.json` CSP;
+> the TypeScript layer (all `analyze()` logic, transport, auth wiring) is fully
+> type-checked and unit-tested.
 
 ## Prerequisites: app registration
 
