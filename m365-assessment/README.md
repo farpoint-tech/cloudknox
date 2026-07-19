@@ -35,21 +35,44 @@ as a static site.
 Each result is a **Finding** with a status (pass/fail/warning/manual/error), a
 severity, a recommendation, and a link to Microsoft docs.
 
-### Roadmap and the browser boundary
+### Desktop-only domains (Tauri build)
+Some data has **no CORS-enabled REST API** and cannot be read from a pure PWA.
+The desktop build (Tauri) adds these by calling native HTTP (no browser origin)
+and the admin's locally-installed PowerShell modules:
+
+| Domain | Source | How the desktop app reaches it |
+|--------|--------|--------------------------------|
+| Defender for Endpoint | `api.security.microsoft.com/api/machines` (no CORS, separate token resource) | native HTTP via `@tauri-apps/plugin-http` |
+| Exchange anti-phishing | `Get-AntiPhishPolicy` (EXO PowerShell) | local `pwsh` via the `run_powershell` command |
+| Purview DLP | `Get-DlpCompliancePolicy` (Security & Compliance PowerShell) | local `pwsh` via `run_powershell` |
+
+In the **web/PWA** build these three domains render a "desktop-only" note; the
+Graph domains (IAM, Intune, Defender Secure Score) run everywhere.
+
 Verified empirically (CORS preflight probe): **all Microsoft Graph endpoints —
-including `/security/secureScores` and `/security/alerts_v2` — return
-`Access-Control-Allow-Origin: *`, so they are reachable from the browser.** What
-is **not** reachable from a pure PWA:
+including `/security/secureScores` — return `Access-Control-Allow-Origin: *`**,
+so everything Graph-based stays in the PWA with zero extra architecture.
 
-- Exchange Online management config (anti-spam/anti-phish policies, mail flow,
-  connectors) — served by `outlook.office365.com/adminapi`, **no CORS**.
-- Microsoft Defender for Endpoint machine/vuln API (`api.security.microsoft.com`)
-  — **no CORS**.
-- Purview DLP policy detail (Security & Compliance PowerShell) — **no CORS**.
+## Desktop build
 
-Those three need either a thin serverless proxy (Vercel function) or a desktop
-(Tauri) build that can call the APIs without a browser origin. Everything
-Graph-based keeps extending the PWA with zero new architecture.
+The desktop app reuses the exact same UI; only the runtime differs. Requires the
+[Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/) (Rust
+toolchain + platform WebView libraries), plus the admin's
+`ExchangeOnlineManagement` PowerShell module for the Exchange/DLP domains.
+
+```bash
+npm install
+# dev (hot-reloads the Next dev server inside the desktop window):
+npm run tauri:dev
+# production installers for the current OS:
+npm run tauri icon public/icon-512.png   # one-time: generate platform icons
+npm run tauri:build
+```
+
+**Security model:** the desktop app requests only read scopes and read cmdlets.
+Native HTTP is scoped (in `src-tauri/capabilities/default.json`) to the Microsoft
+endpoints only. Tenant data never leaves the local machine — same privacy
+property as the PWA.
 
 ## Prerequisites: app registration
 

@@ -3,7 +3,13 @@
  * renders them grouped by domain and sorted by severity.
  */
 
-export type Domain = "iam" | "defender" | "exchange" | "dlp" | "intune";
+export type Domain =
+  | "iam"
+  | "intune"
+  | "defender"
+  | "defenderEndpoint"
+  | "exchange"
+  | "dlp";
 
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
@@ -53,14 +59,22 @@ export interface AssessmentMetadata {
   account?: string;
 }
 
-export const DOMAIN_ORDER: Domain[] = ["iam", "intune", "defender", "exchange", "dlp"];
+export const DOMAIN_ORDER: Domain[] = [
+  "iam",
+  "intune",
+  "defender",
+  "defenderEndpoint",
+  "exchange",
+  "dlp",
+];
 
 export const DOMAIN_LABEL: Record<Domain, string> = {
   iam: "Identity & Access (IAM)",
   intune: "Intune — Device Compliance",
-  defender: "Defender",
-  exchange: "Exchange",
-  dlp: "Data Loss Prevention",
+  defender: "Defender — Secure Score",
+  defenderEndpoint: "Defender for Endpoint",
+  exchange: "Exchange Online — Anti-Phishing",
+  dlp: "Purview — Data Loss Prevention",
 };
 
 export const SEVERITY_ORDER: Record<Severity, number> = {

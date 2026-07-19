@@ -19,6 +19,16 @@ export const GRAPH_SCOPES = [
   "SecurityEvents.Read.All",
 ];
 
+/**
+ * Per-resource scope sets. The Defender for Endpoint API is a SEPARATE resource
+ * from Microsoft Graph (the WindowsDefenderATP API), so it needs its own token
+ * with a different audience. Used only by the desktop build.
+ */
+export const RESOURCE_SCOPES = {
+  graph: GRAPH_SCOPES,
+  defenderEndpoint: ["https://api.security.microsoft.com/.default"],
+};
+
 const clientId = process.env.NEXT_PUBLIC_AAD_CLIENT_ID ?? "";
 // "organizations" = any work/school tenant; override with a specific tenant id.
 const tenant = process.env.NEXT_PUBLIC_AAD_TENANT_ID ?? "organizations";

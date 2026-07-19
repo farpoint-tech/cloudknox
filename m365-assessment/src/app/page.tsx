@@ -7,7 +7,7 @@ import {
   useMsal,
 } from "@azure/msal-react";
 import { GRAPH_SCOPES, isMsalConfigured } from "@/lib/auth/msalConfig";
-import { useGraphClient } from "@/lib/auth/useGraphClient";
+import { buildAssessmentContext } from "@/lib/auth/buildContext";
 import { AssessmentResult, runAssessment } from "@/lib/assessment";
 import { AssessmentView } from "@/components/AssessmentView";
 import { toJson, toMarkdown } from "@/lib/engine/report";
@@ -15,12 +15,12 @@ import { downloadText, timestampSlug } from "@/lib/engine/download";
 
 export default function Home() {
   const { instance, accounts } = useMsal();
-  const graph = useGraphClient();
   const [result, setResult] = useState<AssessmentResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const configured = isMsalConfigured();
+  const account = accounts[0];
 
   const signIn = () => {
     setError(null);
@@ -31,11 +31,12 @@ export default function Home() {
     setResult(null);
   };
   const run = async () => {
-    if (!graph) return;
+    if (!account) return;
     setRunning(true);
     setError(null);
     try {
-      setResult(await runAssessment(graph, { account: accounts[0]?.username }));
+      const ctx = await buildAssessmentContext(instance, account);
+      setResult(await runAssessment(ctx, { account: account.username }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -109,13 +110,13 @@ export default function Home() {
             <div className="mt-6 flex items-center gap-3">
               <button
                 onClick={run}
-                disabled={running || !graph}
+                disabled={running || !account}
                 className="rounded-lg bg-sky-600 px-4 py-2 font-medium text-white hover:bg-sky-500 disabled:opacity-50"
               >
                 {running ? "Running assessment…" : "Run assessment"}
               </button>
-              {accounts[0] && (
-                <span className="text-sm text-slate-400">{accounts[0].username}</span>
+              {account && (
+                <span className="text-sm text-slate-400">{account.username}</span>
               )}
               {result && (
                 <div className="ml-auto flex gap-2">

@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions plus outbound HTTP to Microsoft endpoints (no CORS).",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.security.microsoft.com/*" },
+        { "url": "https://graph.microsoft.com/*" },
+        { "url": "https://login.microsoftonline.com/*" }
+      ]
+    }
+  ]
+}

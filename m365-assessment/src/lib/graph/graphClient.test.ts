@@ -36,6 +36,24 @@ describe("GraphClient.getAll", () => {
   });
 });
 
+describe("GraphClient pathPrefix", () => {
+  it("uses a fixed path prefix (e.g. Defender for Endpoint /api) instead of /v1.0", async () => {
+    let calledUrl = "";
+    const fetchFn = vi.fn(async (url: string | URL | Request) => {
+      calledUrl = String(url);
+      return jsonResponse({ value: [] });
+    });
+    const client = new GraphClient({
+      getToken: token,
+      baseUrl: "https://api.security.microsoft.com",
+      pathPrefix: "/api",
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+    await client.getAll("/machines");
+    expect(calledUrl).toBe("https://api.security.microsoft.com/api/machines");
+  });
+});
+
 describe("GraphClient retry", () => {
   it("retries on 429 honouring Retry-After then succeeds", async () => {
     let calls = 0;
