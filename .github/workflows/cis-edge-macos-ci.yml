@@ -1,0 +1,100 @@
+name: CIS Edge Benchmark (macOS) CI
+
+# Validates the PowerShell module on every change to the macOS benchmark.
+# Runs static analysis (PSScriptAnalyzer), the Pester test suite, and a
+# JSON-integrity check. Platform-agnostic tests run on Linux; the module
+# import is additionally smoke-tested on a real macOS runner.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/cis-edge-benchmark-macos/**'
+      - '.github/workflows/cis-edge-macos-ci.yml'
+  pull_request:
+    paths:
+      - 'scripts/cis-edge-benchmark-macos/**'
+      - '.github/workflows/cis-edge-macos-ci.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  lint-and-test:
+    name: Lint & Test (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scripts/cis-edge-benchmark-macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer and Pester
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force
+
+      - name: PSScriptAnalyzer
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path ./CISEdgeBenchmark.psm1 -Severity Error,Warning
+          if ($results) {
+            $results | Format-Table -AutoSize | Out-String | Write-Host
+            $errors = @($results | Where-Object Severity -eq 'Error')
+            if ($errors.Count -gt 0) {
+              Write-Error "PSScriptAnalyzer found $($errors.Count) error(s)."
+              exit 1
+            }
+            Write-Host "::warning::PSScriptAnalyzer reported $($results.Count) warning(s)."
+          } else {
+            Write-Host "PSScriptAnalyzer: clean."
+          }
+
+      - name: Validate cis_checks.json
+        run: |
+          $checks = Get-Content ./cis_checks.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($checks.Count -lt 100) { throw "Expected >100 checks, found $($checks.Count)." }
+          Write-Host "cis_checks.json OK: $($checks.Count) checks."
+
+      - name: Run Pester tests
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = './tests/testResults.xml'
+          Invoke-Pester -Configuration $config
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pester-test-results
+          path: scripts/cis-edge-benchmark-macos/tests/testResults.xml
+          if-no-files-found: ignore
+
+  macos-smoke:
+    name: Import smoke test (macOS)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: scripts/cis-edge-benchmark-macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import module on macOS
+        run: |
+          Import-Module ./CISEdgeBenchmark.psd1 -Force
+          $cmds = (Get-Module CISEdgeBenchmark).ExportedFunctions.Keys
+          foreach ($c in 'Invoke-CISEdgeAudit','Invoke-CISEdgeEnforce','Invoke-CISEdgeRestore','Show-CISEdgeDashboard') {
+            if ($cmds -notcontains $c) { throw "Missing exported cmdlet: $c" }
+          }
+          Write-Host "macOS import OK. Exported: $($cmds -join ', ')"
+
+      - name: Dry-run enforcement (no root, no changes)
+        run: |
+          Import-Module ./CISEdgeBenchmark.psd1 -Force
+          Invoke-CISEdgeEnforce -DryRun -Level L1
