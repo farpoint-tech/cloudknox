@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
+        shell: pwsh
         working-directory: scripts/cis-edge-benchmark-macos
     steps:
       - uses: actions/checkout@v4
@@ -81,6 +82,7 @@ jobs:
     runs-on: macos-latest
     defaults:
       run:
+        shell: pwsh
         working-directory: scripts/cis-edge-benchmark-macos
     steps:
       - uses: actions/checkout@v4
