@@ -127,7 +127,8 @@ Show-CISEdgeDashboard
 | Cmdlet | Beschreibung |
 |---|---|
 | `Invoke-CISEdgeAudit` | Audit + Dashboard öffnen + Enforcement-Server starten |
-| `Invoke-CISEdgeEnforce` | Policies schreiben (erfordert sudo/root) |
+| `Invoke-CISEdgeEnforce` | Policies schreiben (erfordert sudo/root); legt vorher Backup an |
+| `Invoke-CISEdgeRestore` | Plist aus Backup wiederherstellen (Rollback, erfordert sudo/root) |
 | `Show-CISEdgeDashboard` | Bestehendes Dashboard öffnen |
 
 ### Parameter-Übersicht
@@ -145,6 +146,46 @@ Show-CISEdgeDashboard
 | `-OnlyFailed` | Switch | – | Nur fehlgeschlagene Checks |
 | `-DryRun` | Switch | – | Vorschau, keine Änderungen |
 | `-AutoConfirm` | Switch | – | Kein Bestätigungs-Prompt |
+| `-NoBackup` | Switch | – | Kein Plist-Backup vor Enforcement (nicht empfohlen) |
+
+#### `Invoke-CISEdgeRestore`
+| Parameter | Typ | Standard | Beschreibung |
+|---|---|---|---|
+| `-BackupFile` | `string` | (neuestes) | Bestimmtes Backup (Dateiname oder Pfad) |
+| `-List` | Switch | – | Verfügbare Backups auflisten und beenden |
+| `-AutoConfirm` | Switch | – | Kein Bestätigungs-Prompt |
+
+---
+
+## Backup & Restore (Rollback)
+
+Jeder reguläre Enforcement-Lauf sichert die aktuelle Edge-Plist **automatisch**
+mit Zeitstempel nach `backups/`, bevor Änderungen geschrieben werden. So lässt
+sich ein Enforcement jederzeit zurückrollen.
+
+```powershell
+# Verfügbare Backups anzeigen (kein sudo nötig)
+Invoke-CISEdgeRestore -List
+
+# Neuestes Backup wiederherstellen
+sudo pwsh -Command "Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeRestore -AutoConfirm"
+
+# Bestimmtes Backup wiederherstellen
+sudo pwsh -Command "Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeRestore -BackupFile com.microsoft.Edge.20260721-120000.plist"
+```
+
+Der Restore leert zusätzlich den Prefs-Cache (`killall cfprefsd`) – Edge danach
+neu starten, damit die wiederhergestellten Werte greifen.
+
+---
+
+## Weiterführende Dokumentation
+
+| Dokument | Inhalt |
+|---|---|
+| [`DEPLOYMENT.md`](DEPLOYMENT.md) | Rollout in Unternehmen, MDM (Jamf/Intune), Reporting |
+| [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | Ausführliche Fehlerbehebung (11 Szenarien) |
+| [`COMPATIBILITY.md`](COMPATIBILITY.md) | Unterstützte macOS-/Edge-/PowerShell-Versionen |
 
 ---
 
@@ -156,9 +197,14 @@ cis-edge-benchmark-macos/
 ├── CISEdgeBenchmark.psd1   # Modul-Manifest
 ├── cis_checks.json         # 128 CIS-Check-Definitionen
 ├── dashboard.html          # Interaktives HTML-Dashboard
+├── DEPLOYMENT.md           # Rollout- & MDM-Guide
+├── TROUBLESHOOTING.md      # Fehlerbehebung
+├── COMPATIBILITY.md        # Versions-Kompatibilitätsmatrix
+├── tests/                  # Pester-Tests (CI)
 ├── audit_results.json      # Audit-Ergebnisse (wird generiert)
 ├── audit_results.js        # Dashboard-Datendatei (wird generiert)
-└── enforcement_log.txt     # Enforcement-Protokoll (wird generiert)
+├── enforcement_log.txt     # Enforcement-Protokoll (wird generiert)
+└── backups/                # Plist-Backups vor Enforcement (wird generiert)
 ```
 
 ---
