@@ -18,6 +18,12 @@
 .PARAMETER ExcelFileName
     Überschreibt den in der config.json hinterlegten Excel-Dateinamen.
 
+.PARAMETER JsonInputFile
+    Liest die Zeilen aus einer JSON-Datei (erzeugt von der Browser-App
+    browser/ExchangeProvisioner.html) statt aus Excel. Das ImportExcel-Modul
+    wird in diesem Modus nicht benötigt (geeignet für Azure Cloud Shell).
+    Nicht kombinierbar mit -ExcelFileName.
+
 .PARAMETER Force
     Unterdrückt alle interaktiven Rückfragen (Modulinstallation, Validierungsprobleme).
     Empfohlen für Scheduled Tasks und unbeaufsichtigte Ausführung.
@@ -35,6 +41,10 @@
     Verwendet eine andere Excel-Datei.
 
 .EXAMPLE
+    .\Provisioning.ps1 -JsonInputFile "provisioning-data.json" -WhatIf
+    Trockenlauf mit validierten Daten aus der Browser-App (z. B. in Azure Cloud Shell).
+
+.EXAMPLE
     .\Provisioning.ps1 -Force
     Unbeaufsichtigter Lauf ohne Rückfragen (Scheduled Task / CI-Pipeline).
 #>
@@ -43,6 +53,7 @@
 param(
     [string]$ConfigFileName = "config.json",
     [string]$ExcelFileName,
+    [string]$JsonInputFile,
     [switch]$Force
 )
 
@@ -829,12 +840,20 @@ try {
         Write-Log "Force-Modus aktiv: Alle Rückfragen werden automatisch bestätigt." "WARN"
     }
 
-    # -- Module --
+    # -- Eingabemodus bestimmen --
+    $useJsonInput = ($PSBoundParameters.ContainsKey('JsonInputFile') -and -not [string]::IsNullOrWhiteSpace($JsonInputFile))
+    if ($useJsonInput -and $PSBoundParameters.ContainsKey('ExcelFileName') -and -not [string]::IsNullOrWhiteSpace($ExcelFileName)) {
+        throw "-JsonInputFile und -ExcelFileName können nicht kombiniert werden."
+    }
+
+    # -- Module (ImportExcel nur im Excel-Modus nötig) --
     Ensure-Module -ModuleName "ExchangeOnlineManagement"
-    Ensure-Module -ModuleName "ImportExcel"
+    if (-not $useJsonInput) {
+        Ensure-Module -ModuleName "ImportExcel"
+        Import-Module ImportExcel -ErrorAction Stop
+    }
 
     Import-Module ExchangeOnlineManagement -ErrorAction Stop
-    Import-Module ImportExcel -ErrorAction Stop
     Write-Log "Module erfolgreich geladen" "SUCCESS"
 
     # -- Config --
@@ -870,42 +889,61 @@ try {
         throw "general.domain in config.json ist leer. Eine Standarddomain ist erforderlich."
     }
 
-    # -- Excel-Datei bestimmen --
-    if ($PSBoundParameters.ContainsKey('ExcelFileName') -and -not [string]::IsNullOrWhiteSpace($ExcelFileName)) {
-        $ExcelFile = Join-Path $ScriptPath $ExcelFileName
+    if ($useJsonInput) {
+        # -- JSON-Eingabe (Browser-App) --
+        $jsonPath = if ([System.IO.Path]::IsPathRooted($JsonInputFile)) { $JsonInputFile } else { Join-Path $ScriptPath $JsonInputFile }
+        Write-Log "Eingabemodus: JSON-Datei (Browser-App): $jsonPath"
+
+        if (-not (Test-Path -LiteralPath $jsonPath)) {
+            throw "JSON-Datei nicht gefunden: $jsonPath"
+        }
+
+        $jsonData = Get-Content -LiteralPath $jsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $smRows = @(@(Get-RowProp $jsonData 'sharedMailboxes')    | Where-Object { $null -ne $_ })
+        $dgRows = @(@(Get-RowProp $jsonData 'distributionGroups') | Where-Object { $null -ne $_ })
+
+        if ($smRows.Count -eq 0 -and $dgRows.Count -eq 0) {
+            throw "Keine Daten in der JSON-Datei. Erwartet werden die Arrays 'sharedMailboxes' und/oder 'distributionGroups'."
+        }
     }
     else {
-        $excelFromConfig = Get-SafeTrim $Config.general.excelFile
-        if ([string]::IsNullOrWhiteSpace($excelFromConfig)) {
-            throw "general.excelFile fehlt in config.json und kein -ExcelFileName angegeben."
+        # -- Excel-Datei bestimmen --
+        if ($PSBoundParameters.ContainsKey('ExcelFileName') -and -not [string]::IsNullOrWhiteSpace($ExcelFileName)) {
+            $ExcelFile = Join-Path $ScriptPath $ExcelFileName
         }
-        $ExcelFile = Join-Path $ScriptPath $excelFromConfig
-    }
+        else {
+            $excelFromConfig = Get-SafeTrim $Config.general.excelFile
+            if ([string]::IsNullOrWhiteSpace($excelFromConfig)) {
+                throw "general.excelFile fehlt in config.json und kein -ExcelFileName angegeben."
+            }
+            $ExcelFile = Join-Path $ScriptPath $excelFromConfig
+        }
 
-    Write-Log "Excel-Datei: $ExcelFile"
+        Write-Log "Excel-Datei: $ExcelFile"
 
-    if (-not (Test-Path -LiteralPath $ExcelFile)) {
-        throw "Excel-Datei nicht gefunden: $ExcelFile"
-    }
+        if (-not (Test-Path -LiteralPath $ExcelFile)) {
+            throw "Excel-Datei nicht gefunden: $ExcelFile"
+        }
 
-    # -- Tabellen aus Excel lesen (benannte ListObjects über EPPlus) --
-    try {
-        $smRows = @(Get-ExcelTableData -Path $ExcelFile -TableName "SharedMailboxes")
-    }
-    catch {
-        Write-Log "Tabelle 'SharedMailboxes' nicht gefunden oder nicht lesbar: $($_.Exception.Message)" "WARN"
-        $smRows = @()
-    }
-    try {
-        $dgRows = @(Get-ExcelTableData -Path $ExcelFile -TableName "DistributionGroups")
-    }
-    catch {
-        Write-Log "Tabelle 'DistributionGroups' nicht gefunden oder nicht lesbar: $($_.Exception.Message)" "WARN"
-        $dgRows = @()
-    }
+        # -- Tabellen aus Excel lesen (benannte ListObjects über EPPlus) --
+        try {
+            $smRows = @(Get-ExcelTableData -Path $ExcelFile -TableName "SharedMailboxes")
+        }
+        catch {
+            Write-Log "Tabelle 'SharedMailboxes' nicht gefunden oder nicht lesbar: $($_.Exception.Message)" "WARN"
+            $smRows = @()
+        }
+        try {
+            $dgRows = @(Get-ExcelTableData -Path $ExcelFile -TableName "DistributionGroups")
+        }
+        catch {
+            Write-Log "Tabelle 'DistributionGroups' nicht gefunden oder nicht lesbar: $($_.Exception.Message)" "WARN"
+            $dgRows = @()
+        }
 
-    if ($smRows.Count -eq 0 -and $dgRows.Count -eq 0) {
-        throw "Keine Daten gefunden. Stelle sicher, dass die Excel-Tabellen 'SharedMailboxes' und/oder 'DistributionGroups' existieren."
+        if ($smRows.Count -eq 0 -and $dgRows.Count -eq 0) {
+            throw "Keine Daten gefunden. Stelle sicher, dass die Excel-Tabellen 'SharedMailboxes' und/oder 'DistributionGroups' existieren."
+        }
     }
 
     Write-Log "Shared Mailbox Zeilen: $($smRows.Count)" "INFO"

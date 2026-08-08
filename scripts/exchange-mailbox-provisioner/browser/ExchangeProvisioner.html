@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<!--
+  Exchange Provisioner - Browser-Validierung (Zero-Storage)
+
+  Sicherheitsmodell:
+  - Content-Security-Policy verbietet JEDEN Netzwerkzugriff (connect-src 'none',
+    default-src 'none'): Daten koennen diese Seite technisch nicht verlassen.
+  - Keine Verwendung von localStorage, sessionStorage, IndexedDB oder Cookies.
+  - Alle Daten leben ausschliesslich im Arbeitsspeicher des Tabs.
+    Tab schliessen = alle Daten weg.
+  - Die Datei funktioniert komplett offline (file://) - kein Server noetig.
+-->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exchange Provisioner – Browser-Validierung (Zero-Storage)</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #ffffff; --text: #1a2733; --muted: #5b6b7b;
+    --border: #d7dee5; --accent: #0a5dc2; --ok: #1a7f37; --warn: #9a6700;
+    --err: #c62828; --badge-bg: #e8f0fa; --code-bg: #eef2f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10161c; --card: #1a232c; --text: #e3ebf2; --muted: #93a4b4;
+      --border: #2c3a47; --accent: #5aa2f0; --ok: #4caf6e;
+      --warn: #d9a74a; --err: #ef6a5f; --badge-bg: #21303f; --code-bg: #141c24;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 1.45rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.1rem; margin: 0 0 .75rem; }
+  .sub { color: var(--muted); margin: 0 0 1rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.25rem; }
+  .badge {
+    background: var(--badge-bg); color: var(--accent); border: 1px solid var(--border);
+    border-radius: 999px; padding: .2rem .75rem; font-size: .82rem; font-weight: 600;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.1rem 1.25rem; margin-bottom: 1.1rem;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .9rem; }
+  label { display: block; font-size: .82rem; font-weight: 600; color: var(--muted); margin-bottom: .25rem; }
+  input[type=text], textarea {
+    width: 100%; padding: .5rem .6rem; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font: inherit;
+  }
+  textarea { min-height: 130px; font-family: ui-monospace, Consolas, monospace; font-size: .82rem; white-space: pre; }
+  .chk { display: flex; align-items: center; gap: .5rem; font-size: .9rem; padding-top: 1.35rem; }
+  .chk label { margin: 0; font-size: .9rem; color: var(--text); }
+  button {
+    font: inherit; font-weight: 600; padding: .55rem 1.1rem; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger  { color: var(--err); border-color: var(--err); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .btnrow { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .9rem; }
+  .hint { font-size: .8rem; color: var(--muted); margin-top: .4rem; }
+  code, .mono { font-family: ui-monospace, Consolas, monospace; font-size: .85em; background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre.mono { padding: .75rem; overflow-x: auto; white-space: pre; }
+  .tablewrap { overflow-x: auto; margin-top: .75rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .82rem; }
+  th, td { border: 1px solid var(--border); padding: .35rem .55rem; text-align: left; white-space: nowrap; }
+  th { background: var(--badge-bg); position: sticky; top: 0; }
+  .st-ok  { color: var(--ok); font-weight: 700; }
+  .st-err { color: var(--err); font-weight: 700; }
+  .issues { margin: .5rem 0 0; padding-left: 1.2rem; color: var(--err); font-size: .85rem; }
+  .summary { display: flex; flex-wrap: wrap; gap: 1.25rem; font-size: .95rem; margin-top: .25rem; }
+  .summary b.ok { color: var(--ok); } .summary b.err { color: var(--err); }
+  details { margin-top: .75rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  .secbox { border-left: 4px solid var(--ok); padding-left: .9rem; font-size: .88rem; }
+  .filebtn { font-size: .85rem; }
+  footer { color: var(--muted); font-size: .78rem; margin-top: 1.5rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Exchange Provisioner – Browser-Validierung</h1>
+  <p class="sub">Shared Mailboxes &amp; Distribution Groups: Daten prüfen, Vorschau ansehen, sauberes JSON für den Provisioning-Lauf erzeugen.</p>
+  <div class="badges">
+    <span class="badge">🔒 Keine Speicherung</span>
+    <span class="badge">🚫 Kein Netzwerkzugriff (per CSP erzwungen)</span>
+    <span class="badge">💻 Läuft zu 100 % lokal in diesem Tab</span>
+    <span class="badge">🗑️ Tab zu = Daten weg</span>
+  </div>
+
+  <div class="card secbox">
+    <b>Sicherheitsgarantien dieser Seite:</b>
+    Die eingebettete Content-Security-Policy (<code>connect-src 'none'</code>) blockiert jeden Netzwerkaufruf –
+    nachprüfbar über DevTools → Netzwerk-Tab, der leer bleibt. Es werden keine Cookies, kein localStorage,
+    keine IndexedDB verwendet. Ihre Daten existieren nur im Arbeitsspeicher dieses Tabs und verschwinden
+    vollständig, sobald Sie den Tab schließen oder <i>„Alle Daten löschen"</i> klicken.
+  </div>
+
+  <div class="card">
+    <h2>1&nbsp;·&nbsp;Einstellungen</h2>
+    <div class="grid">
+      <div><label for="setDomain">Standarddomain *</label><input type="text" id="setDomain" placeholder="contoso.com"></div>
+      <div><label for="setDelim">Multivalue-Trenner</label><input type="text" id="setDelim" value=";" maxlength="1"></div>
+      <div><label for="setPrefixSM">Präfix Shared Mailbox</label><input type="text" id="setPrefixSM" value="SM - "></div>
+      <div><label for="setPrefixDG">Präfix Distribution Group</label><input type="text" id="setPrefixDG" value="DG - "></div>
+      <div class="chk"><input type="checkbox" id="setHidden"><label for="setHidden">Standard: aus GAL ausblenden</label></div>
+      <div class="chk"><input type="checkbox" id="setExtFwd"><label for="setExtFwd">Externe Weiterleitungen erlauben</label></div>
+    </div>
+    <p class="hint">Diese Werte müssen mit der <code>config.json</code> des Provisioning-Scripts übereinstimmen – das Script validiert serverseitig erneut (Defense in Depth).</p>
+  </div>
+
+  <div class="card">
+    <h2>2&nbsp;·&nbsp;Shared Mailboxes</h2>
+    <p class="hint">Erwartete Spalten: <code>Vorname; Nachname; Zusatz; Anzeigename; PrimaereAdresse; Weiterleitung; FullAccess; SendAs; HiddenFromGAL</code> (Pflicht: die ersten drei).</p>
+    <div class="btnrow">
+      <input class="filebtn" type="file" id="fileSM" accept=".csv,.txt,.tsv">
+    </div>
+    <label for="pasteSM" style="margin-top:.75rem">…oder Tabelle direkt aus Excel hierher kopieren (Strg+C in Excel → Strg+V hier):</label>
+    <textarea id="pasteSM" placeholder="Vorname&#9;Nachname&#9;Zusatz&#9;…"></textarea>
+  </div>
+
+  <div class="card">
+    <h2>3&nbsp;·&nbsp;Distribution Groups</h2>
+    <p class="hint">Erwartete Spalten: <code>Vorname; Nachname; Zusatz; Anzeigename; PrimaereAdresse; Mitglieder; Besitzer; HiddenFromGAL</code> (Pflicht: die ersten drei).</p>
+    <div class="btnrow">
+      <input class="filebtn" type="file" id="fileDG" accept=".csv,.txt,.tsv">
+    </div>
+    <label for="pasteDG" style="margin-top:.75rem">…oder Tabelle direkt aus Excel hierher kopieren:</label>
+    <textarea id="pasteDG" placeholder="Vorname&#9;Nachname&#9;Zusatz&#9;…"></textarea>
+  </div>
+
+  <div class="btnrow" style="margin-bottom:1.1rem">
+    <button class="primary" id="btnValidate">✔ Validieren &amp; Vorschau</button>
+    <button id="btnExport" disabled>⬇ JSON für Provisioning exportieren</button>
+    <button class="danger" id="btnWipe">🗑 Alle Daten löschen</button>
+  </div>
+
+  <div class="card" id="resultCard" hidden>
+    <h2>4&nbsp;·&nbsp;Ergebnis</h2>
+    <div class="summary" id="summaryRow"></div>
+    <ul class="issues" id="issueList"></ul>
+    <div id="previewSM"></div>
+    <div id="previewDG"></div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>5&nbsp;·&nbsp;Ausführung: Azure Cloud Shell (ephemeral) – Browser rein, Browser raus, nichts bleibt</summary>
+      <ol style="font-size:.9rem">
+        <li><code>shell.azure.com</code> im Browser öffnen → <b>PowerShell</b> wählen → beim Storage-Dialog <b>„Kein Speicherkonto erforderlich" (ephemeral)</b> auswählen. Einmal mit dem Admin-Konto einloggen (MFA wird unterstützt).</li>
+        <li>Über das Upload-Symbol drei Dateien hochladen: <code>Provisioning.ps1</code>, <code>config.json</code> und die hier exportierte <code>provisioning-data.json</code>.</li>
+        <li>Trockenlauf: <code>./Provisioning.ps1 -JsonInputFile provisioning-data.json -WhatIf</code></li>
+        <li>Scharfer Lauf: <code>./Provisioning.ps1 -JsonInputFile provisioning-data.json</code> – das ExchangeOnlineManagement-Modul ist in Cloud Shell vorinstalliert; ImportExcel wird im JSON-Modus nicht benötigt.</li>
+        <li>Ergebnis-CSV bei Bedarf über das Download-Symbol sichern, dann <b>Browser-Tab schließen</b> → der ephemere Container wird vernichtet, nichts bleibt gespeichert.</li>
+      </ol>
+      <p class="hint">Warum nicht direkt aus dieser Seite heraus? Microsoft Graph kann keine Shared Mailboxes und keine klassischen Verteilergruppen anlegen, und die Exchange-Admin-API ist für Browser-Aufrufe gesperrt (kein CORS). Cloud Shell ist der von Microsoft unterstützte Weg, der trotzdem vollständig im Browser bleibt.</p>
+    </details>
+  </div>
+
+  <footer>Exchange Mailbox Provisioner · Browser-Validierung · Diese Seite sendet nichts, speichert nichts und funktioniert offline.</footer>
+</div>
+
+<script>
+'use strict';
+
+/* ============================================================
+   Zustand: ausschliesslich im Arbeitsspeicher dieses Tabs
+   ============================================================ */
+let state = { sm: [], dg: [], validSM: [], validDG: [], issues: [] };
+
+const $ = id => document.getElementById(id);
+
+/* ============================================================
+   Parser: CSV/TSV mit Anfuehrungszeichen, Trenner-Autoerkennung
+   ============================================================ */
+function detectDelimiter(line) {
+  const counts = { '\t': (line.match(/\t/g) || []).length,
+                   ';':  (line.match(/;/g)  || []).length,
+                   ',':  (line.match(/,/g)  || []).length };
+  let best = '\t';
+  if (counts[';'] > counts[best]) best = ';';
+  if (counts[','] > counts[best]) best = ',';
+  return counts[best] > 0 ? best : ';';
+}
+
+function parseDelimited(text, delim) {
+  const rows = []; let row = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else { inQ = false; } }
+      else field += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === delim) { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c !== '\r') field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(f => f.trim() !== ''));
+}
+
+const KNOWN_COLS = ['Vorname','Nachname','Zusatz','Anzeigename','PrimaereAdresse',
+                    'Weiterleitung','FullAccess','SendAs','Mitglieder','Besitzer','HiddenFromGAL'];
+
+function rowsFromText(text, label) {
+  const t = (text || '').replace(/^﻿/, '').trim();
+  if (!t) return { rows: [], error: null };
+  const firstLine = t.split('\n', 1)[0];
+  const delim = detectDelimiter(firstLine);
+  const raw = parseDelimited(t, delim);
+  if (raw.length < 2) return { rows: [], error: label + ': Kopfzeile gefunden, aber keine Datenzeilen.' };
+
+  const headerMap = {};
+  raw[0].forEach((h, idx) => {
+    const clean = h.trim();
+    const match = KNOWN_COLS.find(k => k.toLowerCase() === clean.toLowerCase());
+    if (match) headerMap[idx] = match;
+  });
+  const mapped = Object.values(headerMap);
+  for (const req of ['Vorname', 'Nachname', 'Zusatz']) {
+    if (!mapped.includes(req)) {
+      return { rows: [], error: label + ': Pflichtspalte "' + req + '" fehlt in der Kopfzeile (gefunden: ' + (mapped.join(', ') || 'keine bekannte Spalte') + ').' };
+    }
+  }
+  const rows = raw.slice(1).map(r => {
+    const obj = {};
+    Object.entries(headerMap).forEach(([idx, name]) => { obj[name] = (r[idx] || '').trim(); });
+    return obj;
+  });
+  return { rows, error: null };
+}
+
+/* ============================================================
+   Validierungslogik: Spiegel der Regeln aus Provisioning.ps1
+   ============================================================ */
+function normalizeAlias(value) {
+  let n = value
+    .replace(/Ä/g, 'Ae').replace(/Ö/g, 'Oe').replace(/Ü/g, 'Ue')
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss');
+  n = n.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  let a = n.toLowerCase()
+    .replace(/\s+/g, '.')
+    .replace(/[^a-z0-9.\-]/g, '')
+    .replace(/\.{2,}/g, '.')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[.\-]+|[.\-]+$/g, '');
+  if (!a) throw new Error('Kein gültiger Alias erzeugbar aus: ' + value);
+  if (a.length > 64) a = a.slice(0, 64).replace(/^[.\-]+|[.\-]+$/g, '');
+  return a;
+}
+
+function isValidEmail(v) {
+  if (!v) return true;
+  return /^[^\s@,;"]+@[^\s@,;"]+\.[^\s@,;"]+$/.test(v);
+}
+
+function splitMulti(v, delim) {
+  if (!v || !v.trim()) return [];
+  return [...new Set(v.split(delim).map(x => x.trim()).filter(Boolean))];
+}
+
+function parseBool(v, dflt) {
+  const t = (v || '').trim().toLowerCase();
+  if (!t) return dflt;
+  if (/^(1|true|yes|ja|j)$/.test(t)) return true;
+  if (/^(0|false|no|nein|n)$/.test(t)) return false;
+  return dflt;
+}
+
+function sanitizeDisplayName(v) { return v.replace(/[\/\\:*?"<>|]/g, '-'); }
+
+function readSettings() {
+  return {
+    domain: $('setDomain').value.trim().toLowerCase(),
+    delimiter: $('setDelim').value || ';',
+    prefixSM: $('setPrefixSM').value,
+    prefixDG: $('setPrefixDG').value,
+    defaultHidden: $('setHidden').checked,
+    allowExternalForwarding: $('setExtFwd').checked
+  };
+}
+
+function validateRows(type, rows, settings, globalAliases) {
+  const valid = [], preview = [], issues = [];
+  rows.forEach((row, i) => {
+    const label = (type === 'SM' ? 'SharedMailbox' : 'DistributionGroup') + ' Zeile ' + (i + 1);
+    const rowIssues = [];
+    const vorname = row.Vorname || '', nachname = row.Nachname || '', zusatz = row.Zusatz || '';
+
+    if (!vorname && !nachname && !zusatz) return; // leere Zeile
+
+    if (!vorname || !nachname || !zusatz) {
+      rowIssues.push('Pflichtfelder Vorname, Nachname oder Zusatz fehlen.');
+    }
+
+    let alias = '', primary = '', display = '';
+    if (rowIssues.length === 0) {
+      try {
+        const generated = normalizeAlias(vorname + '.' + nachname + '.' + zusatz);
+        const explicit = (row.PrimaereAdresse || '').trim();
+        if (explicit) {
+          if (!isValidEmail(explicit)) throw new Error('Primäre Adresse ungültig: ' + explicit);
+          primary = explicit.toLowerCase();
+        } else {
+          if (!settings.domain) throw new Error('Standarddomain ist leer (Einstellungen).');
+          primary = generated + '@' + settings.domain;
+        }
+        alias = primary.split('@')[0].toLowerCase();
+
+        if (globalAliases.has(alias)) rowIssues.push("Alias '" + alias + "' ist doppelt in den Eingabedaten.");
+        else globalAliases.add(alias);
+
+        const rawName = (row.Anzeigename || '').trim();
+        const prefix = type === 'SM' ? settings.prefixSM : settings.prefixDG;
+        display = sanitizeDisplayName(rawName || (prefix + vorname + '.' + nachname + '.' + zusatz));
+
+        const multiFields = type === 'SM'
+          ? [['FullAccess', row.FullAccess], ['SendAs', row.SendAs]]
+          : [['Mitglieder', row.Mitglieder], ['Besitzer', row.Besitzer]];
+        for (const [name, val] of multiFields) {
+          for (const email of splitMulti(val, settings.delimiter)) {
+            if (!isValidEmail(email)) rowIssues.push("Ungültige E-Mail in Spalte '" + name + "': " + email);
+          }
+        }
+
+        if (type === 'SM') {
+          const fwd = (row.Weiterleitung || '').trim();
+          if (fwd) {
+            if (!isValidEmail(fwd)) rowIssues.push("Ungültige E-Mail in Spalte 'Weiterleitung': " + fwd);
+            else {
+              const fwdDomain = fwd.split('@').pop().toLowerCase();
+              if (settings.domain && fwdDomain !== settings.domain && !settings.allowExternalForwarding) {
+                rowIssues.push("Externe Weiterleitung zu '" + fwdDomain + "' ist nicht erlaubt (Einstellung deaktiviert).");
+              }
+            }
+          }
+        }
+      } catch (e) { rowIssues.push(e.message); }
+    }
+
+    rowIssues.forEach(msg => issues.push(label + ' : ' + msg));
+    preview.push({ n: i + 1, alias, primary, display,
+                   hidden: parseBool(row.HiddenFromGAL, settings.defaultHidden),
+                   ok: rowIssues.length === 0, msg: rowIssues.join(' | ') });
+    if (rowIssues.length === 0) valid.push(row);
+  });
+  return { valid, preview, issues };
+}
+
+/* ============================================================
+   UI
+   ============================================================ */
+function esc(s) {
+  return String(s).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function renderPreview(el, title, preview) {
+  if (!preview.length) { el.innerHTML = ''; return; }
+  let html = '<h2 style="margin-top:1rem">' + esc(title) + '</h2><div class="tablewrap"><table><thead><tr>' +
+    '<th>#</th><th>Status</th><th>Alias</th><th>Primäre SMTP</th><th>Anzeigename</th><th>GAL versteckt</th><th>Hinweis</th></tr></thead><tbody>';
+  for (const p of preview) {
+    html += '<tr><td>' + p.n + '</td>' +
+      '<td class="' + (p.ok ? 'st-ok">OK' : 'st-err">Fehler') + '</td>' +
+      '<td>' + esc(p.alias) + '</td><td>' + esc(p.primary) + '</td><td>' + esc(p.display) + '</td>' +
+      '<td>' + (p.hidden ? 'ja' : 'nein') + '</td><td style="white-space:normal">' + esc(p.msg) + '</td></tr>';
+  }
+  el.innerHTML = html + '</tbody></table></div>';
+}
+
+function loadFileInto(fileInput, textarea) {
+  const f = fileInput.files && fileInput.files[0];
+  if (!f) return Promise.resolve();
+  return f.text().then(t => { textarea.value = t; });
+}
+
+function runValidation() {
+  Promise.all([
+    loadFileInto($('fileSM'), $('pasteSM')),
+    loadFileInto($('fileDG'), $('pasteDG'))
+  ]).then(() => {
+    const settings = readSettings();
+    const issues = [];
+
+    if (!settings.domain) issues.push('Einstellungen: Standarddomain ist leer – generierte Adressen sind sonst ungültig.');
+
+    const smParsed = rowsFromText($('pasteSM').value, 'SharedMailboxes');
+    const dgParsed = rowsFromText($('pasteDG').value, 'DistributionGroups');
+    if (smParsed.error) issues.push(smParsed.error);
+    if (dgParsed.error) issues.push(dgParsed.error);
+
+    const globalAliases = new Set();
+    const sm = validateRows('SM', smParsed.rows, settings, globalAliases);
+    const dg = validateRows('DG', dgParsed.rows, settings, globalAliases);
+    issues.push(...sm.issues, ...dg.issues);
+
+    state = { sm: smParsed.rows, dg: dgParsed.rows, validSM: sm.valid, validDG: dg.valid, issues };
+
+    const total = sm.preview.length + dg.preview.length;
+    const okCount = sm.valid.length + dg.valid.length;
+    $('resultCard').hidden = false;
+    $('summaryRow').innerHTML =
+      '<span>Zeilen gesamt: <b>' + total + '</b></span>' +
+      '<span>Gültig: <b class="ok">' + okCount + '</b></span>' +
+      '<span>Mit Fehlern: <b class="err">' + (total - okCount) + '</b></span>' +
+      '<span>Shared Mailboxes: <b>' + sm.valid.length + '</b></span>' +
+      '<span>Distribution Groups: <b>' + dg.valid.length + '</b></span>';
+    $('issueList').innerHTML = issues.map(i => '<li>' + esc(i) + '</li>').join('');
+    renderPreview($('previewSM'), 'Vorschau: Shared Mailboxes', sm.preview);
+    renderPreview($('previewDG'), 'Vorschau: Distribution Groups', dg.preview);
+
+    $('btnExport').disabled = okCount === 0;
+    $('resultCard').scrollIntoView({ behavior: 'smooth' });
+  });
+}
+
+function exportJson() {
+  const settings = readSettings();
+  const payload = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    source: 'ExchangeProvisioner Browser-App (Zero-Storage)',
+    note: 'Nur clientseitig validierte Zeilen. Provisioning.ps1 validiert serverseitig erneut.',
+    settingsUsedForValidation: {
+      domain: settings.domain, delimiter: settings.delimiter,
+      allowExternalForwarding: settings.allowExternalForwarding
+    },
+    counts: { sharedMailboxes: state.validSM.length, distributionGroups: state.validDG.length },
+    sharedMailboxes: state.validSM,
+    distributionGroups: state.validDG
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'provisioning-data.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function wipeAll() {
+  state = { sm: [], dg: [], validSM: [], validDG: [], issues: [] };
+  ['pasteSM', 'pasteDG', 'setDomain'].forEach(id => { $(id).value = ''; });
+  $('fileSM').value = ''; $('fileDG').value = '';
+  $('setDelim').value = ';'; $('setPrefixSM').value = 'SM - '; $('setPrefixDG').value = 'DG - ';
+  $('setHidden').checked = false; $('setExtFwd').checked = false;
+  $('resultCard').hidden = true;
+  $('summaryRow').innerHTML = ''; $('issueList').innerHTML = '';
+  $('previewSM').innerHTML = ''; $('previewDG').innerHTML = '';
+  $('btnExport').disabled = true;
+}
+
+$('btnValidate').addEventListener('click', runValidation);
+$('btnExport').addEventListener('click', exportJson);
+$('btnWipe').addEventListener('click', wipeAll);
+window.addEventListener('beforeunload', wipeAll);
+</script>
+</body>
+</html>
