@@ -28,10 +28,12 @@
     Configuration:
     - Adjust $DefaultOwnerUPN in the script to the desired owner
 
-    Version: 1.1
+    Version: 1.2
     Author: Farpoint Technologies
     Created:  2026-04-08
-    Modified: 2026-04-09 - Fix: OData filter quote escaping for the owner UPN
+    Modified: 2026-04-09 - v1.1: OData filter quote escaping for the owner UPN
+                           v1.2: Enterprise-App filter (excludes managed identities
+                           and Microsoft first-party apps)
 #>
 
 #Requires -Modules Microsoft.Graph
@@ -63,7 +65,11 @@ Write-Host "✅ Owner resolved: $($OwnerUser.DisplayName) [$OwnerObjectId]" -For
 
 # --- GET ALL SERVICE PRINCIPALS (Enterprise Apps) ---
 Write-Host "`n🔍 Fetching all Enterprise Applications..." -ForegroundColor Cyan
-$AllSPs = Get-MgServicePrincipal -All -Property "Id,DisplayName,ServicePrincipalType"
+# Only real Enterprise Apps: exclude managed identities/legacy SPs and Microsoft first-party apps
+$MicrosoftTenantIds = @("f8cdef31-a31e-4b4a-93e4-5f571e91255a", "72f988bf-86f1-41af-91ab-2d7cd011db47")
+$AllSPs = Get-MgServicePrincipal -All -Filter "servicePrincipalType eq 'Application'" `
+    -Property "Id,DisplayName,ServicePrincipalType,AppOwnerOrganizationId" |
+    Where-Object { "$($_.AppOwnerOrganizationId)" -notin $MicrosoftTenantIds }
 
 $Counter   = 0
 $Skipped   = 0

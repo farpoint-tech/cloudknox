@@ -2,7 +2,7 @@
 
 **Farpoint Technologies - Microsoft Intune & Azure AD Management Scripts**
 
-> Letzte Aktualisierung: 2026-04-09 | Version: 2.4.2
+> Letzte Aktualisierung: 2026-04-09 | Version: 2.4.3
 
 ---
 

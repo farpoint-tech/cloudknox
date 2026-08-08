@@ -36,11 +36,13 @@
     - Microsoft.Graph
     - ImportExcel
 
-    Version: 1.1
+    Version: 1.2
     Author: Farpoint Technologies
     Created:  2026-04-08
-    Modified: 2026-04-09 - Fix: fail-safe dry-run logic, ValidateSet on -Mode,
+    Modified: 2026-04-09 - v1.1: fail-safe dry-run logic, ValidateSet on -Mode,
                            Test-Path on -ExcelPath, OData filter quote escaping
+                           v1.2: GUID validation on AppObjectId, [string] casts
+                           for Excel cell values
 #>
 
 #Requires -Modules Microsoft.Graph, ImportExcel
@@ -78,14 +80,22 @@ $Assigned = 0; $Skipped = 0; $Errors = 0; $DryRun = ($Mode -ne "Apply")
 if ($DryRun) { Write-Host "⚠️  DRY-RUN MODE – no changes will be made.`n" -ForegroundColor Yellow }
 
 foreach ($Row in $Data) {
-    $NewOwnerUPN = $Row."NEW Owner UPN"
-    $AppObjectId = $Row.AppObjectId
-    $DisplayName = $Row.DisplayName
+    # Cast to [string]: Import-Excel returns typed values (numeric cells would break .Trim())
+    $NewOwnerUPN = [string]$Row."NEW Owner UPN"
+    $AppObjectId = [string]$Row.AppObjectId
+    $DisplayName = [string]$Row.DisplayName
 
     # Skip rows without a new owner entered
     if (-not $NewOwnerUPN -or $NewOwnerUPN.Trim() -eq "") {
         Write-Host "SKIP – '$DisplayName' (no new owner entered)" -ForegroundColor Gray
         $Skipped++
+        continue
+    }
+
+    # Reject anything that is not a plain GUID before it reaches the request URI
+    if ($AppObjectId -notmatch '^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$') {
+        Write-Warning "ERROR – Invalid AppObjectId '$AppObjectId' for '$DisplayName'. Skipping."
+        $Errors++
         continue
     }
 

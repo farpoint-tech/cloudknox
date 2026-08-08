@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [2.4.3] - 2026-04-09 CET
+
+### Security
+- **Export-EnterpriseAppOwnerList.ps1 (v1.5)**: Excel formula-injection protection – tenant-controlled values (DisplayName, Tags, Category, Owners) with a leading `=` are neutralized before export, since Export-Excel would otherwise write them as executable formulas into a file the script auto-opens.
+- **Import-EnterpriseAppOwners.ps1 (v1.2)**: AppObjectId from the department-filled Excel is now validated as a plain GUID before being used in the Graph request URI (prevents endpoint redirection via tampered rows).
+
+### Fixed
+- **All list-based scripts (Export v1.5, Assign-OwnerByCategory v1.2, Assign-EnterpriseAppOwners v1.2)**: Now target only real Enterprise Apps – `servicePrincipalType eq 'Application'` filter plus exclusion of Microsoft first-party apps (well-known Microsoft tenant IDs). Managed identities and ~2000+ built-in Microsoft SPs are no longer processed.
+- **Export-EnterpriseAppOwnerList.ps1 (v1.5)**: Service-principal owners are now resolved via the directory object's properties instead of Get-MgUser – apps owned only by a service principal are no longer mislabeled as "No Owner". File open now works on macOS (`open` instead of executing the .xlsx).
+- **Import-EnterpriseAppOwners.ps1 (v1.2)**: Excel cell values are cast to `[string]` before `.Trim()` – numeric cells no longer crash the import loop.
+
 ## [2.4.2] - 2026-04-09 CET
 
 ### Security
