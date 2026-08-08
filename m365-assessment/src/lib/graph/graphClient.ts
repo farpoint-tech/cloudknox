@@ -85,6 +85,15 @@ export class GraphClient {
     return this.fetchWithRetry<T>(url, path);
   }
 
+  /** Single POST with a JSON body; returns the parsed response ({} on 204). */
+  async post<T>(path: string, body: unknown, opts?: GraphRequestOptions): Promise<T> {
+    const url = this.buildUrl(path, opts);
+    return this.fetchWithRetry<T>(url, path, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
   /**
    * GET a collection and follow every @odata.nextLink so ALL items are
    * returned, regardless of tenant size.
@@ -100,16 +109,23 @@ export class GraphClient {
     return items;
   }
 
-  private async fetchWithRetry<T>(url: string, path: string): Promise<T> {
+  private async fetchWithRetry<T>(
+    url: string,
+    path: string,
+    init?: { method?: string; body?: string },
+  ): Promise<T> {
     let attempt = 0;
     // Retries apply to 429 and 5xx only; other errors fail fast.
     for (;;) {
       const token = await this.getToken();
       const res = await this.fetchFn(url, {
+        method: init?.method ?? "GET",
+        body: init?.body,
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",
           ConsistencyLevel: "eventual",
+          ...(init?.body ? { "Content-Type": "application/json" } : {}),
         },
       });
 
