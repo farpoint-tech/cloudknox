@@ -266,6 +266,30 @@ function isValidEmail(v) {
   return /^[^\s@,;"]+@[^\s@,;"]+\.[^\s@,;"]+$/.test(v);
 }
 
+/* Exchange-Online-Regeln fuer den Alias: Buchstaben, Ziffern und
+   ! # % * + - / = ? ^ _ ~ sowie Punkte, die weder am Anfang/Ende stehen
+   noch doppelt vorkommen duerfen. Umlaute und Leerzeichen sind unzulaessig.
+   Generierte Aliase erfuellen das durch normalizeAlias immer; explizit
+   angegebene Primaeradressen muessen dagegen geprueft werden, sonst faellt
+   der Fehler erst zur Laufzeit im New-Mailbox auf. */
+const ALIAS_ZEICHEN = /^[A-Za-z0-9!#%*+\-/=?^_~.]+$/;
+
+function assertValidAlias(alias, quelle) {
+  if (alias.length > 64) {
+    throw new Error('Alias aus ' + quelle + ' ist länger als die von Exchange erlaubten 64 Zeichen: ' + alias);
+  }
+  if (!ALIAS_ZEICHEN.test(alias)) {
+    throw new Error('Alias aus ' + quelle + ' enthält für Exchange unzulässige Zeichen '
+      + '(z. B. Umlaute oder Leerzeichen): ' + alias);
+  }
+  if (/^\.|\.$|\.\./.test(alias)) {
+    throw new Error('Alias aus ' + quelle + ' hat einen Punkt am Anfang oder Ende '
+      + 'oder zwei Punkte hintereinander: ' + alias);
+  }
+}
+
+const BOOL_TOKEN = /^(1|true|yes|ja|j|0|false|no|nein|n)$/;
+
 function splitMulti(v, delim) {
   if (!v || !v.trim()) return [];
   return [...new Set(v.split(delim).map(x => x.trim()).filter(Boolean))];
@@ -299,10 +323,19 @@ function validateRows(type, rows, settings, globalAliases) {
     const rowIssues = [];
     const vorname = row.Vorname || '', nachname = row.Nachname || '', zusatz = row.Zusatz || '';
 
-    if (!vorname && !nachname && !zusatz) return; // leere Zeile
+    // Nur wirklich komplett leere Zeilen ueberspringen. Eine Zeile, in der bloss
+    // die drei Pflichtfelder leer sind, aber z. B. Anzeigename oder Weiterleitung
+    // gefuellt ist, ist ein Fehler - sie darf nicht spurlos verschwinden.
+    if (KNOWN_COLS.every(c => !(row[c] || '').trim())) return;
 
     if (!vorname || !nachname || !zusatz) {
       rowIssues.push('Pflichtfelder Vorname, Nachname oder Zusatz fehlen.');
+    }
+
+    const hiddenRaw = (row.HiddenFromGAL || '').trim();
+    if (hiddenRaw && !BOOL_TOKEN.test(hiddenRaw.toLowerCase())) {
+      rowIssues.push("Spalte 'HiddenFromGAL': '" + hiddenRaw + "' ist kein gültiger Ja/Nein-Wert "
+        + '(erlaubt: 1/0, true/false, yes/no, ja/nein, j/n).');
     }
 
     let alias = '', primary = '', display = '';
@@ -318,9 +351,7 @@ function validateRows(type, rows, settings, globalAliases) {
           primary = generated + '@' + settings.domain;
         }
         alias = primary.split('@')[0].toLowerCase();
-
-        if (globalAliases.has(alias)) rowIssues.push("Alias '" + alias + "' ist doppelt in den Eingabedaten.");
-        else globalAliases.add(alias);
+        assertValidAlias(alias, explicit ? "Spalte 'PrimaereAdresse'" : 'Vorname/Nachname/Zusatz');
 
         const rawName = (row.Anzeigename || '').trim();
         const prefix = type === 'SM' ? settings.prefixSM : settings.prefixDG;
@@ -348,6 +379,15 @@ function validateRows(type, rows, settings, globalAliases) {
           }
         }
       } catch (e) { rowIssues.push(e.message); }
+    }
+
+    // Alias erst reservieren, wenn die Zeile sonst fehlerfrei ist. Wuerde er - wie
+    // urspruenglich - schon vor den uebrigen Pruefungen belegt, blockierte eine
+    // spaeter verworfene Zeile den Alias ihres gueltigen Zwillings, und es entstuende
+    // ein Duplikat-Fehler, der auf die falsche Zeile zeigt.
+    if (rowIssues.length === 0 && alias) {
+      if (globalAliases.has(alias)) rowIssues.push("Alias '" + alias + "' ist doppelt in den Eingabedaten.");
+      else globalAliases.add(alias);
     }
 
     rowIssues.forEach(msg => issues.push(label + ' : ' + msg));
@@ -380,19 +420,42 @@ function renderPreview(el, title, preview) {
   el.innerHTML = html + '</tbody></table></div>';
 }
 
-function loadFileInto(fileInput, textarea) {
+/* Deutsches Excel exportiert CSV standardmaessig als ANSI/Windows-1252, nicht als
+   UTF-8. file.text() dekodiert aber immer als UTF-8: aus "Müller" wurde dabei
+   stillschweigend "M<?>ller", und weil die Alias-Normalisierung unbekannte Zeichen
+   ersatzlos entfernt, entstand ohne jede Fehlermeldung der Alias "mller".
+   Deshalb erst streng als UTF-8 dekodieren und nur bei echtem Dekodierfehler auf
+   Windows-1252 zurueckfallen - sichtbar als Warnung. */
+function decodeBytes(buf) {
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(buf), fallback: false };
+  } catch (e) {
+    return { text: new TextDecoder('windows-1252').decode(buf), fallback: true };
+  }
+}
+
+function loadFileInto(fileInput, textarea, label, warnings) {
   const f = fileInput.files && fileInput.files[0];
   if (!f) return Promise.resolve();
-  return f.text().then(t => { textarea.value = t; });
+  return f.arrayBuffer().then(buf => {
+    const res = decodeBytes(buf);
+    if (res.fallback) {
+      warnings.push(label + ': Die Datei ist nicht UTF-8-kodiert und wurde als Windows-1252 (ANSI) '
+        + 'gelesen – so exportiert deutsches Excel standardmäßig. Bitte die Umlaute in der '
+        + 'Vorschau unten kontrollieren.');
+    }
+    textarea.value = res.text;
+  });
 }
 
 function runValidation() {
+  const warnings = [];
   Promise.all([
-    loadFileInto($('fileSM'), $('pasteSM')),
-    loadFileInto($('fileDG'), $('pasteDG'))
+    loadFileInto($('fileSM'), $('pasteSM'), 'SharedMailboxes', warnings),
+    loadFileInto($('fileDG'), $('pasteDG'), 'DistributionGroups', warnings)
   ]).then(() => {
     const settings = readSettings();
-    const issues = [];
+    const issues = warnings.slice();
 
     if (!settings.domain) issues.push('Einstellungen: Standarddomain ist leer – generierte Adressen sind sonst ungültig.');
 
@@ -423,6 +486,13 @@ function runValidation() {
 
     $('btnExport').disabled = okCount === 0;
     $('resultCard').scrollIntoView({ behavior: 'smooth' });
+  }).catch(err => {
+    // Ohne diesen Zweig bliebe ein Lesefehler unsichtbar: der Klick auf
+    // "Validieren" wuerde einfach nichts tun.
+    $('resultCard').hidden = false;
+    $('summaryRow').innerHTML = '';
+    $('issueList').innerHTML = '<li>' + esc('Datei konnte nicht gelesen werden: ' + (err && err.message ? err.message : err)) + '</li>';
+    $('btnExport').disabled = true;
   });
 }
 

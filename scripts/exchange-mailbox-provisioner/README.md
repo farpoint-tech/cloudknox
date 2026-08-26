@@ -154,6 +154,8 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
 
 Das ExchangeOnlineManagement-Modul ist in Cloud Shell vorinstalliert; ImportExcel wird im JSON-Modus nicht benötigt. Das Script validiert alle Zeilen serverseitig erneut (Defense in Depth).
 
+**Zur CSV-Kodierung:** Deutsches Excel exportiert CSV standardmäßig als ANSI/Windows-1252, nicht als UTF-8. Die Browser-App erkennt das automatisch, liest die Datei entsprechend und weist mit einer Meldung darauf hin - die Umlaute sollten trotzdem kurz in der Vorschau kontrolliert werden. Wer auf Nummer sicher gehen will, exportiert aus Excel als „CSV UTF-8" oder kopiert die Tabelle direkt per Strg+C/Strg+V in die Seite.
+
 ### Warum kein Direkt-Provisioning aus der HTML-Seite?
 
 Microsoft Graph kann **keine Shared Mailboxes und keine klassischen Verteilergruppen** anlegen, und die Exchange-Admin-REST-API ist für Browser-Aufrufe gesperrt (kein CORS, nicht dokumentiert). Azure Cloud Shell ist der von Microsoft unterstützte Weg, der trotzdem vollständig im Browser bleibt - mit demselben Zero-Storage-Ergebnis.
@@ -186,6 +188,16 @@ Beide Dateien werden unter Windows mit **restriktiven NTFS-ACLs** angelegt (nur 
 | `Failed` | Erstellung fehlgeschlagen, kein Objekt vorhanden |
 | `Declined` | Benutzer hat die Aktion bei einer `-Confirm`-Abfrage abgelehnt |
 | `PartiallyCreated` | **Achtung:** Objekt wurde angelegt, aber die Konfiguration (Weiterleitung, Berechtigungen, Mitglieder) ist unvollständig - manuelle Prüfung erforderlich |
+
+### Exitcodes
+
+Für Scheduled Tasks und CI-Pipelines relevant - das Script signalisiert das Ergebnis über den Exitcode:
+
+| Code | Bedeutung |
+|------|-----------|
+| `0` | Lauf vollständig durchgelaufen |
+| `1` | Lauf abgebrochen (Anmeldung, Konfiguration, fehlendes Modul ...) |
+| `2` | Lauf beendet, aber mindestens eine Zeile ist fehlgeschlagen |
 
 ## Funktionsmerkmale
 

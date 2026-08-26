@@ -47,6 +47,12 @@
 .EXAMPLE
     .\Provisioning.ps1 -Force
     Unbeaufsichtigter Lauf ohne Rückfragen (Scheduled Task / CI-Pipeline).
+
+.NOTES
+    Exitcodes (wichtig für Scheduled Tasks und CI-Pipelines):
+      0 = Lauf vollständig durchgelaufen
+      1 = Lauf abgebrochen (Anmeldung, Konfiguration, fehlendes Modul ...)
+      2 = Lauf beendet, aber mindestens eine Zeile ist fehlgeschlagen
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
@@ -71,6 +77,16 @@ $ConfigFile         = Join-Path $ScriptPath $ConfigFileName
 $script:LogFile     = Join-Path $ScriptPath "Provisioning_$TimeStamp.log"
 $script:ResultsFile = Join-Path $ScriptPath "Provisioning_Results_$TimeStamp.csv"
 $script:AclProtectionFailed = $false
+$script:FatalError          = $false
+$script:FailedRowCount      = 0
+
+# Alle bekannten Eingabespalten - identisch zu KNOWN_COLS in
+# browser/ExchangeProvisioner.html. Wird gebraucht, um wirklich leere Zeilen von
+# solchen zu unterscheiden, die nur in den Pflichtfeldern leer sind.
+$script:KnownColumns = @(
+    'Vorname', 'Nachname', 'Zusatz', 'Anzeigename', 'PrimaereAdresse',
+    'Weiterleitung', 'FullAccess', 'SendAs', 'Mitglieder', 'Besitzer', 'HiddenFromGAL'
+)
 
 # ============================================================
 # HILFSFUNKTIONEN
@@ -231,10 +247,20 @@ function Get-SafeTrim {
     return ([string]$Value).Trim()
 }
 
+$script:BoolTokenPattern = '^(1|true|yes|ja|j|0|false|no|nein|n)$'
+
+function Test-BoolToken {
+    param([AllowNull()][object]$Value)
+    $text = Get-SafeTrim $Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $true }   # leer = Default, zulässig
+    return ($text.ToLowerInvariant() -match $script:BoolTokenPattern)
+}
+
 function Get-SafeBool {
     param(
         [AllowNull()][object]$Value,
-        [bool]$Default = $false
+        [bool]$Default = $false,
+        [string]$Label
     )
 
     $text = Get-SafeTrim $Value
@@ -243,7 +269,14 @@ function Get-SafeBool {
     switch -Regex ($text.ToLowerInvariant()) {
         '^(1|true|yes|ja|j)$'   { return $true }
         '^(0|false|no|nein|n)$' { return $false }
-        default                 { return $Default }
+        default {
+            # Unlesbare Werte nicht mehr stillschweigend auf den Default fallen
+            # lassen - sonst landet eine Mailbox sichtbar in der GAL, obwohl der
+            # Admin das Gegenteil eingetragen hat.
+            $wo = if ($Label) { " in $Label" } else { '' }
+            Write-Log "Unlesbarer Ja/Nein-Wert$wo : '$text' - verwende Standard '$Default'. Erlaubt: 1/0, true/false, yes/no, ja/nein, j/n." "WARN"
+            return $Default
+        }
     }
 }
 
@@ -404,9 +437,38 @@ function Get-EffectivePrimaryAddress {
     return "$GeneratedAlias@$DefaultDomain"
 }
 
+# Exchange-Online-Regeln für den Alias: Buchstaben, Ziffern und
+# ! # % * + - / = ? ^ _ ~ sowie Punkte, die weder am Anfang/Ende stehen noch
+# doppelt vorkommen dürfen. Umlaute und Leerzeichen sind unzulässig.
+function Assert-ValidAlias {
+    param(
+        [Parameter(Mandatory)][string]$Alias,
+        [Parameter(Mandatory)][string]$Source,
+        [int]$MaxLength = 64
+    )
+
+    if ($Alias.Length -gt $MaxLength) {
+        throw "Alias aus $Source ist länger als die von Exchange erlaubten $MaxLength Zeichen: $Alias"
+    }
+    if ($Alias -notmatch '^[A-Za-z0-9!#%*+\-/=?^_~.]+$') {
+        throw "Alias aus $Source enthält für Exchange unzulässige Zeichen (z. B. Umlaute oder Leerzeichen): $Alias"
+    }
+    if ($Alias -match '^\.|\.$|\.\.') {
+        throw "Alias aus $Source hat einen Punkt am Anfang oder Ende oder zwei Punkte hintereinander: $Alias"
+    }
+}
+
+# Bei generierten Adressen ist der Lokalteil bereits ein normalisierter Alias.
+# Bei einer explizit gesetzten PrimaereAdresse ist er es nicht - ohne Prüfung
+# schlüge erst New-Mailbox zur Laufzeit fehl, mitten im Batch.
 function Get-AliasFromAddress {
-    param([Parameter(Mandatory)][string]$Address)
-    return ($Address.Split('@')[0]).ToLowerInvariant()
+    param(
+        [Parameter(Mandatory)][string]$Address,
+        [string]$Source = 'PrimaereAdresse'
+    )
+    $alias = ($Address.Split('@')[0]).ToLowerInvariant()
+    Assert-ValidAlias -Alias $alias -Source $Source
+    return $alias
 }
 
 # -- Existenzprüfung für mehrere Identitäten --
@@ -535,23 +597,35 @@ function Test-RowsBeforeProvisioning {
         $Row           = $Rows[$i]
         $rowLabel      = "$Type Zeile $($i + 1)"
         $rowHasIssue   = $false
+        $alias         = ''
 
         $vorname  = Get-SafeTrim (Get-RowProp $Row 'Vorname')
         $nachname = Get-SafeTrim (Get-RowProp $Row 'Nachname')
         $zusatz   = Get-SafeTrim (Get-RowProp $Row 'Zusatz')
 
-        # Leere Zeile überspringen
-        if ([string]::IsNullOrWhiteSpace($vorname) -and
-            [string]::IsNullOrWhiteSpace($nachname) -and
-            [string]::IsNullOrWhiteSpace($zusatz)) {
-            continue
+        # Nur wirklich komplett leere Zeilen überspringen. Eine Zeile, in der bloß
+        # die drei Pflichtfelder leer sind, aber z. B. Anzeigename oder Weiterleitung
+        # gefüllt ist, ist ein Fehler - sie darf nicht spurlos verschwinden.
+        $rowIsEmpty = $true
+        foreach ($col in $script:KnownColumns) {
+            if (-not [string]::IsNullOrWhiteSpace((Get-SafeTrim (Get-RowProp $Row $col)))) {
+                $rowIsEmpty = $false
+                break
+            }
         }
+        if ($rowIsEmpty) { continue }
 
         # Pflichtfelder
         if ([string]::IsNullOrWhiteSpace($vorname) -or
             [string]::IsNullOrWhiteSpace($nachname) -or
             [string]::IsNullOrWhiteSpace($zusatz)) {
             $issues += "$rowLabel : Pflichtfelder Vorname, Nachname oder Zusatz fehlen."
+            $rowHasIssue = $true
+        }
+
+        # Nicht interpretierbare Ja/Nein-Werte als Zeilenfehler melden
+        if (-not (Test-BoolToken (Get-RowProp $Row 'HiddenFromGAL'))) {
+            $issues += "$rowLabel : Spalte 'HiddenFromGAL': '$(Get-SafeTrim (Get-RowProp $Row 'HiddenFromGAL'))' ist kein gültiger Ja/Nein-Wert (erlaubt: 1/0, true/false, yes/no, ja/nein, j/n)."
             $rowHasIssue = $true
         }
 
@@ -562,13 +636,9 @@ function Test-RowsBeforeProvisioning {
                     -ExplicitAddress (Get-SafeTrim (Get-RowProp $Row 'PrimaereAdresse')) `
                     -GeneratedAlias $generatedAlias `
                     -DefaultDomain $defaultDomain
-                $alias = Get-AliasFromAddress -Address $primaryAddress
-
-                # Doppelter Alias
-                if (-not $GlobalAliases.Add($alias)) {
-                    $issues += "$rowLabel : Alias '$alias' ist doppelt in der Excel-Datei."
-                    $rowHasIssue = $true
-                }
+                $explicitAddr = Get-SafeTrim (Get-RowProp $Row 'PrimaereAdresse')
+                $aliasSource  = if ($explicitAddr) { "Spalte 'PrimaereAdresse'" } else { 'Vorname/Nachname/Zusatz' }
+                $alias = Get-AliasFromAddress -Address $primaryAddress -Source $aliasSource
 
                 # E-Mail-Validierung für Multivalue-Felder
                 $fieldsToValidate = @()
@@ -614,6 +684,17 @@ function Test-RowsBeforeProvisioning {
             }
         }
 
+        # Alias erst reservieren, wenn die Zeile sonst fehlerfrei ist. Würde er - wie
+        # ursprünglich - schon vor den übrigen Prüfungen belegt, blockierte eine später
+        # verworfene Zeile den Alias ihres gültigen Zwillings, und der Duplikat-Fehler
+        # zeigte auf die falsche Zeile.
+        if (-not $rowHasIssue -and -not [string]::IsNullOrWhiteSpace($alias)) {
+            if (-not $GlobalAliases.Add($alias)) {
+                $issues += "$rowLabel : Alias '$alias' ist doppelt in den Eingabedaten."
+                $rowHasIssue = $true
+            }
+        }
+
         if (-not $rowHasIssue) {
             $validRows += $Row
         }
@@ -649,7 +730,7 @@ function New-SharedMailboxFromRow {
     $zusatz        = Get-SafeTrim (Get-RowProp $Row 'Zusatz')
     $anzeigename   = Get-SafeTrim (Get-RowProp $Row 'Anzeigename')
     $weiterleitung = Get-SafeTrim (Get-RowProp $Row 'Weiterleitung')
-    $hiddenGAL     = Get-SafeBool (Get-RowProp $Row 'HiddenFromGAL') $defaultHiddenGAL
+    $hiddenGAL     = Get-SafeBool (Get-RowProp $Row 'HiddenFromGAL') $defaultHiddenGAL -Label "Spalte 'HiddenFromGAL'"
 
     $generatedAlias = Convert-ToMailboxAlias -Value "$vorname.$nachname.$zusatz"
     $primaryAddress = Get-EffectivePrimaryAddress -ExplicitAddress (Get-RowProp $Row 'PrimaereAdresse') -GeneratedAlias $generatedAlias -DefaultDomain $defaultDomain
@@ -740,7 +821,7 @@ function New-DistributionGroupFromRow {
     $nachname    = Get-SafeTrim (Get-RowProp $Row 'Nachname')
     $zusatz      = Get-SafeTrim (Get-RowProp $Row 'Zusatz')
     $anzeigename = Get-SafeTrim (Get-RowProp $Row 'Anzeigename')
-    $hiddenGAL   = Get-SafeBool (Get-RowProp $Row 'HiddenFromGAL') $defaultHiddenGAL
+    $hiddenGAL   = Get-SafeBool (Get-RowProp $Row 'HiddenFromGAL') $defaultHiddenGAL -Label "Spalte 'HiddenFromGAL'"
 
     $generatedAlias = Convert-ToMailboxAlias -Value "$vorname.$nachname.$zusatz"
     $primaryAddress = Get-EffectivePrimaryAddress -ExplicitAddress (Get-RowProp $Row 'PrimaereAdresse') -GeneratedAlias $generatedAlias -DefaultDomain $defaultDomain
@@ -1084,6 +1165,7 @@ try {
     Write-Log "  Erstellt:     $CreatedCount" "SUCCESS"
     Write-Log "  Übersprungen: $SkippedCount" "WARN"
     Write-Log "  Fehler:       $FailedCount" $(if ($FailedCount -gt 0) { "ERROR" } else { "INFO" })
+    $script:FailedRowCount = $FailedCount
     Write-Log "============================================================"
 
     if ($Results.Count -gt 0) {
@@ -1100,6 +1182,7 @@ try {
 catch {
     Write-Log "Unerwarteter Fehler: $($_.Exception.Message)" "ERROR"
     Write-Log $_.ScriptStackTrace "ERROR"
+    $script:FatalError = $true
 }
 finally {
     if ($ConnectedToExchange) {
@@ -1113,3 +1196,12 @@ finally {
     }
     Write-Log "Scriptende"
 }
+
+# Exitcode setzen. Ohne das endete das Script auch nach einem Abbruch mit 0 und
+# ein Scheduled Task oder eine CI-Pipeline meldete den Fehlschlag als Erfolg.
+#   0 = alles durchgelaufen
+#   1 = Lauf abgebrochen (Login, Config, Modul ...)
+#   2 = Lauf beendet, aber mindestens eine Zeile fehlgeschlagen
+if ($script:FatalError) { exit 1 }
+if ($script:FailedRowCount -gt 0) { exit 2 }
+exit 0
