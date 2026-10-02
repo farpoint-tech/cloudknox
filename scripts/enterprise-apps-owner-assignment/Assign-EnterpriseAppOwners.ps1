@@ -28,9 +28,10 @@
     Configuration:
     - Adjust $DefaultOwnerUPN in the script to the desired owner
 
-    Version: 1.0
+    Version: 1.1
     Author: Farpoint Technologies
-    Created: 2026-04-08
+    Created:  2026-04-08
+    Modified: 2026-04-09 - Fix: OData filter quote escaping for the owner UPN
 #>
 
 #Requires -Modules Microsoft.Graph
@@ -50,7 +51,9 @@ $DefaultOwnerUPN = "admin@yourdomain.com"  # <-- Owner UPN hier anpassen
 Connect-MgGraph -Scopes "Application.Read.All", "Directory.ReadWrite.All"
 
 # --- GET OWNER OBJECT ID ---
-$OwnerUser = Get-MgUser -Filter "userPrincipalName eq '$DefaultOwnerUPN'"
+# Escape single quotes to keep the OData filter intact
+$SafeUPN = $DefaultOwnerUPN.Trim().Replace("'", "''")
+$OwnerUser = Get-MgUser -Filter "userPrincipalName eq '$SafeUPN'"
 if (-not $OwnerUser) {
     Write-Error "User '$DefaultOwnerUPN' not found. Exiting."
     exit 1

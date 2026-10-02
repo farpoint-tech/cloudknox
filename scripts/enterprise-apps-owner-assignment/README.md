@@ -119,6 +119,9 @@ The exported Excel file contains the following columns:
 ## Security Notes
 
 - **Dry-run first**: Always run `Import-EnterpriseAppOwners.ps1` in WhatIf mode first
+- **Fail-safe mode logic**: The import script only performs changes when `-Mode Apply` is passed exactly; any other value runs as dry-run (`ValidateSet` rejects invalid values)
+- **Confirmation prompt**: `Assign-OwnerByCategory.ps1` shows the number of targeted apps and requires typing `yes` before any change is made
+- **OData injection protection**: All UPN inputs (Excel cells, interactive prompts, configuration) are quote-escaped before being used in Graph API filters
 - **Least privilege**: Phase 1 (Export) only requires read permissions
 - **Audit trail**: The Excel file serves as documentation of the owner assignments
 - **Existing owners**: No script overwrites existing owners – only missing ones are added
@@ -134,6 +137,12 @@ The exported Excel file contains the following columns:
 | Export folder doesn't exist | The script creates `C:\Temp` (Windows) or `~/Downloads` (macOS) automatically |
 
 ## Changelog
+
+### v1.4 / v1.1 (2026-04-09) – Security & resilience fixes (all scripts)
+- **Import (v1.1)**: Fail-safe dry-run logic (`$Mode -ne "Apply"` instead of `-eq "WhatIf"`), `ValidateSet` on `-Mode`, `Test-Path` validation on `-ExcelPath` before Graph login, OData filter quote escaping for UPNs from Excel
+- **Assign-OwnerByCategory (v1.1)**: Fixed negative-index bug (entering `0` in a multi-selection like `0,2` silently targeted the *last* category), numeric and range validation of the selection input, confirmation prompt before any change, summary counters (assigned/skipped/errors), OData quote escaping
+- **Assign-EnterpriseAppOwners (v1.1)**: OData filter quote escaping for the configured owner UPN
+- **Export (v1.4)**: Owners are now fetched once per app into a cache (previously twice: category summary + export build), `Generic.List` replaces O(n²) array `+=` for large tenants
 
 ### v1.3 (2026-04-09) – Export-EnterpriseAppOwnerList.ps1
 - Auto path: `C:\Temp` on Windows, `~/Downloads` on macOS

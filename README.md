@@ -2,7 +2,7 @@
 
 **Farpoint Technologies - Microsoft Intune & Azure AD Management Scripts**
 
-> Letzte Aktualisierung: 2026-04-09 | Version: 2.4.1
+> Letzte Aktualisierung: 2026-04-09 | Version: 2.4.2
 
 ---
 
@@ -551,6 +551,7 @@ Provisioniert Shared Mailboxes und Verteilergruppen (Distribution Groups) in Exc
 | `-ConfigFileName` | String | Name der Konfigurationsdatei | `config.json` |
 | `-ExcelFileName` | String | Überschreibt den Excel-Dateinamen aus der Config | – |
 | `-WhatIf` | Switch | Trockenlauf ohne echte Änderungen | – |
+| `-Force` | Switch | Unterdrückt alle Rückfragen (unbeaufsichtigte Ausführung) | – |
 
 #### Verwendungsbeispiele
 
@@ -625,11 +626,15 @@ pwsh -Command "Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeEnforce -Dry
 - **Idempotente Berechtigungen** - Bereits vorhandene FullAccess-/SendAs-Rechte werden übersprungen
 - **Zwei Authentifizierungsmodi** - Interaktiver Web-Login oder App-Registrierung mit Zertifikat
 - **Fehlertoleranz** - Einzelne fehlerhafte Zeilen unterbrechen nicht die gesamte Verarbeitung
-- **CSV-Ergebnisbericht** - Vollständiger Export aller verarbeiteten Zeilen
+- **CSV-Ergebnisbericht** - Vollständiger Export aller verarbeiteten Zeilen (ACL-geschützt)
+- **Least-Privilege-Session** - Exchange-Verbindung lädt nur die benötigten Cmdlets
+- **Teilfehler-Erkennung** - Unvollständig konfigurierte Objekte werden als `PartiallyCreated` markiert
+- **Externe Weiterleitungen standardmäßig blockiert** - Freigabe nur per Config (`allowExternalForwarding`); erlaubte Fälle werden im Log hervorgehoben
+- **CSV-Injection-Schutz** - Formelzeichen im Ergebnis-CSV werden neutralisiert
 ### 9. Enterprise Apps Owner Assignment
 
 **Path:** `scripts/enterprise-apps-owner-assignment/`
-**Version:** 1.3 (Export) / 1.0 (others) | **Author:** Farpoint Technologies
+**Version:** 1.4 (Export) / 1.1 (others) | **Author:** Farpoint Technologies
 **Language:** English
 **Scripts:** 4 (Export, Import, Interactive, Standalone)
 

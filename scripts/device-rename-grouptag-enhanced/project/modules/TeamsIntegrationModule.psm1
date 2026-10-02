@@ -887,7 +887,7 @@ function Format-TeamsMessage {
     $formattedText = $Text
     
     if ($Code) {
-        $formattedText = "`$formattedText`"
+        $formattedText = '`' + $formattedText + '`'
     }
     
     if ($Bold) {

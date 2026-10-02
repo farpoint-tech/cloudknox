@@ -27,10 +27,12 @@
     - Microsoft.Graph
     - ImportExcel
 
-    Version: 1.3
+    Version: 1.4
     Author: Farpoint Technologies
     Created:  2026-04-08
-    Modified: 2026-04-09 - Fix: Module checks, ConditionalText, auto export path
+    Modified: 2026-04-09 - v1.3: Module checks, ConditionalText, auto export path
+                           v1.4: Owner cache (single Graph call per app), List
+                                 instead of array += for large tenants
 #>
 
 # ============================================================
@@ -75,6 +77,13 @@ Connect-MgGraph -Scopes "Application.Read.All", "Directory.Read.All"
 Write-Host "`n🔍 Fetching all Enterprise Applications..." -ForegroundColor Cyan
 $AllSPs = Get-MgServicePrincipal -All -Property "Id,DisplayName,AppId,ServicePrincipalType,Tags"
 
+# --- RESOLVE OWNERS (one Graph call per app, reused for summary and export) ---
+Write-Host "🔍 Resolving owners for $($AllSPs.Count) apps..." -ForegroundColor Cyan
+$OwnerCache = @{}
+foreach ($SP in $AllSPs) {
+    $OwnerCache[$SP.Id] = Get-MgServicePrincipalOwner -ServicePrincipalId $SP.Id -ErrorAction SilentlyContinue
+}
+
 # --- TAG ANALYSIS ---
 $AllTags = $AllSPs | ForEach-Object { $_.Tags } | Where-Object { $_ } | Sort-Object -Unique
 Write-Host "`n📋 DETECTED TAGS IN YOUR TENANT:" -ForegroundColor Yellow
@@ -98,7 +107,7 @@ Write-Host ("-" * 55)
 foreach ($grp in $CategorySummary) {
     $noOwner = 0
     foreach ($sp in $grp.Group) {
-        $owners = Get-MgServicePrincipalOwner -ServicePrincipalId $sp.Id -ErrorAction SilentlyContinue
+        $owners = $OwnerCache[$sp.Id]
         if (-not $owners -or $owners.Count -eq 0) { $noOwner++ }
     }
     Write-Host ("{0,-25} {1,-10} {2}" -f $grp.Name, $grp.Count, "⚠ $noOwner without owner")
@@ -107,10 +116,10 @@ Write-Host ("=" * 55)
 
 # --- BUILD EXPORT DATA ---
 Write-Host "`n📤 Building export list..." -ForegroundColor Cyan
-$ExportData = @()
+$ExportData = [System.Collections.Generic.List[object]]::new()
 
 foreach ($SP in $AllSPs) {
-    $Owners = Get-MgServicePrincipalOwner -ServicePrincipalId $SP.Id -ErrorAction SilentlyContinue
+    $Owners = $OwnerCache[$SP.Id]
     $OwnerUPNs = if ($Owners) {
         ($Owners | ForEach-Object {
             (Get-MgUser -UserId $_.Id -ErrorAction SilentlyContinue).UserPrincipalName
@@ -121,7 +130,7 @@ foreach ($SP in $AllSPs) {
     $TagString = if ($SP.Tags) { $SP.Tags -join "; " } else { "" }
     $Status    = if ($OwnerUPNs) { "Has Owner" } else { "No Owner" }
 
-    $ExportData += [PSCustomObject]@{
+    $ExportData.Add([PSCustomObject]@{
         AppObjectId            = $SP.Id
         DisplayName            = $SP.DisplayName
         "AppId (Client ID)"    = $SP.AppId
@@ -133,7 +142,7 @@ foreach ($SP in $AllSPs) {
         "NEW Owner UPN"        = ""
         Department             = ""
         Notes                  = ""
-    }
+    })
 }
 
 # --- EXPORT TO EXCEL ---

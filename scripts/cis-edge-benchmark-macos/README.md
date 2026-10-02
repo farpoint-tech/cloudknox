@@ -174,6 +174,38 @@ cis-edge-benchmark-macos/
 
 ---
 
+## Sicherheit des Enforcement-Servers
+
+Während `Invoke-CISEdgeAudit` läuft, hört ein lokaler HTTP-Server auf
+`localhost:18989`, damit die Enforce-Buttons im Dashboard Policy-Änderungen
+auslösen können. Da dieser Server bei aktivem Enforcement als **root** läuft,
+gelten folgende Schutzmaßnahmen:
+
+- **CSRF-Token**: Jeder Audit-Lauf erzeugt ein kryptographisch zufälliges
+  256-Bit-Token und bettet es in `audit_results.js` ein. Der `/enforce`-Endpunkt
+  akzeptiert nur Anfragen, die dieses Token im Header `X-Enforce-Token` mitsenden.
+  Eine bösartige Website, die du zufällig im Browser geöffnet hast, kann das
+  Token nicht lesen und wird mit **HTTP 403** abgewiesen – sie kann also kein
+  Enforcement erzwingen.
+- **Nur localhost**: Der Server bindet ausschließlich an `localhost` und ist
+  von außen nicht erreichbar.
+- **Fail-closed**: Fehlt das Token oder ist es ungültig, wird die Anfrage
+  abgelehnt, bevor irgendetwas geschrieben wird. Ungültige Zugriffe werden in
+  `enforcement_log.txt` protokolliert.
+- **Größenlimit & minimale Fehlerausgabe**: Übergroße Request-Bodies werden
+  abgewiesen (HTTP 413); interne Fehlerdetails bleiben lokal im Log und werden
+  nicht über HTTP zurückgegeben.
+
+> **Wichtig:** Verwende immer das Dashboard, das der aktuelle Audit-Lauf öffnet.
+> Ein aus einer früheren Session geöffnetes Dashboard trägt ein veraltetes Token
+> und erhält beim Enforce ein 403 – lade es dann einfach neu (der Audit schreibt
+> das gültige Token in `audit_results.js`).
+>
+> Beende die PowerShell-Session (Ctrl+C), wenn du den Server nicht mehr brauchst;
+> danach ist kein Enforcement-Endpunkt mehr aktiv.
+
+---
+
 ## Unterschiede zur Windows-Version
 
 | Aspekt | Windows (Original) | macOS (Dieses Modul) |

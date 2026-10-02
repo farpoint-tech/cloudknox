@@ -6,6 +6,111 @@
 $DeviceTypeFilter = "All"
 $BatchSize = 10
 
+# ---------------------------------------------------------------------------
+# Global helper: reliably determine a policy's platform ONLY from its
+# @odata.type value using exact, anchored tokens. DisplayName/Description are
+# never used because substring/regex matching there over-matches (e.g. "iOS"
+# matching "Kiosk"/"BIOS", "Windows" matching unrelated policies).
+# ---------------------------------------------------------------------------
+function Get-PolicyPlatform {
+    param($Policy)
+
+    $odataType = $null
+    if ($Policy.'@odata.type') {
+        $odataType = [string]$Policy.'@odata.type'
+    }
+    elseif ($Policy.ODataType) {
+        $odataType = [string]$Policy.ODataType
+    }
+    elseif ($Policy.AdditionalProperties -and $Policy.AdditionalProperties.ContainsKey('@odata.type')) {
+        $odataType = [string]$Policy.AdditionalProperties['@odata.type']
+    }
+
+    if ([string]::IsNullOrEmpty($odataType)) {
+        return "Unknown"
+    }
+
+    # -like is case-insensitive. Anchored ".graph.<platform>" tokens cannot
+    # collide (e.g. a Windows kiosk type ".graph.windowsKiosk..." never matches
+    # ".graph.ios"). macOS is checked before iOS for clarity.
+    if ($odataType -like '*.graph.macos*') {
+        return "macOS"
+    }
+    elseif ($odataType -like '*.graph.ios*') {
+        return "iOS"
+    }
+    elseif ($odataType -like '*.graph.android*') {
+        return "Android"
+    }
+    elseif ($odataType -like '*windows*') {
+        return "Windows"
+    }
+    else {
+        return "Unknown"
+    }
+}
+
+# Backup folder for this run (created lazily on the first successful backup).
+$script:BackupFolder = $null
+
+# ---------------------------------------------------------------------------
+# Global helper: export a policy object to a JSON backup BEFORE it is deleted.
+# Returns $true only when a backup file was written successfully. Callers MUST
+# skip deletion when this returns $false (never delete without a backup).
+# ---------------------------------------------------------------------------
+function Backup-PolicyObject {
+    param(
+        $Policy,
+        [string]$PolicyType
+    )
+
+    try {
+        # Create the run-specific backup folder once.
+        if (-not $script:BackupFolder) {
+            $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+            $script:BackupFolder = Join-Path -Path (Join-Path -Path "." -ChildPath "PolicyBackups") -ChildPath $timestamp
+            if (-not (Test-Path -Path $script:BackupFolder)) {
+                New-Item -Path $script:BackupFolder -ItemType Directory -Force | Out-Null
+            }
+        }
+
+        # Fetch the full policy object; fall back to the in-memory object.
+        $fullObject = $null
+        try {
+            if ($PolicyType -eq "DeviceCompliance") {
+                $uri = "https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies/$($Policy.Id)"
+            }
+            else {
+                $uri = "https://graph.microsoft.com/v1.0/deviceManagement/deviceConfigurations/$($Policy.Id)"
+            }
+            $fullObject = Invoke-MgGraphRequest -Uri $uri -Method GET -ErrorAction Stop
+        }
+        catch {
+            $fullObject = $Policy
+        }
+
+        # Build a safe file name from the DisplayName and Id.
+        $safeName = [string]$Policy.DisplayName
+        if ([string]::IsNullOrEmpty($safeName)) {
+            $safeName = "Policy"
+        }
+        $safeName = [regex]::Replace($safeName, '[\\/:\*\?"<>\|]', '_')
+        $safeName = $safeName -replace '\s+', '_'
+        $safeId = [regex]::Replace([string]$Policy.Id, '[^0-9A-Za-z\-]', '_')
+        $fileName = "$($safeName)_$($safeId).json"
+        $filePath = Join-Path -Path $script:BackupFolder -ChildPath $fileName
+
+        $fullObject | ConvertTo-Json -Depth 20 | Out-File -FilePath $filePath -Encoding UTF8 -ErrorAction Stop
+
+        Write-Host "  Backup saved: $filePath" -ForegroundColor DarkGray
+        return $true
+    }
+    catch {
+        Write-Host "  Backup FAILED`: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
 # Check and install required modules
 Write-Host "Checking required modules..." -ForegroundColor Cyan
 $requiredModules = @(
@@ -81,9 +186,7 @@ try {
         "DeviceManagementConfiguration.ReadWrite.All",
         "DeviceManagementApps.ReadWrite.All",
         "DeviceManagementServiceConfig.ReadWrite.All",
-        "DeviceManagementManagedDevices.ReadWrite.All",
-        "Directory.Read.All",
-        "Directory.ReadWrite.All"
+        "DeviceManagementManagedDevices.ReadWrite.All"
     )
     
     # Clear any existing connections
@@ -157,6 +260,18 @@ try {
         exit
     }
     
+    # ===== CRITICAL SAFETY WARNING =====
+    Write-Host "`n############################################################" -ForegroundColor Red
+    Write-Host "#                   CRITICAL WARNING                       #" -ForegroundColor Red
+    Write-Host "############################################################" -ForegroundColor Red
+    Write-Host "This tool PERMANENTLY DELETES Intune policy OBJECTS tenant-wide." -ForegroundColor Red
+    Write-Host "Deleting a policy removes it from EVERY device it is assigned to" -ForegroundColor Red
+    Write-Host "across the entire tenant. It does NOT remove an assignment from a" -ForegroundColor Red
+    Write-Host "single device." -ForegroundColor Red
+    Write-Host "Deletion is IRREVERSIBLE except by manually restoring from the JSON" -ForegroundColor Red
+    Write-Host "backups this tool writes to .\PolicyBackups\ before each deletion." -ForegroundColor Red
+    Write-Host "############################################################" -ForegroundColor Red
+
     # Set initial batch size
     Write-Host "`n===== BATCH PROCESSING SETTINGS =====" -ForegroundColor Magenta
     Write-Host "1. Process individually (1 policy per batch)" -ForegroundColor Cyan
@@ -292,53 +407,10 @@ try {
                         $filteredPolicies = @()
                         
                         foreach ($policy in $allPolicies) {
-                            $includePolicy = $false
-                            
-                            # Check policy name and properties for device type indicators
-                            if ($policy.DisplayName -match $DeviceTypeFilter -or 
-                                ($policy.Description -and $policy.Description -match $DeviceTypeFilter)) {
-                                $includePolicy = $true
-                            }
-                            
-                            # Check platform-specific properties
-                            switch ($DeviceTypeFilter) {
-                                "Windows" {
-                                    if (($policy.AdditionalProperties -and 
-                                         ($policy.AdditionalProperties.ContainsKey("windows10CompliancePolicy") -or 
-                                          $policy.AdditionalProperties.ContainsKey("windows81CompliancePolicy"))) -or
-                                        ($policy.'@odata.type' -and $policy.'@odata.type' -match "windows") -or
-                                        ($policy.ODataType -and $policy.ODataType -match "windows")) {
-                                        $includePolicy = $true
-                                    }
-                                }
-                                "macOS" {
-                                    if (($policy.AdditionalProperties -and 
-                                         $policy.AdditionalProperties.ContainsKey("macOSCompliancePolicy")) -or
-                                        ($policy.'@odata.type' -and $policy.'@odata.type' -match "macOS") -or
-                                        ($policy.ODataType -and $policy.ODataType -match "macOS")) {
-                                        $includePolicy = $true
-                                    }
-                                }
-                                "iOS" {
-                                    if (($policy.AdditionalProperties -and 
-                                         $policy.AdditionalProperties.ContainsKey("iosCompliancePolicy")) -or
-                                        ($policy.'@odata.type' -and $policy.'@odata.type' -match "ios") -or
-                                        ($policy.ODataType -and $policy.ODataType -match "ios")) {
-                                        $includePolicy = $true
-                                    }
-                                }
-                                "Android" {
-                                    if (($policy.AdditionalProperties -and 
-                                         ($policy.AdditionalProperties.ContainsKey("androidCompliancePolicy") -or 
-                                          $policy.AdditionalProperties.ContainsKey("androidWorkProfileCompliancePolicy"))) -or
-                                        ($policy.'@odata.type' -and $policy.'@odata.type' -match "android") -or
-                                        ($policy.ODataType -and $policy.ODataType -match "android")) {
-                                        $includePolicy = $true
-                                    }
-                                }
-                            }
-                            
-                            if ($includePolicy) {
+                            # Include ONLY policies whose platform (detected reliably from the
+                            # @odata.type value) matches the selected filter. DisplayName and
+                            # Description are intentionally NOT used to avoid over-matching.
+                            if ((Get-PolicyPlatform -Policy $policy) -eq $DeviceTypeFilter) {
                                 $filteredPolicies += $policy
                             }
                         }
@@ -366,9 +438,10 @@ try {
                             Write-Host " $($i+1). $($policies[$i].DisplayName)" -ForegroundColor Cyan
                         }
                         
-                        $confirmation = Read-Host "`nAre you sure you want to delete ALL $totalPolicies policies? (Y/N)"
-                        if ($confirmation -ne 'Y') {
-                            Write-Host "Deletion cancelled." -ForegroundColor Cyan
+                        Write-Host "`nWARNING: This will PERMANENTLY DELETE all $totalPolicies policies tenant-wide (unassigning them from ALL devices)." -ForegroundColor Red
+                        $typed = Read-Host "To confirm, type the exact number of policies to delete ($totalPolicies)"
+                        if ($typed -ne "$totalPolicies") {
+                            Write-Host "Deletion cancelled (entry did not match $totalPolicies)." -ForegroundColor Cyan
                             continue
                         }
                         
@@ -378,6 +451,12 @@ try {
                         for ($i = 0; $i -lt $policies.Count; $i++) {
                             $policy = $policies[$i]
                             Write-Host "Deleting ($($i+1)/$totalPolicies): $($policy.DisplayName)" -ForegroundColor Cyan
+                            
+                            if (-not (Backup-PolicyObject -Policy $policy -PolicyType $PolicyType)) {
+                                Write-Host "  Skipped - backup FAILED, policy NOT deleted: $($policy.DisplayName)" -ForegroundColor Yellow
+                                $failCount++
+                                continue
+                            }
                             
                             try {
                                 # Try standard cmdlet first
@@ -415,7 +494,10 @@ try {
                     $processingBatches = $true
                     
                     while ($processingBatches) {
+                        if ($currentIndex -ge $totalPolicies) { $currentIndex = 0 }
+                        if ($currentIndex -lt 0) { $currentIndex = 0 }
                         $endIndex = [Math]::Min($currentIndex + $BatchSize - 1, $totalPolicies - 1)
+                        if ($endIndex -lt $currentIndex) { $endIndex = $currentIndex }
                         $currentBatch = $policies[$currentIndex..$endIndex]
                         
                         Write-Host "`n===== POLICY BATCH $($currentIndex + 1) - $($endIndex + 1) OF $totalPolicies =====" -ForegroundColor Magenta
@@ -423,35 +505,7 @@ try {
                         
                         for ($i = 0; $i -lt $currentBatch.Count; $i++) {
                             $policy = $currentBatch[$i]
-                            $deviceType = "Unknown"
-                            
-                            # Try to determine device type from policy properties
-                            if (($policy.'@odata.type' -and $policy.'@odata.type' -match "windows") -or
-                                ($policy.ODataType -and $policy.ODataType -match "windows") -or
-                                ($policy.AdditionalProperties -and 
-                                 ($policy.AdditionalProperties.ContainsKey("windows10CompliancePolicy") -or 
-                                  $policy.AdditionalProperties.ContainsKey("windows81CompliancePolicy")))) {
-                                $deviceType = "Windows"
-                            }
-                            elseif (($policy.'@odata.type' -and $policy.'@odata.type' -match "macOS") -or
-                                    ($policy.ODataType -and $policy.ODataType -match "macOS") -or
-                                    ($policy.AdditionalProperties -and 
-                                     $policy.AdditionalProperties.ContainsKey("macOSCompliancePolicy"))) {
-                                $deviceType = "macOS"
-                            }
-                            elseif (($policy.'@odata.type' -and $policy.'@odata.type' -match "ios") -or
-                                    ($policy.ODataType -and $policy.ODataType -match "ios") -or
-                                    ($policy.AdditionalProperties -and 
-                                     $policy.AdditionalProperties.ContainsKey("iosCompliancePolicy"))) {
-                                $deviceType = "iOS"
-                            }
-                            elseif (($policy.'@odata.type' -and $policy.'@odata.type' -match "android") -or
-                                    ($policy.ODataType -and $policy.ODataType -match "android") -or
-                                    ($policy.AdditionalProperties -and 
-                                     ($policy.AdditionalProperties.ContainsKey("androidCompliancePolicy") -or 
-                                      $policy.AdditionalProperties.ContainsKey("androidWorkProfileCompliancePolicy")))) {
-                                $deviceType = "Android"
-                            }
+                            $deviceType = Get-PolicyPlatform -Policy $policy
                             
                             Write-Host " $($i+1). $($policy.DisplayName) [$deviceType]" -ForegroundColor Cyan
                         }
@@ -465,7 +519,7 @@ try {
                         
                         switch ($batchChoice.ToUpper()) {
                             'A' {
-                                $confirmation = Read-Host "Are you sure you want to delete ALL policies in this batch? (Y/N)"
+                                $confirmation = Read-Host "Are you sure you want to delete ALL $($currentBatch.Count) policies in this batch? (Y/N)"
                                 if ($confirmation -eq 'Y') {
                                     $successCount = 0
                                     $failCount = 0
@@ -473,6 +527,12 @@ try {
                                     for ($i = 0; $i -lt $currentBatch.Count; $i++) {
                                         $policy = $currentBatch[$i]
                                         Write-Host "Deleting: $($policy.DisplayName)" -ForegroundColor Cyan
+                                        
+                                        if (-not (Backup-PolicyObject -Policy $policy -PolicyType $PolicyType)) {
+                                            Write-Host "  Skipped - backup FAILED, policy NOT deleted: $($policy.DisplayName)" -ForegroundColor Yellow
+                                            $failCount++
+                                            continue
+                                        }
                                         
                                         try {
                                             # Try standard cmdlet first
@@ -528,53 +588,10 @@ try {
                                             $filteredPolicies = @()
                                             
                                             foreach ($policy in $allPolicies) {
-                                                $includePolicy = $false
-                                                
-                                                # Check policy name and properties for device type indicators
-                                                if ($policy.DisplayName -match $DeviceTypeFilter -or 
-                                                    ($policy.Description -and $policy.Description -match $DeviceTypeFilter)) {
-                                                    $includePolicy = $true
-                                                }
-                                                
-                                                # Check platform-specific properties
-                                                switch ($DeviceTypeFilter) {
-                                                    "Windows" {
-                                                        if (($policy.AdditionalProperties -and 
-                                                             ($policy.AdditionalProperties.ContainsKey("windows10CompliancePolicy") -or 
-                                                              $policy.AdditionalProperties.ContainsKey("windows81CompliancePolicy"))) -or
-                                                            ($policy.'@odata.type' -and $policy.'@odata.type' -match "windows") -or
-                                                            ($policy.ODataType -and $policy.ODataType -match "windows")) {
-                                                            $includePolicy = $true
-                                                        }
-                                                    }
-                                                    "macOS" {
-                                                        if (($policy.AdditionalProperties -and 
-                                                             $policy.AdditionalProperties.ContainsKey("macOSCompliancePolicy")) -or
-                                                            ($policy.'@odata.type' -and $policy.'@odata.type' -match "macOS") -or
-                                                            ($policy.ODataType -and $policy.ODataType -match "macOS")) {
-                                                            $includePolicy = $true
-                                                        }
-                                                    }
-                                                    "iOS" {
-                                                        if (($policy.AdditionalProperties -and 
-                                                             $policy.AdditionalProperties.ContainsKey("iosCompliancePolicy")) -or
-                                                            ($policy.'@odata.type' -and $policy.'@odata.type' -match "ios") -or
-                                                            ($policy.ODataType -and $policy.ODataType -match "ios")) {
-                                                            $includePolicy = $true
-                                                        }
-                                                    }
-                                                    "Android" {
-                                                        if (($policy.AdditionalProperties -and 
-                                                             ($policy.AdditionalProperties.ContainsKey("androidCompliancePolicy") -or 
-                                                              $policy.AdditionalProperties.ContainsKey("androidWorkProfileCompliancePolicy"))) -or
-                                                            ($policy.'@odata.type' -and $policy.'@odata.type' -match "android") -or
-                                                            ($policy.ODataType -and $policy.ODataType -match "android")) {
-                                                            $includePolicy = $true
-                                                        }
-                                                    }
-                                                }
-                                                
-                                                if ($includePolicy) {
+                                                # Include ONLY policies whose platform (detected reliably from the
+                                                # @odata.type value) matches the selected filter. DisplayName and
+                                                # Description are intentionally NOT used to avoid over-matching.
+                                                if ((Get-PolicyPlatform -Policy $policy) -eq $DeviceTypeFilter) {
                                                     $filteredPolicies += $policy
                                                 }
                                             }
@@ -591,6 +608,11 @@ try {
                                             Write-Host "No policies left matching the current filter." -ForegroundColor Green
                                             Read-Host "Press Enter to continue..."
                                             $processingBatches = $false
+                                        }
+                                        else {
+                                            # The refreshed list may be smaller; clamp the batch index.
+                                            if ($currentIndex -ge $totalPolicies) { $currentIndex = 0 }
+                                            if ($currentIndex -lt 0) { $currentIndex = 0 }
                                         }
                                     }
                                     catch {
@@ -649,6 +671,12 @@ try {
                                             $policy = $currentBatch[$index]
                                             Write-Host "Deleting: $($policy.DisplayName)" -ForegroundColor Cyan
                                             
+                                            if (-not (Backup-PolicyObject -Policy $policy -PolicyType $PolicyType)) {
+                                                Write-Host "  Skipped - backup FAILED, policy NOT deleted: $($policy.DisplayName)" -ForegroundColor Yellow
+                                                $failCount++
+                                                continue
+                                            }
+                                            
                                             try {
                                                 # Try standard cmdlet first
                                                 try {
@@ -703,53 +731,10 @@ try {
                                                 $filteredPolicies = @()
                                                 
                                                 foreach ($policy in $allPolicies) {
-                                                    $includePolicy = $false
-                                                    
-                                                    # Check policy name and properties for device type indicators
-                                                    if ($policy.DisplayName -match $DeviceTypeFilter -or 
-                                                        ($policy.Description -and $policy.Description -match $DeviceTypeFilter)) {
-                                                        $includePolicy = $true
-                                                    }
-                                                    
-                                                    # Check platform-specific properties
-                                                    switch ($DeviceTypeFilter) {
-                                                        "Windows" {
-                                                            if (($policy.AdditionalProperties -and 
-                                                                 ($policy.AdditionalProperties.ContainsKey("windows10CompliancePolicy") -or 
-                                                                  $policy.AdditionalProperties.ContainsKey("windows81CompliancePolicy"))) -or
-                                                                ($policy.'@odata.type' -and $policy.'@odata.type' -match "windows") -or
-                                                                ($policy.ODataType -and $policy.ODataType -match "windows")) {
-                                                                $includePolicy = $true
-                                                            }
-                                                        }
-                                                        "macOS" {
-                                                            if (($policy.AdditionalProperties -and 
-                                                                 $policy.AdditionalProperties.ContainsKey("macOSCompliancePolicy")) -or
-                                                                ($policy.'@odata.type' -and $policy.'@odata.type' -match "macOS") -or
-                                                                ($policy.ODataType -and $policy.ODataType -match "macOS")) {
-                                                                $includePolicy = $true
-                                                            }
-                                                        }
-                                                        "iOS" {
-                                                            if (($policy.AdditionalProperties -and 
-                                                                 $policy.AdditionalProperties.ContainsKey("iosCompliancePolicy")) -or
-                                                                ($policy.'@odata.type' -and $policy.'@odata.type' -match "ios") -or
-                                                                ($policy.ODataType -and $policy.ODataType -match "ios")) {
-                                                                $includePolicy = $true
-                                                            }
-                                                        }
-                                                        "Android" {
-                                                            if (($policy.AdditionalProperties -and 
-                                                                 ($policy.AdditionalProperties.ContainsKey("androidCompliancePolicy") -or 
-                                                                  $policy.AdditionalProperties.ContainsKey("androidWorkProfileCompliancePolicy"))) -or
-                                                                ($policy.'@odata.type' -and $policy.'@odata.type' -match "android") -or
-                                                                ($policy.ODataType -and $policy.ODataType -match "android")) {
-                                                                $includePolicy = $true
-                                                            }
-                                                        }
-                                                    }
-                                                    
-                                                    if ($includePolicy) {
+                                                    # Include ONLY policies whose platform (detected reliably from the
+                                                    # @odata.type value) matches the selected filter. DisplayName and
+                                                    # Description are intentionally NOT used to avoid over-matching.
+                                                    if ((Get-PolicyPlatform -Policy $policy) -eq $DeviceTypeFilter) {
                                                         $filteredPolicies += $policy
                                                     }
                                                 }
@@ -766,6 +751,11 @@ try {
                                                 Write-Host "No policies left matching the current filter." -ForegroundColor Green
                                                 Read-Host "Press Enter to continue..."
                                                 $processingBatches = $false
+                                            }
+                                            else {
+                                                # The refreshed list may be smaller; clamp the batch index.
+                                                if ($currentIndex -ge $totalPolicies) { $currentIndex = 0 }
+                                                if ($currentIndex -lt 0) { $currentIndex = 0 }
                                             }
                                         }
                                         catch {
@@ -829,53 +819,10 @@ try {
                         $filteredPolicies = @()
                         
                         foreach ($policy in $allPolicies) {
-                            $includePolicy = $false
-                            
-                            # Check policy name and properties for device type indicators
-                            if ($policy.DisplayName -match $DeviceTypeFilter -or 
-                                ($policy.Description -and $policy.Description -match $DeviceTypeFilter)) {
-                                $includePolicy = $true
-                            }
-                            
-                            # Check platform-specific properties
-                            switch ($DeviceTypeFilter) {
-                                "Windows" {
-                                    if (($policy.AdditionalProperties -and 
-                                         ($policy.AdditionalProperties.ContainsKey("windows10CompliancePolicy") -or 
-                                          $policy.AdditionalProperties.ContainsKey("windows81CompliancePolicy"))) -or
-                                        ($policy.'@odata.type' -and $policy.'@odata.type' -match "windows") -or
-                                        ($policy.ODataType -and $policy.ODataType -match "windows")) {
-                                        $includePolicy = $true
-                                    }
-                                }
-                                "macOS" {
-                                    if (($policy.AdditionalProperties -and 
-                                         $policy.AdditionalProperties.ContainsKey("macOSCompliancePolicy")) -or
-                                        ($policy.'@odata.type' -and $policy.'@odata.type' -match "macOS") -or
-                                        ($policy.ODataType -and $policy.ODataType -match "macOS")) {
-                                        $includePolicy = $true
-                                    }
-                                }
-                                "iOS" {
-                                    if (($policy.AdditionalProperties -and 
-                                         $policy.AdditionalProperties.ContainsKey("iosCompliancePolicy")) -or
-                                        ($policy.'@odata.type' -and $policy.'@odata.type' -match "ios") -or
-                                        ($policy.ODataType -and $policy.ODataType -match "ios")) {
-                                        $includePolicy = $true
-                                    }
-                                }
-                                "Android" {
-                                    if (($policy.AdditionalProperties -and 
-                                         ($policy.AdditionalProperties.ContainsKey("androidCompliancePolicy") -or 
-                                          $policy.AdditionalProperties.ContainsKey("androidWorkProfileCompliancePolicy"))) -or
-                                        ($policy.'@odata.type' -and $policy.'@odata.type' -match "android") -or
-                                        ($policy.ODataType -and $policy.ODataType -match "android")) {
-                                        $includePolicy = $true
-                                    }
-                                }
-                            }
-                            
-                            if ($includePolicy) {
+                            # Include ONLY policies whose platform (detected reliably from the
+                            # @odata.type value) matches the selected filter. DisplayName and
+                            # Description are intentionally NOT used to avoid over-matching.
+                            if ((Get-PolicyPlatform -Policy $policy) -eq $DeviceTypeFilter) {
                                 $filteredPolicies += $policy
                             }
                         }
@@ -903,9 +850,10 @@ try {
                             Write-Host " $($i+1). $($policies[$i].DisplayName)" -ForegroundColor Cyan
                         }
                         
-                        $confirmation = Read-Host "`nAre you sure you want to delete ALL $totalPolicies policies? (Y/N)"
-                        if ($confirmation -ne 'Y') {
-                            Write-Host "Deletion cancelled." -ForegroundColor Cyan
+                        Write-Host "`nWARNING: This will PERMANENTLY DELETE all $totalPolicies policies tenant-wide (unassigning them from ALL devices)." -ForegroundColor Red
+                        $typed = Read-Host "To confirm, type the exact number of policies to delete ($totalPolicies)"
+                        if ($typed -ne "$totalPolicies") {
+                            Write-Host "Deletion cancelled (entry did not match $totalPolicies)." -ForegroundColor Cyan
                             continue
                         }
                         
@@ -915,6 +863,12 @@ try {
                         for ($i = 0; $i -lt $policies.Count; $i++) {
                             $policy = $policies[$i]
                             Write-Host "Deleting ($($i+1)/$totalPolicies): $($policy.DisplayName)" -ForegroundColor Cyan
+                            
+                            if (-not (Backup-PolicyObject -Policy $policy -PolicyType $PolicyType)) {
+                                Write-Host "  Skipped - backup FAILED, policy NOT deleted: $($policy.DisplayName)" -ForegroundColor Yellow
+                                $failCount++
+                                continue
+                            }
                             
                             try {
                                 # Try standard cmdlet first
@@ -952,7 +906,10 @@ try {
                     $processingBatches = $true
                     
                     while ($processingBatches) {
+                        if ($currentIndex -ge $totalPolicies) { $currentIndex = 0 }
+                        if ($currentIndex -lt 0) { $currentIndex = 0 }
                         $endIndex = [Math]::Min($currentIndex + $BatchSize - 1, $totalPolicies - 1)
+                        if ($endIndex -lt $currentIndex) { $endIndex = $currentIndex }
                         $currentBatch = $policies[$currentIndex..$endIndex]
                         
                         Write-Host "`n===== POLICY BATCH $($currentIndex + 1) - $($endIndex + 1) OF $totalPolicies =====" -ForegroundColor Magenta
@@ -960,35 +917,7 @@ try {
                         
                         for ($i = 0; $i -lt $currentBatch.Count; $i++) {
                             $policy = $currentBatch[$i]
-                            $deviceType = "Unknown"
-                            
-                            # Try to determine device type from policy properties
-                            if (($policy.'@odata.type' -and $policy.'@odata.type' -match "windows") -or
-                                ($policy.ODataType -and $policy.ODataType -match "windows") -or
-                                ($policy.AdditionalProperties -and 
-                                 ($policy.AdditionalProperties.ContainsKey("windows10CompliancePolicy") -or 
-                                  $policy.AdditionalProperties.ContainsKey("windows81CompliancePolicy")))) {
-                                $deviceType = "Windows"
-                            }
-                            elseif (($policy.'@odata.type' -and $policy.'@odata.type' -match "macOS") -or
-                                    ($policy.ODataType -and $policy.ODataType -match "macOS") -or
-                                    ($policy.AdditionalProperties -and 
-                                     $policy.AdditionalProperties.ContainsKey("macOSCompliancePolicy"))) {
-                                $deviceType = "macOS"
-                            }
-                            elseif (($policy.'@odata.type' -and $policy.'@odata.type' -match "ios") -or
-                                    ($policy.ODataType -and $policy.ODataType -match "ios") -or
-                                    ($policy.AdditionalProperties -and 
-                                     $policy.AdditionalProperties.ContainsKey("iosCompliancePolicy"))) {
-                                $deviceType = "iOS"
-                            }
-                            elseif (($policy.'@odata.type' -and $policy.'@odata.type' -match "android") -or
-                                    ($policy.ODataType -and $policy.ODataType -match "android") -or
-                                    ($policy.AdditionalProperties -and 
-                                     ($policy.AdditionalProperties.ContainsKey("androidCompliancePolicy") -or 
-                                      $policy.AdditionalProperties.ContainsKey("androidWorkProfileCompliancePolicy")))) {
-                                $deviceType = "Android"
-                            }
+                            $deviceType = Get-PolicyPlatform -Policy $policy
                             
                             Write-Host " $($i+1). $($policy.DisplayName) [$deviceType]" -ForegroundColor Cyan
                         }
@@ -1002,7 +931,7 @@ try {
                         
                         switch ($batchChoice.ToUpper()) {
                             'A' {
-                                $confirmation = Read-Host "Are you sure you want to delete ALL policies in this batch? (Y/N)"
+                                $confirmation = Read-Host "Are you sure you want to delete ALL $($currentBatch.Count) policies in this batch? (Y/N)"
                                 if ($confirmation -eq 'Y') {
                                     $successCount = 0
                                     $failCount = 0
@@ -1010,6 +939,12 @@ try {
                                     for ($i = 0; $i -lt $currentBatch.Count; $i++) {
                                         $policy = $currentBatch[$i]
                                         Write-Host "Deleting: $($policy.DisplayName)" -ForegroundColor Cyan
+                                        
+                                        if (-not (Backup-PolicyObject -Policy $policy -PolicyType $PolicyType)) {
+                                            Write-Host "  Skipped - backup FAILED, policy NOT deleted: $($policy.DisplayName)" -ForegroundColor Yellow
+                                            $failCount++
+                                            continue
+                                        }
                                         
                                         try {
                                             # Try standard cmdlet first
@@ -1065,53 +1000,10 @@ try {
                                             $filteredPolicies = @()
                                             
                                             foreach ($policy in $allPolicies) {
-                                                $includePolicy = $false
-                                                
-                                                # Check policy name and properties for device type indicators
-                                                if ($policy.DisplayName -match $DeviceTypeFilter -or 
-                                                    ($policy.Description -and $policy.Description -match $DeviceTypeFilter)) {
-                                                    $includePolicy = $true
-                                                }
-                                                
-                                                # Check platform-specific properties
-                                                switch ($DeviceTypeFilter) {
-                                                    "Windows" {
-                                                        if (($policy.AdditionalProperties -and 
-                                                             ($policy.AdditionalProperties.ContainsKey("windows10CompliancePolicy") -or 
-                                                              $policy.AdditionalProperties.ContainsKey("windows81CompliancePolicy"))) -or
-                                                            ($policy.'@odata.type' -and $policy.'@odata.type' -match "windows") -or
-                                                            ($policy.ODataType -and $policy.ODataType -match "windows")) {
-                                                            $includePolicy = $true
-                                                        }
-                                                    }
-                                                    "macOS" {
-                                                        if (($policy.AdditionalProperties -and 
-                                                             $policy.AdditionalProperties.ContainsKey("macOSCompliancePolicy")) -or
-                                                            ($policy.'@odata.type' -and $policy.'@odata.type' -match "macOS") -or
-                                                            ($policy.ODataType -and $policy.ODataType -match "macOS")) {
-                                                            $includePolicy = $true
-                                                        }
-                                                    }
-                                                    "iOS" {
-                                                        if (($policy.AdditionalProperties -and 
-                                                             $policy.AdditionalProperties.ContainsKey("iosCompliancePolicy")) -or
-                                                            ($policy.'@odata.type' -and $policy.'@odata.type' -match "ios") -or
-                                                            ($policy.ODataType -and $policy.ODataType -match "ios")) {
-                                                            $includePolicy = $true
-                                                        }
-                                                    }
-                                                    "Android" {
-                                                        if (($policy.AdditionalProperties -and 
-                                                             ($policy.AdditionalProperties.ContainsKey("androidCompliancePolicy") -or 
-                                                              $policy.AdditionalProperties.ContainsKey("androidWorkProfileCompliancePolicy"))) -or
-                                                            ($policy.'@odata.type' -and $policy.'@odata.type' -match "android") -or
-                                                            ($policy.ODataType -and $policy.ODataType -match "android")) {
-                                                            $includePolicy = $true
-                                                        }
-                                                    }
-                                                }
-                                                
-                                                if ($includePolicy) {
+                                                # Include ONLY policies whose platform (detected reliably from the
+                                                # @odata.type value) matches the selected filter. DisplayName and
+                                                # Description are intentionally NOT used to avoid over-matching.
+                                                if ((Get-PolicyPlatform -Policy $policy) -eq $DeviceTypeFilter) {
                                                     $filteredPolicies += $policy
                                                 }
                                             }
@@ -1128,6 +1020,11 @@ try {
                                             Write-Host "No policies left matching the current filter." -ForegroundColor Green
                                             Read-Host "Press Enter to continue..."
                                             $processingBatches = $false
+                                        }
+                                        else {
+                                            # The refreshed list may be smaller; clamp the batch index.
+                                            if ($currentIndex -ge $totalPolicies) { $currentIndex = 0 }
+                                            if ($currentIndex -lt 0) { $currentIndex = 0 }
                                         }
                                     }
                                     catch {
@@ -1186,6 +1083,12 @@ try {
                                             $policy = $currentBatch[$index]
                                             Write-Host "Deleting: $($policy.DisplayName)" -ForegroundColor Cyan
                                             
+                                            if (-not (Backup-PolicyObject -Policy $policy -PolicyType $PolicyType)) {
+                                                Write-Host "  Skipped - backup FAILED, policy NOT deleted: $($policy.DisplayName)" -ForegroundColor Yellow
+                                                $failCount++
+                                                continue
+                                            }
+                                            
                                             try {
                                                 # Try standard cmdlet first
                                                 try {
@@ -1240,53 +1143,10 @@ try {
                                                 $filteredPolicies = @()
                                                 
                                                 foreach ($policy in $allPolicies) {
-                                                    $includePolicy = $false
-                                                    
-                                                    # Check policy name and properties for device type indicators
-                                                    if ($policy.DisplayName -match $DeviceTypeFilter -or 
-                                                        ($policy.Description -and $policy.Description -match $DeviceTypeFilter)) {
-                                                        $includePolicy = $true
-                                                    }
-                                                    
-                                                    # Check platform-specific properties
-                                                    switch ($DeviceTypeFilter) {
-                                                        "Windows" {
-                                                            if (($policy.AdditionalProperties -and 
-                                                                 ($policy.AdditionalProperties.ContainsKey("windows10CompliancePolicy") -or 
-                                                                  $policy.AdditionalProperties.ContainsKey("windows81CompliancePolicy"))) -or
-                                                                ($policy.'@odata.type' -and $policy.'@odata.type' -match "windows") -or
-                                                                ($policy.ODataType -and $policy.ODataType -match "windows")) {
-                                                                $includePolicy = $true
-                                                            }
-                                                        }
-                                                        "macOS" {
-                                                            if (($policy.AdditionalProperties -and 
-                                                                 $policy.AdditionalProperties.ContainsKey("macOSCompliancePolicy")) -or
-                                                                ($policy.'@odata.type' -and $policy.'@odata.type' -match "macOS") -or
-                                                                ($policy.ODataType -and $policy.ODataType -match "macOS")) {
-                                                                $includePolicy = $true
-                                                            }
-                                                        }
-                                                        "iOS" {
-                                                            if (($policy.AdditionalProperties -and 
-                                                                 $policy.AdditionalProperties.ContainsKey("iosCompliancePolicy")) -or
-                                                                ($policy.'@odata.type' -and $policy.'@odata.type' -match "ios") -or
-                                                                ($policy.ODataType -and $policy.ODataType -match "ios")) {
-                                                                $includePolicy = $true
-                                                            }
-                                                        }
-                                                        "Android" {
-                                                            if (($policy.AdditionalProperties -and 
-                                                                 ($policy.AdditionalProperties.ContainsKey("androidCompliancePolicy") -or 
-                                                                  $policy.AdditionalProperties.ContainsKey("androidWorkProfileCompliancePolicy"))) -or
-                                                                ($policy.'@odata.type' -and $policy.'@odata.type' -match "android") -or
-                                                                ($policy.ODataType -and $policy.ODataType -match "android")) {
-                                                                $includePolicy = $true
-                                                            }
-                                                        }
-                                                    }
-                                                    
-                                                    if ($includePolicy) {
+                                                    # Include ONLY policies whose platform (detected reliably from the
+                                                    # @odata.type value) matches the selected filter. DisplayName and
+                                                    # Description are intentionally NOT used to avoid over-matching.
+                                                    if ((Get-PolicyPlatform -Policy $policy) -eq $DeviceTypeFilter) {
                                                         $filteredPolicies += $policy
                                                     }
                                                 }
@@ -1303,6 +1163,11 @@ try {
                                                 Write-Host "No policies left matching the current filter." -ForegroundColor Green
                                                 Read-Host "Press Enter to continue..."
                                                 $processingBatches = $false
+                                            }
+                                            else {
+                                                # The refreshed list may be smaller; clamp the batch index.
+                                                if ($currentIndex -ge $totalPolicies) { $currentIndex = 0 }
+                                                if ($currentIndex -lt 0) { $currentIndex = 0 }
                                             }
                                         }
                                         catch {
