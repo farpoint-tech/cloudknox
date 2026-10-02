@@ -1,7 +1,7 @@
 # Exchange Mailbox Provisioner
 
 **Pfad:** `scripts/exchange-mailbox-provisioner/Provisioning.ps1`
-**Version:** 4.0 | **Autor:** Farpoint Technologies
+**Version:** 4.1 | **Autor:** Farpoint Technologies
 **Sprache:** Deutsch
 
 ## Was macht dieses Script?
@@ -101,6 +101,7 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
 |-----------|-----|-------------|----------|
 | `-ConfigFileName` | String | Name der Konfigurationsdatei | `config.json` |
 | `-ExcelFileName` | String | Überschreibt den Excel-Dateinamen aus der Config | – |
+| `-JsonInputFile` | String | Liest Zeilen aus einer JSON-Datei der Browser-App statt aus Excel (ImportExcel entfällt; ideal für Azure Cloud Shell) | – |
 | `-WhatIf` | Switch | Zeigt geplante Aktionen ohne Ausführung | – |
 | `-Confirm` | Switch | Fordert bei jeder Aktion Bestätigung | – |
 | `-Force` | Switch | Unterdrückt alle interaktiven Rückfragen (für Scheduled Tasks / unbeaufsichtigte Läufe) | – |
@@ -122,7 +123,42 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
 
 # Unbeaufsichtigter Lauf ohne Rückfragen (Scheduled Task / CI-Pipeline)
 .\Provisioning.ps1 -Force
+
+# Daten aus der Browser-App (JSON) statt Excel - z. B. in Azure Cloud Shell
+./Provisioning.ps1 -JsonInputFile provisioning-data.json -WhatIf
+./Provisioning.ps1 -JsonInputFile provisioning-data.json
 ```
+
+## Browser-Option (Zero-Storage)
+
+`browser/ExchangeProvisioner.html` ist eine **einzelne, vollständig offline-fähige HTML-Datei** - einfach per Doppelklick im Browser öffnen, kein Server, keine Installation.
+
+### Sicherheitsmodell
+
+| Garantie | Umsetzung |
+|----------|-----------|
+| Daten verlassen den Browser nicht | Content-Security-Policy mit `connect-src 'none'` / `default-src 'none'` - jeder Netzwerkaufruf wird vom Browser selbst blockiert (nachprüfbar: DevTools → Netzwerk-Tab bleibt leer) |
+| Keine Speicherung | Kein localStorage, keine sessionStorage, keine IndexedDB, keine Cookies - alle Daten leben nur im RAM des Tabs |
+| Tab zu = Daten weg | Zustand wird zusätzlich bei `beforeunload` aktiv gelöscht; „Alle Daten löschen"-Button jederzeit verfügbar |
+| Kein Tracking | `referrer: no-referrer`, keine externen Ressourcen, keine Fonts/CDNs |
+
+### Ablauf: komplett im Browser, ohne dass etwas gespeichert bleibt
+
+1. **`ExchangeProvisioner.html` öffnen** (lokal, Doppelklick) - Daten per CSV-Upload oder direkt aus Excel hineinkopieren (Strg+C/Strg+V)
+2. **Validieren & Vorschau** - identische Regeln wie das PowerShell-Script (Aliase, E-Mails, Duplikate, Weiterleitungs-Policy)
+3. **JSON exportieren** - `provisioning-data.json` enthält nur die gültigen Zeilen
+4. **[shell.azure.com](https://shell.azure.com) öffnen** → PowerShell → **„Kein Speicherkonto erforderlich" (ephemeral)** → einmal einloggen (MFA)
+5. **3 Dateien hochladen** (`Provisioning.ps1`, `config.json`, `provisioning-data.json`) und ausführen:
+   `./Provisioning.ps1 -JsonInputFile provisioning-data.json -WhatIf` → dann scharf ohne `-WhatIf`
+6. **Browser schließen** - der ephemere Cloud-Shell-Container wird vernichtet, nichts bleibt gespeichert
+
+Das ExchangeOnlineManagement-Modul ist in Cloud Shell vorinstalliert; ImportExcel wird im JSON-Modus nicht benötigt. Das Script validiert alle Zeilen serverseitig erneut (Defense in Depth).
+
+**Zur CSV-Kodierung:** Deutsches Excel exportiert CSV standardmäßig als ANSI/Windows-1252, nicht als UTF-8. Die Browser-App erkennt das automatisch, liest die Datei entsprechend und weist mit einer Meldung darauf hin - die Umlaute sollten trotzdem kurz in der Vorschau kontrolliert werden. Wer auf Nummer sicher gehen will, exportiert aus Excel als „CSV UTF-8" oder kopiert die Tabelle direkt per Strg+C/Strg+V in die Seite.
+
+### Warum kein Direkt-Provisioning aus der HTML-Seite?
+
+Microsoft Graph kann **keine Shared Mailboxes und keine klassischen Verteilergruppen** anlegen, und die Exchange-Admin-REST-API ist für Browser-Aufrufe gesperrt (kein CORS, nicht dokumentiert). Azure Cloud Shell ist der von Microsoft unterstützte Weg, der trotzdem vollständig im Browser bleibt - mit demselben Zero-Storage-Ergebnis.
 
 ## Benötigte Module
 
@@ -152,6 +188,16 @@ Beide Dateien werden unter Windows mit **restriktiven NTFS-ACLs** angelegt (nur 
 | `Failed` | Erstellung fehlgeschlagen, kein Objekt vorhanden |
 | `Declined` | Benutzer hat die Aktion bei einer `-Confirm`-Abfrage abgelehnt |
 | `PartiallyCreated` | **Achtung:** Objekt wurde angelegt, aber die Konfiguration (Weiterleitung, Berechtigungen, Mitglieder) ist unvollständig - manuelle Prüfung erforderlich |
+
+### Exitcodes
+
+Für Scheduled Tasks und CI-Pipelines relevant - das Script signalisiert das Ergebnis über den Exitcode:
+
+| Code | Bedeutung |
+|------|-----------|
+| `0` | Lauf vollständig durchgelaufen |
+| `1` | Lauf abgebrochen (Anmeldung, Konfiguration, fehlendes Modul ...) |
+| `2` | Lauf beendet, aber mindestens eine Zeile ist fehlgeschlagen |
 
 ## Funktionsmerkmale
 
