@@ -81,6 +81,11 @@
   details { margin-top: .75rem; }
   summary { cursor: pointer; font-weight: 600; }
   .secbox { border-left: 4px solid var(--ok); padding-left: .9rem; font-size: .88rem; }
+  .warnbox { border-left: 4px solid var(--warn); padding-left: .9rem; font-size: .88rem; }
+  .stale {
+    border-left: 4px solid var(--warn); background: var(--code-bg); padding: .6rem .9rem;
+    margin-bottom: .75rem; font-size: .88rem; font-weight: 600; color: var(--warn);
+  }
   .filebtn { font-size: .85rem; }
   footer { color: var(--muted); font-size: .78rem; margin-top: 1.5rem; }
 </style>
@@ -94,7 +99,7 @@
     <span class="badge">🔒 Keine Speicherung</span>
     <span class="badge">🚫 Kein Netzwerkzugriff (per CSP erzwungen)</span>
     <span class="badge">💻 Läuft zu 100 % lokal in diesem Tab</span>
-    <span class="badge">🗑️ Tab zu = Daten weg</span>
+    <span class="badge">🗑️ Tab zu = Daten im Tab weg</span>
   </div>
 
   <div class="card secbox">
@@ -103,6 +108,16 @@
     nachprüfbar über DevTools → Netzwerk-Tab, der leer bleibt. Es werden keine Cookies, kein localStorage,
     keine IndexedDB verwendet. Ihre Daten existieren nur im Arbeitsspeicher dieses Tabs und verschwinden
     vollständig, sobald Sie den Tab schließen oder <i>„Alle Daten löschen"</i> klicken.
+  </div>
+
+  <div class="card warnbox">
+    <b>Wichtig – die Export-Datei ist davon ausgenommen:</b>
+    Der JSON-Export ist ein gewöhnlicher Browser-Download. <code>provisioning-data.json</code> landet damit
+    unverschlüsselt in Ihrem Download-Ordner und enthält Postfachnamen, Adressen, Weiterleitungsziele,
+    Mitglieder und Berechtigungen. Diese Datei überlebt das Schließen des Tabs und wird weder von
+    <i>„Alle Daten löschen"</i> noch beim Verlassen der Seite entfernt – das kann eine Webseite technisch nicht.
+    <b>Löschen Sie sie selbst, sobald sie in die Cloud Shell hochgeladen ist</b> (und denken Sie an den Papierkorb).
+    Ohne Datei gibt es keinen Weg in die Cloud Shell; der Zero-Storage-Teil gilt für diese Seite, nicht für den Download.
   </div>
 
   <div class="card">
@@ -146,6 +161,10 @@
 
   <div class="card" id="resultCard" hidden>
     <h2>4&nbsp;·&nbsp;Ergebnis</h2>
+    <div class="stale" id="staleNotice" hidden>
+      ⚠ Eingaben wurden nach dieser Prüfung geändert – die Vorschau unten ist veraltet.
+      Bitte erneut validieren, bevor Sie exportieren.
+    </div>
     <div class="summary" id="summaryRow"></div>
     <ul class="issues" id="issueList"></ul>
     <div id="previewSM"></div>
@@ -160,7 +179,8 @@
         <li>Über das Upload-Symbol drei Dateien hochladen: <code>Provisioning.ps1</code>, <code>config.json</code> und die hier exportierte <code>provisioning-data.json</code>.</li>
         <li>Trockenlauf: <code>./Provisioning.ps1 -JsonInputFile provisioning-data.json -WhatIf</code></li>
         <li>Scharfer Lauf: <code>./Provisioning.ps1 -JsonInputFile provisioning-data.json</code> – das ExchangeOnlineManagement-Modul ist in Cloud Shell vorinstalliert; ImportExcel wird im JSON-Modus nicht benötigt.</li>
-        <li>Ergebnis-CSV bei Bedarf über das Download-Symbol sichern, dann <b>Browser-Tab schließen</b> → der ephemere Container wird vernichtet, nichts bleibt gespeichert.</li>
+        <li>Ergebnis-CSV bei Bedarf über das Download-Symbol sichern, dann <b>Browser-Tab schließen</b> → der ephemere Container wird vernichtet.</li>
+        <li><b>Zum Schluss <code>provisioning-data.json</code> aus Ihrem Download-Ordner löschen</b> (und aus dem Papierkorb). Diese Datei liegt unverschlüsselt auf Ihrer Platte und ist der einzige Teil des Ablaufs, der das Schließen des Tabs überlebt.</li>
       </ol>
       <p class="hint">Warum nicht direkt aus dieser Seite heraus? Microsoft Graph kann keine Shared Mailboxes und keine klassischen Verteilergruppen anlegen, und die Exchange-Admin-API ist für Browser-Aufrufe gesperrt (kein CORS). Cloud Shell ist der von Microsoft unterstützte Weg, der trotzdem vollständig im Browser bleibt.</p>
     </details>
@@ -474,6 +494,7 @@ function runValidation() {
     const total = sm.preview.length + dg.preview.length;
     const okCount = sm.valid.length + dg.valid.length;
     $('resultCard').hidden = false;
+    $('staleNotice').hidden = true;
     $('summaryRow').innerHTML =
       '<span>Zeilen gesamt: <b>' + total + '</b></span>' +
       '<span>Gültig: <b class="ok">' + okCount + '</b></span>' +
@@ -490,13 +511,28 @@ function runValidation() {
     // Ohne diesen Zweig bliebe ein Lesefehler unsichtbar: der Klick auf
     // "Validieren" wuerde einfach nichts tun.
     $('resultCard').hidden = false;
+    $('staleNotice').hidden = true;
     $('summaryRow').innerHTML = '';
     $('issueList').innerHTML = '<li>' + esc('Datei konnte nicht gelesen werden: ' + (err && err.message ? err.message : err)) + '</li>';
     $('btnExport').disabled = true;
   });
 }
 
+/* Jede Aenderung an Daten oder Einstellungen macht das Validierungsergebnis
+   ungueltig. Ohne das liesse sich nach einer Korrektur direkt exportieren:
+   exportJson liest die Einstellungen frisch, nimmt die Zeilen aber aus der
+   letzten Pruefung - das JSON enthielte dann alte Zeilen unter neuen
+   settingsUsedForValidation-Angaben. */
+function invalidateValidation() {
+  if (!state.validSM.length && !state.validDG.length && $('btnExport').disabled) return;
+  state.validSM = []; state.validDG = [];
+  $('btnExport').disabled = true;
+  if (!$('resultCard').hidden) $('staleNotice').hidden = false;
+}
+
 function exportJson() {
+  // Doppelter Boden: der Knopf ist in diesem Zustand bereits deaktiviert.
+  if (!state.validSM.length && !state.validDG.length) return;
   const settings = readSettings();
   const payload = {
     version: 1,
@@ -526,6 +562,7 @@ function wipeAll() {
   $('setDelim').value = ';'; $('setPrefixSM').value = 'SM - '; $('setPrefixDG').value = 'DG - ';
   $('setHidden').checked = false; $('setExtFwd').checked = false;
   $('resultCard').hidden = true;
+  $('staleNotice').hidden = true;
   $('summaryRow').innerHTML = ''; $('issueList').innerHTML = '';
   $('previewSM').innerHTML = ''; $('previewDG').innerHTML = '';
   $('btnExport').disabled = true;
@@ -535,6 +572,12 @@ $('btnValidate').addEventListener('click', runValidation);
 $('btnExport').addEventListener('click', exportJson);
 $('btnWipe').addEventListener('click', wipeAll);
 window.addEventListener('beforeunload', wipeAll);
+
+/* Alle Eingaben, die das Ergebnis beeinflussen, entwerten es bei Aenderung. */
+['pasteSM', 'pasteDG', 'setDomain', 'setDelim', 'setPrefixSM', 'setPrefixDG']
+  .forEach(id => $(id).addEventListener('input', invalidateValidation));
+['fileSM', 'fileDG', 'setHidden', 'setExtFwd']
+  .forEach(id => $(id).addEventListener('change', invalidateValidation));
 </script>
 </body>
 </html>
