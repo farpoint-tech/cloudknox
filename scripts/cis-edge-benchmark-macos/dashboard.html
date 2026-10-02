@@ -256,6 +256,7 @@ function updateStats() {
   const fail = r.filter(x => x.status === 'FAIL').length;
   const notcfg = r.filter(x => x.status === 'NOT CONFIGURED').length;
   const total = r.length;
+  if (total === 0) return;
   const l1 = r.filter(x => x.level === 'L1').length;
   const l2 = r.filter(x => x.level === 'L2').length;
 
@@ -279,6 +280,7 @@ function drawDonut() {
   const fail = r.filter(x => x.status === 'FAIL').length;
   const notcfg = r.filter(x => x.status === 'NOT CONFIGURED').length;
   const total = r.length;
+  if (total === 0) return;
 
   const canvas = document.getElementById('donutCanvas');
   const ctx = canvas.getContext('2d');
@@ -322,6 +324,7 @@ function drawLevelChart() {
   let html = '';
   levels.forEach(lv => {
     const items = r.filter(x => x.level === lv);
+    if (items.length === 0) return;
     const pass = items.filter(x => x.status === 'PASS').length;
     const fail = items.filter(x => x.status === 'FAIL').length;
     const notcfg = items.filter(x => x.status === 'NOT CONFIGURED').length;
@@ -376,8 +379,8 @@ function sortResults() {
   filteredResults.sort((a, b) => {
     let va = a[k], vb = b[k];
     if (k === 'id') {
-      const pa = a.id.split('.').map(Number);
-      const pb = b.id.split('.').map(Number);
+      const pa = String(a.id || '').split('.').map(Number);
+      const pb = String(b.id || '').split('.').map(Number);
       for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
         const d = (pa[i] || 0) - (pb[i] || 0);
         if (d !== 0) return d * dir;
@@ -396,34 +399,40 @@ function renderTable() {
   tbody.innerHTML = filteredResults.map(r => {
     const statusClass = r.status === 'PASS' ? 'badge-pass' : r.status === 'FAIL' ? 'badge-fail' : 'badge-notcfg';
     const levelClass = r.level === 'L1' ? 'badge-l1' : 'badge-l2';
-    const cur = r.currentValue !== null && r.currentValue !== undefined ? r.currentValue : '<em style="color:var(--text2)">not set</em>';
+    const cur = r.currentValue !== null && r.currentValue !== undefined ? esc(String(r.currentValue)) : '<em style="color:var(--text2)">not set</em>';
     const canEnforce = r.status !== 'PASS';
     return `<tr>
       <td style="font-weight:600;white-space:nowrap">${esc(r.id)}</td>
-      <td><span class="badge ${levelClass}">${r.level}</span></td>
+      <td><span class="badge ${levelClass}">${esc(r.level)}</span></td>
       <td title="${esc(r.detail || '')}">${esc(r.title)}</td>
       <td class="val-cell" title="${esc(r.regPath)}">${esc(r.valueName)}</td>
       <td class="val-cell">${cur}</td>
-      <td class="val-cell">${r.recommendedValue !== null ? esc(String(r.recommendedDisplay || r.recommendedValue)) : '-'}</td>
-      <td><span class="badge ${statusClass}">${r.status}</span></td>
-      <td><button class="enforce-btn" ${canEnforce ? '' : 'disabled'} onclick="showEnforce('${esc(r.id)}')">Enforce</button></td>
+      <td class="val-cell">${r.recommendedValue !== null && r.recommendedValue !== undefined ? esc(String(r.recommendedDisplay || r.recommendedValue)) : '-'}</td>
+      <td><span class="badge ${statusClass}">${esc(r.status)}</span></td>
+      <td><button class="enforce-btn" ${canEnforce ? '' : 'disabled'} data-enforce-id="${esc(r.id)}">Enforce</button></td>
     </tr>`;
   }).join('');
 }
 
-function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function esc(s) { if (s == null || s === '') return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 const API_PORT = 18989;
 const API_URL = 'http://localhost:' + API_PORT;
 
 async function enforceViaServer(body) {
   try {
+    const headers = {'Content-Type': 'application/json'};
+    // CSRF capability token embedded into audit_results.js by the audit run.
+    // The server rejects /enforce requests that do not present it.
+    if (window.ENFORCE_TOKEN) headers['X-Enforce-Token'] = window.ENFORCE_TOKEN;
     const r = await fetch(API_URL + '/enforce', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: headers,
       body: JSON.stringify(body)
     });
     if (r.ok) return await r.json();
+    if (r.status === 403) return { status: 'error', message: 'Enforcement token rejected. Re-run Invoke-CISEdgeAudit and reload the dashboard it opens.' };
+    return { status: 'error', message: 'Server returned HTTP ' + r.status + '.' };
   } catch(e) {}
   return null;
 }
@@ -441,7 +450,7 @@ function openModal(title, desc, codeText, actions) {
 function handleEnforceResult(result, title, fallbackCmd) {
   if (result && result.status === 'ok') {
     // Auto-refresh dashboard with updated audit data
-    if (result.updatedData) {
+    if (result.updatedData && Array.isArray(result.updatedData.results)) {
       auditData = result.updatedData;
       render();
     }
@@ -474,12 +483,13 @@ async function showEnforce(id) {
     'Apply CIS recommended setting for <strong>' + esc(r.id) + '</strong>?<br>' +
     '<span style="color:var(--text2)">Registry: ' + esc(r.regPath) + '\\' + esc(r.valueName) + '</span>',
     null,
-    '<button class="btn btn-red" id="confirmEnforceBtn" onclick="doEnforce(\'' + esc(r.id) + '\')">Enforce</button>' +
+    '<button class="btn btn-red" id="confirmEnforceBtn" data-enforce-id="' + esc(r.id) + '">Enforce</button>' +
     '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>');
 }
 
 async function doEnforce(id) {
   const r = auditData.results.find(x => x.id === id);
+  if (!r) { closeModal(); return; }
   const title = 'Enforce: ' + r.id + ' - ' + r.title;
   openModal(title, '<span style="color:var(--notcfg)">Enforcing... check PowerShell window.</span>', null, '');
   const result = await enforceViaServer({checkIds: [id]});
@@ -521,7 +531,7 @@ function exportCSV() {
   const rows = [['ID','Level','Title','Registry Path','Value Name','Reg Type','Current Value','Recommended Value','Recommended Display','Status','Detail']];
   auditData.results.forEach(r => {
     rows.push([r.id, r.level, r.title, r.regPath, r.valueName, r.regType,
-      r.currentValue !== null ? r.currentValue : '', r.recommendedValue !== null ? r.recommendedValue : '',
+      r.currentValue != null ? r.currentValue : '', r.recommendedValue != null ? r.recommendedValue : '',
       r.recommendedDisplay || '', r.status, r.detail || '']);
   });
   const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
@@ -530,9 +540,24 @@ function exportCSV() {
   a.href = URL.createObjectURL(blob);
   a.download = `CIS_Edge_Audit_${auditData.computer || 'report'}_${(auditData.timestamp || '').replace(/[: ]/g, '-')}.csv`;
   a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 100);
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// Event delegation for Enforce buttons. Using data-enforce-id + delegation
+// (instead of inline onclick="showEnforce('id')") avoids an XSS sink: an id
+// containing a single quote would break out of an inline handler because the
+// HTML parser decodes &#39; back to ' before the JS parser runs. dataset reads
+// the value with no JS interpretation, so it is safe for any id.
+document.getElementById('tableBody').addEventListener('click', e => {
+  const btn = e.target.closest('.enforce-btn');
+  if (btn && !btn.disabled && btn.dataset.enforceId != null) showEnforce(btn.dataset.enforceId);
+});
+document.getElementById('modalActions').addEventListener('click', e => {
+  const btn = e.target.closest('[data-enforce-id]');
+  if (btn) doEnforce(btn.dataset.enforceId);
+});
 </script>
 </body>
 </html>

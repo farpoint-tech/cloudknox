@@ -18,6 +18,16 @@
 .PARAMETER ExcelFileName
     Überschreibt den in der config.json hinterlegten Excel-Dateinamen.
 
+.PARAMETER JsonInputFile
+    Liest die Zeilen aus einer JSON-Datei (erzeugt von der Browser-App
+    browser/ExchangeProvisioner.html) statt aus Excel. Das ImportExcel-Modul
+    wird in diesem Modus nicht benötigt (geeignet für Azure Cloud Shell).
+    Nicht kombinierbar mit -ExcelFileName.
+
+.PARAMETER Force
+    Unterdrückt alle interaktiven Rückfragen (Modulinstallation, Validierungsprobleme).
+    Empfohlen für Scheduled Tasks und unbeaufsichtigte Ausführung.
+
 .EXAMPLE
     .\Provisioning.ps1
     Standardlauf mit config.json und interaktivem Login.
@@ -29,16 +39,33 @@
 .EXAMPLE
     .\Provisioning.ps1 -ExcelFileName "Test.xlsx"
     Verwendet eine andere Excel-Datei.
+
+.EXAMPLE
+    .\Provisioning.ps1 -JsonInputFile "provisioning-data.json" -WhatIf
+    Trockenlauf mit validierten Daten aus der Browser-App (z. B. in Azure Cloud Shell).
+
+.EXAMPLE
+    .\Provisioning.ps1 -Force
+    Unbeaufsichtigter Lauf ohne Rückfragen (Scheduled Task / CI-Pipeline).
+
+.NOTES
+    Exitcodes (wichtig für Scheduled Tasks und CI-Pipelines):
+      0 = Lauf vollständig durchgelaufen
+      1 = Lauf abgebrochen (Anmeldung, Konfiguration, fehlendes Modul ...)
+      2 = Lauf beendet, aber mindestens eine Zeile ist fehlgeschlagen
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
     [string]$ConfigFileName = "config.json",
-    [string]$ExcelFileName
+    [string]$ExcelFileName,
+    [string]$JsonInputFile,
+    [switch]$Force
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:SkipConfirmations = $Force.IsPresent
 
 # ============================================================
 # PFADE
@@ -49,6 +76,17 @@ $TimeStamp  = Get-Date -Format "yyyyMMdd_HHmmss"
 $ConfigFile         = Join-Path $ScriptPath $ConfigFileName
 $script:LogFile     = Join-Path $ScriptPath "Provisioning_$TimeStamp.log"
 $script:ResultsFile = Join-Path $ScriptPath "Provisioning_Results_$TimeStamp.csv"
+$script:AclProtectionFailed = $false
+$script:FatalError          = $false
+$script:FailedRowCount      = 0
+
+# Alle bekannten Eingabespalten - identisch zu KNOWN_COLS in
+# browser/ExchangeProvisioner.html. Wird gebraucht, um wirklich leere Zeilen von
+# solchen zu unterscheiden, die nur in den Pflichtfeldern leer sind.
+$script:KnownColumns = @(
+    'Vorname', 'Nachname', 'Zusatz', 'Anzeigename', 'PrimaereAdresse',
+    'Weiterleitung', 'FullAccess', 'SendAs', 'Mitglieder', 'Besitzer', 'HiddenFromGAL'
+)
 
 # ============================================================
 # HILFSFUNKTIONEN
@@ -64,6 +102,13 @@ function Write-Log {
         [string]$Level = 'INFO'
     )
 
+    # Logging darf nie von -WhatIf/-Confirm unterdrückt werden
+    $WhatIfPreference  = $false
+    $ConfirmPreference = 'None'
+
+    # Log-Forging verhindern: Zeilenumbrüche und Steuerzeichen aus Fremddaten entfernen
+    $Message = ($Message -replace "`r`n", ' | ' -replace "`n", ' | ' -replace "`r", ' | ') -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', ''
+
     $ts   = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $line = "$ts [$Level] $Message"
     Add-Content -LiteralPath $script:LogFile -Value $line -Encoding UTF8
@@ -76,12 +121,86 @@ function Write-Log {
     }
 }
 
+# -- Zugriffsschutz für Ausgabedateien (Log/CSV enthalten Berechtigungsstruktur) --
+function Protect-OutputFile {
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Infrastruktur-Schreibvorgänge nie von -WhatIf/-Confirm unterdrücken lassen
+    $WhatIfPreference  = $false
+    $ConfirmPreference = 'None'
+
+    # ACLs nur unter Windows; unter PS7/Linux keine NTFS-Rechte
+    if ($env:OS -ne 'Windows_NT') { return }
+
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) {
+            New-Item -ItemType File -Path $Path -Force | Out-Null
+        }
+
+        $acl = Get-Acl -LiteralPath $Path
+        # Vererbung kappen: nur explizite Berechtigungen gelten
+        $acl.SetAccessRuleProtection($true, $false)
+
+        # Sprachneutrale SIDs: aktueller Benutzer, SYSTEM, lokale Administratoren
+        $identities = @(
+            [System.Security.Principal.WindowsIdentity]::GetCurrent().User,
+            [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18'),
+            [System.Security.Principal.SecurityIdentifier]::new(
+                [System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
+        )
+        foreach ($id in $identities) {
+            $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+                $id,
+                [System.Security.AccessControl.FileSystemRights]::FullControl,
+                [System.Security.AccessControl.AccessControlType]::Allow)
+            $acl.AddAccessRule($rule)
+        }
+
+        Set-Acl -LiteralPath $Path -AclObject $acl
+    }
+    catch {
+        $script:AclProtectionFailed = $true
+        Write-Log "SICHERHEITSHINWEIS: Zugriffsschutz für '$Path' konnte nicht gesetzt werden - Datei erbt Standardberechtigungen: $($_.Exception.Message)" "ERROR"
+    }
+}
+
+# -- Ergebnis-CSV schreiben (immer, auch im WhatIf-Lauf; mit CSV-Injection-Schutz) --
+function Write-ResultsFile {
+    param(
+        [Parameter(Mandatory)][object[]]$Data,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    # Reporting ist nicht Ziel der WhatIf-Simulation - immer schreiben
+    $WhatIfPreference  = $false
+    $ConfirmPreference = 'None'
+
+    # Formel-Injection neutralisieren: führende = + - @ Tab/CR beim Öffnen in Excel entschärfen
+    $safe = foreach ($item in $Data) {
+        $clone = [ordered]@{}
+        foreach ($p in $item.PSObject.Properties) {
+            $v = $p.Value
+            if ($v -is [string] -and $v -match '^[=+\-@\t\r]') { $v = "'" + $v }
+            $clone[$p.Name] = $v
+        }
+        [PSCustomObject]$clone
+    }
+
+    Protect-OutputFile -Path $Path
+    $safe | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8
+}
+
 # -- Benutzerbestätigung --
 function Confirm-Action {
     param(
         [Parameter(Mandatory)]
         [string]$Message
     )
+
+    if ($script:SkipConfirmations) {
+        Write-Log "Automatische Bestätigung (Force-Modus): $Message" "WARN"
+        return $true
+    }
 
     do {
         $answer = Read-Host "$Message [J/N]"
@@ -108,7 +227,10 @@ function Ensure-Module {
 
     Write-Log "Modul fehlt: $ModuleName" "WARN"
 
-    if (-not (Confirm-Action -Message "Das Modul '$ModuleName' ist nicht installiert. Jetzt installieren?")) {
+    if ($script:SkipConfirmations) {
+        Write-Log "Installiere Modul ohne Rückfrage (Force-Modus): $ModuleName" "WARN"
+    }
+    elseif (-not (Confirm-Action -Message "Das Modul '$ModuleName' ist nicht installiert. Jetzt installieren?")) {
         throw "Benötigtes Modul '$ModuleName' wurde nicht installiert. Script wird beendet."
     }
 
@@ -125,10 +247,20 @@ function Get-SafeTrim {
     return ([string]$Value).Trim()
 }
 
+$script:BoolTokenPattern = '^(1|true|yes|ja|j|0|false|no|nein|n)$'
+
+function Test-BoolToken {
+    param([AllowNull()][object]$Value)
+    $text = Get-SafeTrim $Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $true }   # leer = Default, zulässig
+    return ($text.ToLowerInvariant() -match $script:BoolTokenPattern)
+}
+
 function Get-SafeBool {
     param(
         [AllowNull()][object]$Value,
-        [bool]$Default = $false
+        [bool]$Default = $false,
+        [string]$Label
     )
 
     $text = Get-SafeTrim $Value
@@ -137,7 +269,14 @@ function Get-SafeBool {
     switch -Regex ($text.ToLowerInvariant()) {
         '^(1|true|yes|ja|j)$'   { return $true }
         '^(0|false|no|nein|n)$' { return $false }
-        default                 { return $Default }
+        default {
+            # Unlesbare Werte nicht mehr stillschweigend auf den Default fallen
+            # lassen - sonst landet eine Mailbox sichtbar in der GAL, obwohl der
+            # Admin das Gegenteil eingetragen hat.
+            $wo = if ($Label) { " in $Label" } else { '' }
+            Write-Log "Unlesbarer Ja/Nein-Wert$wo : '$text' - verwende Standard '$Default'. Erlaubt: 1/0, true/false, yes/no, ja/nein, j/n." "WARN"
+            return $Default
+        }
     }
 }
 
@@ -148,9 +287,10 @@ function Split-MultiValue {
     )
 
     $text = Get-SafeTrim $Value
-    if ([string]::IsNullOrWhiteSpace($text)) { return @() }
+    # Unäres Komma: Array übersteht die Funktionsgrenze auch bei 0/1 Elementen
+    if ([string]::IsNullOrWhiteSpace($text)) { return ,@() }
 
-    return @(
+    return ,@(
         $text -split [regex]::Escape($Delimiter) |
         ForEach-Object { $_.Trim() } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
@@ -212,6 +352,65 @@ function Convert-ToMailboxAlias {
     return $alias
 }
 
+# -- Sicherer Eigenschaftszugriff auf PSObjects (Strict-Mode-sicher) --
+function Get-RowProp {
+    param(
+        [AllowNull()][object]$Row,
+        [Parameter(Mandatory)][string]$Name,
+        [object]$Default = $null
+    )
+    if ($null -eq $Row) { return $Default }
+    $prop = $Row.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $Default }
+    return $prop.Value
+}
+
+# -- Benannte Excel-Tabelle (ListObject) über EPPlus lesen --
+# Import-Excel kennt keinen -TableName Parameter; benannte Tabellen sind nur
+# über das EPPlus-Objektmodell des ImportExcel-Moduls erreichbar.
+function Get-ExcelTableData {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$TableName
+    )
+
+    $pkg = Open-ExcelPackage -Path $Path
+    try {
+        foreach ($ws in $pkg.Workbook.Worksheets) {
+            $table = $ws.Tables | Where-Object { $_.Name -eq $TableName }
+            if (-not $table) { continue }
+
+            $startRow = $table.Address.Start.Row
+            $endRow   = $table.Address.End.Row
+            $startCol = $table.Address.Start.Column
+            $endCol   = $table.Address.End.Column
+
+            $headers = @()
+            for ($col = $startCol; $col -le $endCol; $col++) {
+                $headers += $ws.Cells[$startRow, $col].Text
+            }
+
+            $rows = @()
+            for ($row = $startRow + 1; $row -le $endRow; $row++) {
+                $obj = [ordered]@{}
+                for ($col = $startCol; $col -le $endCol; $col++) {
+                    $header = $headers[$col - $startCol]
+                    if (-not [string]::IsNullOrWhiteSpace($header)) {
+                        $obj[$header] = $ws.Cells[$row, $col].Text
+                    }
+                }
+                $rows += [PSCustomObject]$obj
+            }
+            return ,$rows
+        }
+
+        throw "Tabelle '$TableName' wurde auf keinem Worksheet gefunden."
+    }
+    finally {
+        Close-ExcelPackage -ExcelPackage $pkg -NoSave
+    }
+}
+
 # -- Empfänger-Existenzprüfung --
 function Get-ExistingRecipient {
     param([Parameter(Mandatory)][string]$Identity)
@@ -238,9 +437,38 @@ function Get-EffectivePrimaryAddress {
     return "$GeneratedAlias@$DefaultDomain"
 }
 
+# Exchange-Online-Regeln für den Alias: Buchstaben, Ziffern und
+# ! # % * + - / = ? ^ _ ~ sowie Punkte, die weder am Anfang/Ende stehen noch
+# doppelt vorkommen dürfen. Umlaute und Leerzeichen sind unzulässig.
+function Assert-ValidAlias {
+    param(
+        [Parameter(Mandatory)][string]$Alias,
+        [Parameter(Mandatory)][string]$Source,
+        [int]$MaxLength = 64
+    )
+
+    if ($Alias.Length -gt $MaxLength) {
+        throw "Alias aus $Source ist länger als die von Exchange erlaubten $MaxLength Zeichen: $Alias"
+    }
+    if ($Alias -notmatch '^[A-Za-z0-9!#%*+\-/=?^_~.]+$') {
+        throw "Alias aus $Source enthält für Exchange unzulässige Zeichen (z. B. Umlaute oder Leerzeichen): $Alias"
+    }
+    if ($Alias -match '^\.|\.$|\.\.') {
+        throw "Alias aus $Source hat einen Punkt am Anfang oder Ende oder zwei Punkte hintereinander: $Alias"
+    }
+}
+
+# Bei generierten Adressen ist der Lokalteil bereits ein normalisierter Alias.
+# Bei einer explizit gesetzten PrimaereAdresse ist er es nicht - ohne Prüfung
+# schlüge erst New-Mailbox zur Laufzeit fehl, mitten im Batch.
 function Get-AliasFromAddress {
-    param([Parameter(Mandatory)][string]$Address)
-    return ($Address.Split('@')[0]).ToLowerInvariant()
+    param(
+        [Parameter(Mandatory)][string]$Address,
+        [string]$Source = 'PrimaereAdresse'
+    )
+    $alias = ($Address.Split('@')[0]).ToLowerInvariant()
+    Assert-ValidAlias -Alias $alias -Source $Source
+    return $alias
 }
 
 # -- Existenzprüfung für mehrere Identitäten --
@@ -307,10 +535,19 @@ function Connect-ExchangeCustom {
 
     $mode = (Get-SafeTrim $Config.authentication.mode).ToLowerInvariant()
 
+    $requiredCmdlets = @(
+        'New-Mailbox', 'Set-Mailbox', 'Get-Mailbox',
+        'New-DistributionGroup', 'Set-DistributionGroup',
+        'Add-DistributionGroupMember', 'Get-DistributionGroup',
+        'Add-MailboxPermission', 'Get-MailboxPermission',
+        'Add-RecipientPermission', 'Get-RecipientPermission',
+        'Get-Recipient'
+    )
+
     if ($mode -eq 'app') {
-        $appId    = Get-SafeTrim $Config.authentication.appId
-        $org      = Get-SafeTrim $Config.authentication.organization
-        $certHash = Get-SafeTrim $Config.authentication.certificateThumbprint
+        $appId    = Get-SafeTrim (Get-RowProp $Config.authentication 'appId')
+        $org      = Get-SafeTrim (Get-RowProp $Config.authentication 'organization')
+        $certHash = Get-SafeTrim (Get-RowProp $Config.authentication 'certificateThumbprint')
 
         if ([string]::IsNullOrWhiteSpace($appId) -or
             [string]::IsNullOrWhiteSpace($org) -or
@@ -323,12 +560,19 @@ function Connect-ExchangeCustom {
             -AppId $appId `
             -CertificateThumbprint $certHash `
             -Organization $org `
+            -CommandName $requiredCmdlets `
+            -ShowBanner:$false `
+            -ErrorAction Stop
+    }
+    elseif ($mode -eq 'interactive' -or [string]::IsNullOrWhiteSpace($mode)) {
+        Write-Log "Authentifizierungsmodus: Interaktiver Web-Login"
+        Connect-ExchangeOnline `
+            -CommandName $requiredCmdlets `
             -ShowBanner:$false `
             -ErrorAction Stop
     }
     else {
-        Write-Log "Authentifizierungsmodus: Interaktiver Web-Login"
-        Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+        throw "Unbekannter Authentifizierungsmodus: '$mode'. Gültige Werte: 'interactive', 'app'."
     }
 }
 
@@ -345,24 +589,31 @@ function Test-RowsBeforeProvisioning {
 
     $delimiter     = if ((Get-SafeTrim $Config.general.delimiter)) { Get-SafeTrim $Config.general.delimiter } else { ';' }
     $defaultDomain = Get-SafeTrim $Config.general.domain
-    $issues        = @()
-    $validRows     = @()
+    $issues           = @()
+    $validRows        = @()
+    $invalidRowCount  = 0
 
     for ($i = 0; $i -lt $Rows.Count; $i++) {
         $Row           = $Rows[$i]
         $rowLabel      = "$Type Zeile $($i + 1)"
         $rowHasIssue   = $false
+        $alias         = ''
 
-        $vorname  = Get-SafeTrim $Row.Vorname
-        $nachname = Get-SafeTrim $Row.Nachname
-        $zusatz   = Get-SafeTrim $Row.Zusatz
+        $vorname  = Get-SafeTrim (Get-RowProp $Row 'Vorname')
+        $nachname = Get-SafeTrim (Get-RowProp $Row 'Nachname')
+        $zusatz   = Get-SafeTrim (Get-RowProp $Row 'Zusatz')
 
-        # Leere Zeile überspringen
-        if ([string]::IsNullOrWhiteSpace($vorname) -and
-            [string]::IsNullOrWhiteSpace($nachname) -and
-            [string]::IsNullOrWhiteSpace($zusatz)) {
-            continue
+        # Nur wirklich komplett leere Zeilen überspringen. Eine Zeile, in der bloß
+        # die drei Pflichtfelder leer sind, aber z. B. Anzeigename oder Weiterleitung
+        # gefüllt ist, ist ein Fehler - sie darf nicht spurlos verschwinden.
+        $rowIsEmpty = $true
+        foreach ($col in $script:KnownColumns) {
+            if (-not [string]::IsNullOrWhiteSpace((Get-SafeTrim (Get-RowProp $Row $col)))) {
+                $rowIsEmpty = $false
+                break
+            }
         }
+        if ($rowIsEmpty) { continue }
 
         # Pflichtfelder
         if ([string]::IsNullOrWhiteSpace($vorname) -or
@@ -372,34 +623,36 @@ function Test-RowsBeforeProvisioning {
             $rowHasIssue = $true
         }
 
+        # Nicht interpretierbare Ja/Nein-Werte als Zeilenfehler melden
+        if (-not (Test-BoolToken (Get-RowProp $Row 'HiddenFromGAL'))) {
+            $issues += "$rowLabel : Spalte 'HiddenFromGAL': '$(Get-SafeTrim (Get-RowProp $Row 'HiddenFromGAL'))' ist kein gültiger Ja/Nein-Wert (erlaubt: 1/0, true/false, yes/no, ja/nein, j/n)."
+            $rowHasIssue = $true
+        }
+
         if (-not $rowHasIssue) {
             try {
                 $generatedAlias = Convert-ToMailboxAlias -Value "$vorname.$nachname.$zusatz"
                 $primaryAddress = Get-EffectivePrimaryAddress `
-                    -ExplicitAddress (Get-SafeTrim $Row.PrimaereAdresse) `
+                    -ExplicitAddress (Get-SafeTrim (Get-RowProp $Row 'PrimaereAdresse')) `
                     -GeneratedAlias $generatedAlias `
                     -DefaultDomain $defaultDomain
-                $alias = Get-AliasFromAddress -Address $primaryAddress
-
-                # Doppelter Alias
-                if (-not $GlobalAliases.Add($alias)) {
-                    $issues += "$rowLabel : Alias '$alias' ist doppelt in der Excel-Datei."
-                    $rowHasIssue = $true
-                }
+                $explicitAddr = Get-SafeTrim (Get-RowProp $Row 'PrimaereAdresse')
+                $aliasSource  = if ($explicitAddr) { "Spalte 'PrimaereAdresse'" } else { 'Vorname/Nachname/Zusatz' }
+                $alias = Get-AliasFromAddress -Address $primaryAddress -Source $aliasSource
 
                 # E-Mail-Validierung für Multivalue-Felder
                 $fieldsToValidate = @()
                 if ($Type -eq 'SharedMailbox') {
                     $fieldsToValidate += @(
-                        @{ Name = 'Weiterleitung'; Values = @(Get-SafeTrim $Row.Weiterleitung) | Where-Object { $_ } },
-                        @{ Name = 'FullAccess';    Values = Split-MultiValue -Value $Row.FullAccess -Delimiter $delimiter },
-                        @{ Name = 'SendAs';        Values = Split-MultiValue -Value $Row.SendAs -Delimiter $delimiter }
+                        @{ Name = 'Weiterleitung'; Values = @(Get-SafeTrim (Get-RowProp $Row 'Weiterleitung')) | Where-Object { $_ } },
+                        @{ Name = 'FullAccess';    Values = Split-MultiValue -Value (Get-RowProp $Row 'FullAccess') -Delimiter $delimiter },
+                        @{ Name = 'SendAs';        Values = Split-MultiValue -Value (Get-RowProp $Row 'SendAs') -Delimiter $delimiter }
                     )
                 }
                 elseif ($Type -eq 'DistributionGroup') {
                     $fieldsToValidate += @(
-                        @{ Name = 'Mitglieder'; Values = Split-MultiValue -Value $Row.Mitglieder -Delimiter $delimiter },
-                        @{ Name = 'Besitzer';   Values = Split-MultiValue -Value $Row.Besitzer -Delimiter $delimiter }
+                        @{ Name = 'Mitglieder'; Values = Split-MultiValue -Value (Get-RowProp $Row 'Mitglieder') -Delimiter $delimiter },
+                        @{ Name = 'Besitzer';   Values = Split-MultiValue -Value (Get-RowProp $Row 'Besitzer') -Delimiter $delimiter }
                     )
                 }
 
@@ -411,6 +664,19 @@ function Test-RowsBeforeProvisioning {
                         }
                     }
                 }
+
+                # Externe Weiterleitung nur wenn per Config freigegeben (Datenabfluss-Prävention)
+                if ($Type -eq 'SharedMailbox') {
+                    $fwd = Get-SafeTrim (Get-RowProp $Row 'Weiterleitung')
+                    if (-not [string]::IsNullOrWhiteSpace($fwd) -and (Test-EmailAddress -EmailAddress $fwd)) {
+                        $allowExternalFwd = Get-SafeBool (Get-RowProp $Config.general 'allowExternalForwarding') $false
+                        $fwdDomain = $fwd.Split('@')[-1].ToLowerInvariant()
+                        if ($fwdDomain -ne $defaultDomain.ToLowerInvariant() -and -not $allowExternalFwd) {
+                            $issues += "$rowLabel : Externe Weiterleitung zu '$fwdDomain' ist nicht erlaubt (general.allowExternalForwarding=false)."
+                            $rowHasIssue = $true
+                        }
+                    }
+                }
             }
             catch {
                 $issues += "$rowLabel : $($_.Exception.Message)"
@@ -418,14 +684,29 @@ function Test-RowsBeforeProvisioning {
             }
         }
 
+        # Alias erst reservieren, wenn die Zeile sonst fehlerfrei ist. Würde er - wie
+        # ursprünglich - schon vor den übrigen Prüfungen belegt, blockierte eine später
+        # verworfene Zeile den Alias ihres gültigen Zwillings, und der Duplikat-Fehler
+        # zeigte auf die falsche Zeile.
+        if (-not $rowHasIssue -and -not [string]::IsNullOrWhiteSpace($alias)) {
+            if (-not $GlobalAliases.Add($alias)) {
+                $issues += "$rowLabel : Alias '$alias' ist doppelt in den Eingabedaten."
+                $rowHasIssue = $true
+            }
+        }
+
         if (-not $rowHasIssue) {
             $validRows += $Row
+        }
+        else {
+            $invalidRowCount++
         }
     }
 
     return [PSCustomObject]@{
-        Issues    = $issues
-        ValidRows = $validRows
+        Issues          = $issues
+        ValidRows       = $validRows
+        InvalidRowCount = $invalidRowCount
     }
 }
 
@@ -433,6 +714,7 @@ function Test-RowsBeforeProvisioning {
 # PROVISIONING-FUNKTIONEN
 # ============================================================
 function New-SharedMailboxFromRow {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory)][object]$Row,
         [Parameter(Mandatory)][pscustomobject]$Config
@@ -443,23 +725,26 @@ function New-SharedMailboxFromRow {
     $displayNamePrefix  = Get-SafeTrim $Config.general.displayNamePrefixSharedMailbox
     $defaultHiddenGAL   = Get-SafeBool $Config.general.defaultHiddenFromGAL $false
 
-    $vorname      = Get-SafeTrim $Row.Vorname
-    $nachname     = Get-SafeTrim $Row.Nachname
-    $zusatz       = Get-SafeTrim $Row.Zusatz
-    $anzeigename  = Get-SafeTrim $Row.Anzeigename
-    $weiterleitung = Get-SafeTrim $Row.Weiterleitung
-    $hiddenGAL    = Get-SafeBool $Row.HiddenFromGAL $defaultHiddenGAL
+    $vorname       = Get-SafeTrim (Get-RowProp $Row 'Vorname')
+    $nachname      = Get-SafeTrim (Get-RowProp $Row 'Nachname')
+    $zusatz        = Get-SafeTrim (Get-RowProp $Row 'Zusatz')
+    $anzeigename   = Get-SafeTrim (Get-RowProp $Row 'Anzeigename')
+    $weiterleitung = Get-SafeTrim (Get-RowProp $Row 'Weiterleitung')
+    $hiddenGAL     = Get-SafeBool (Get-RowProp $Row 'HiddenFromGAL') $defaultHiddenGAL -Label "Spalte 'HiddenFromGAL'"
 
     $generatedAlias = Convert-ToMailboxAlias -Value "$vorname.$nachname.$zusatz"
-    $primaryAddress = Get-EffectivePrimaryAddress -ExplicitAddress $Row.PrimaereAdresse -GeneratedAlias $generatedAlias -DefaultDomain $defaultDomain
+    $primaryAddress = Get-EffectivePrimaryAddress -ExplicitAddress (Get-RowProp $Row 'PrimaereAdresse') -GeneratedAlias $generatedAlias -DefaultDomain $defaultDomain
     $alias          = Get-AliasFromAddress -Address $primaryAddress
 
     if ([string]::IsNullOrWhiteSpace($anzeigename)) {
         $anzeigename = "$displayNamePrefix$vorname.$nachname.$zusatz"
     }
 
-    $fullAccessUsers = Split-MultiValue -Value $Row.FullAccess -Delimiter $delimiter
-    $sendAsUsers     = Split-MultiValue -Value $Row.SendAs -Delimiter $delimiter
+    # Anzeigename: AD-ungültige Zeichen ersetzen
+    $anzeigename = $anzeigename -replace '[/\\:\*\?"<>\|]', '-'
+
+    $fullAccessUsers = Split-MultiValue -Value (Get-RowProp $Row 'FullAccess') -Delimiter $delimiter
+    $sendAsUsers     = Split-MultiValue -Value (Get-RowProp $Row 'SendAs') -Delimiter $delimiter
 
     Assert-RecipientDoesNotExist -PrimaryAddress $primaryAddress -Alias $alias
 
@@ -474,6 +759,10 @@ function New-SharedMailboxFromRow {
             -ErrorAction Stop | Out-Null
 
         if (-not [string]::IsNullOrWhiteSpace($weiterleitung)) {
+            $fwdDomain = $weiterleitung.Split('@')[-1].ToLowerInvariant()
+            if ($fwdDomain -ne $defaultDomain.ToLowerInvariant()) {
+                Write-Log "  SICHERHEITSHINWEIS: Weiterleitung zu externer Domain '$fwdDomain' ($weiterleitung) - bitte prüfen!" "WARN"
+            }
             Set-Mailbox -Identity $alias `
                 -ForwardingSmtpAddress $weiterleitung `
                 -DeliverToMailboxAndForward $true `
@@ -505,17 +794,19 @@ function New-SharedMailboxFromRow {
         }
     }
 
+    # ShouldProcess=false: entweder WhatIf-Lauf oder Benutzer hat bei -Confirm abgelehnt
     return [PSCustomObject]@{
         Type        = "SharedMailbox"
         Alias       = $alias
         PrimarySmtp = $primaryAddress
         DisplayName = $anzeigename
-        Action      = "WhatIf"
+        Action      = $(if ($WhatIfPreference) { "WhatIf" } else { "Declined" })
         Error       = ""
     }
 }
 
 function New-DistributionGroupFromRow {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory)][object]$Row,
         [Parameter(Mandatory)][pscustomobject]$Config
@@ -526,22 +817,25 @@ function New-DistributionGroupFromRow {
     $displayNamePrefix = Get-SafeTrim $Config.general.displayNamePrefixDistributionGroup
     $defaultHiddenGAL  = Get-SafeBool $Config.general.defaultHiddenFromGAL $false
 
-    $vorname     = Get-SafeTrim $Row.Vorname
-    $nachname    = Get-SafeTrim $Row.Nachname
-    $zusatz      = Get-SafeTrim $Row.Zusatz
-    $anzeigename = Get-SafeTrim $Row.Anzeigename
-    $hiddenGAL   = Get-SafeBool $Row.HiddenFromGAL $defaultHiddenGAL
+    $vorname     = Get-SafeTrim (Get-RowProp $Row 'Vorname')
+    $nachname    = Get-SafeTrim (Get-RowProp $Row 'Nachname')
+    $zusatz      = Get-SafeTrim (Get-RowProp $Row 'Zusatz')
+    $anzeigename = Get-SafeTrim (Get-RowProp $Row 'Anzeigename')
+    $hiddenGAL   = Get-SafeBool (Get-RowProp $Row 'HiddenFromGAL') $defaultHiddenGAL -Label "Spalte 'HiddenFromGAL'"
 
     $generatedAlias = Convert-ToMailboxAlias -Value "$vorname.$nachname.$zusatz"
-    $primaryAddress = Get-EffectivePrimaryAddress -ExplicitAddress $Row.PrimaereAdresse -GeneratedAlias $generatedAlias -DefaultDomain $defaultDomain
+    $primaryAddress = Get-EffectivePrimaryAddress -ExplicitAddress (Get-RowProp $Row 'PrimaereAdresse') -GeneratedAlias $generatedAlias -DefaultDomain $defaultDomain
     $alias          = Get-AliasFromAddress -Address $primaryAddress
 
     if ([string]::IsNullOrWhiteSpace($anzeigename)) {
         $anzeigename = "$displayNamePrefix$vorname.$nachname.$zusatz"
     }
 
-    $members = Split-MultiValue -Value $Row.Mitglieder -Delimiter $delimiter
-    $owners  = Split-MultiValue -Value $Row.Besitzer -Delimiter $delimiter
+    # Anzeigename: AD-ungültige Zeichen ersetzen
+    $anzeigename = $anzeigename -replace '[/\\:\*\?"<>\|]', '-'
+
+    $members = Split-MultiValue -Value (Get-RowProp $Row 'Mitglieder') -Delimiter $delimiter
+    $owners  = Split-MultiValue -Value (Get-RowProp $Row 'Besitzer') -Delimiter $delimiter
 
     Assert-RecipientDoesNotExist -PrimaryAddress $primaryAddress -Alias $alias
 
@@ -556,9 +850,9 @@ function New-DistributionGroupFromRow {
             -Type Distribution `
             -ErrorAction Stop | Out-Null
 
-        if ($owners.Count -gt 0) {
+        if (@($owners).Count -gt 0) {
             Set-DistributionGroup -Identity $alias `
-                -ManagedBy $owners `
+                -ManagedBy @($owners) `
                 -BypassSecurityGroupManagerCheck `
                 -ErrorAction Stop
             Write-Log "  Besitzer gesetzt: $($owners -join ', ')"
@@ -589,12 +883,13 @@ function New-DistributionGroupFromRow {
         }
     }
 
+    # ShouldProcess=false: entweder WhatIf-Lauf oder Benutzer hat bei -Confirm abgelehnt
     return [PSCustomObject]@{
         Type        = "DistributionGroup"
         Alias       = $alias
         PrimarySmtp = $primaryAddress
         DisplayName = $anzeigename
-        Action      = "WhatIf"
+        Action      = $(if ($WhatIfPreference) { "WhatIf" } else { "Declined" })
         Error       = ""
     }
 }
@@ -611,16 +906,35 @@ $CreatedCount = 0
 $SkippedCount = 0
 $FailedCount  = 0
 
-Write-Log "Scriptstart"
-Write-Log "Config: $ConfigFile"
-
 try {
-    # -- Module --
+    Protect-OutputFile -Path $script:LogFile
+    Write-Log "Scriptstart"
+    Write-Log "Config: $ConfigFile"
+
+    if ($WhatIfPreference) {
+        Write-Log "╔══════════════════════════════════════════════════════════╗" "WARN"
+        Write-Log "║  WHATIF-MODUS AKTIV - Keine Objekte werden erstellt/     ║" "WARN"
+        Write-Log "║  geändert. Nur Simulation.                               ║" "WARN"
+        Write-Log "╚══════════════════════════════════════════════════════════╝" "WARN"
+    }
+    if ($script:SkipConfirmations) {
+        Write-Log "Force-Modus aktiv: Alle Rückfragen werden automatisch bestätigt." "WARN"
+    }
+
+    # -- Eingabemodus bestimmen --
+    $useJsonInput = ($PSBoundParameters.ContainsKey('JsonInputFile') -and -not [string]::IsNullOrWhiteSpace($JsonInputFile))
+    if ($useJsonInput -and $PSBoundParameters.ContainsKey('ExcelFileName') -and -not [string]::IsNullOrWhiteSpace($ExcelFileName)) {
+        throw "-JsonInputFile und -ExcelFileName können nicht kombiniert werden."
+    }
+
+    # -- Module (ImportExcel nur im Excel-Modus nötig) --
     Ensure-Module -ModuleName "ExchangeOnlineManagement"
-    Ensure-Module -ModuleName "ImportExcel"
+    if (-not $useJsonInput) {
+        Ensure-Module -ModuleName "ImportExcel"
+        Import-Module ImportExcel -ErrorAction Stop
+    }
 
     Import-Module ExchangeOnlineManagement -ErrorAction Stop
-    Import-Module ImportExcel -ErrorAction Stop
     Write-Log "Module erfolgreich geladen" "SUCCESS"
 
     # -- Config --
@@ -629,30 +943,88 @@ try {
     }
     $Config = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
-    # -- Excel-Datei bestimmen --
-    if ($PSBoundParameters.ContainsKey('ExcelFileName') -and -not [string]::IsNullOrWhiteSpace($ExcelFileName)) {
-        $ExcelFile = Join-Path $ScriptPath $ExcelFileName
+    # -- Config-Struktur prüfen --
+    $requiredConfigKeys = @(
+        'general.domain', 'general.excelFile', 'general.delimiter',
+        'general.displayNamePrefixSharedMailbox', 'general.displayNamePrefixDistributionGroup',
+        'general.defaultHiddenFromGAL', 'authentication.mode'
+    )
+    foreach ($keyPath in $requiredConfigKeys) {
+        $parts  = $keyPath -split '\.'
+        $obj    = $Config
+        $found  = $true
+        foreach ($part in $parts) {
+            if ($null -eq $obj) { $found = $false; break }
+            $p = $obj.PSObject.Properties[$part]
+            if ($null -eq $p) { $found = $false; break }
+            $obj = $p.Value
+        }
+        if (-not $found) {
+            throw "Pflichtfeld '$keyPath' fehlt in config.json."
+        }
+    }
+
+    # -- Domain-Pflichtfeld prüfen --
+    $defaultDomain = Get-SafeTrim $Config.general.domain
+    if ([string]::IsNullOrWhiteSpace($defaultDomain)) {
+        throw "general.domain in config.json ist leer. Eine Standarddomain ist erforderlich."
+    }
+
+    if ($useJsonInput) {
+        # -- JSON-Eingabe (Browser-App) --
+        $jsonPath = if ([System.IO.Path]::IsPathRooted($JsonInputFile)) { $JsonInputFile } else { Join-Path $ScriptPath $JsonInputFile }
+        Write-Log "Eingabemodus: JSON-Datei (Browser-App): $jsonPath"
+
+        if (-not (Test-Path -LiteralPath $jsonPath)) {
+            throw "JSON-Datei nicht gefunden: $jsonPath"
+        }
+
+        $jsonData = Get-Content -LiteralPath $jsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $smRows = @(@(Get-RowProp $jsonData 'sharedMailboxes')    | Where-Object { $null -ne $_ })
+        $dgRows = @(@(Get-RowProp $jsonData 'distributionGroups') | Where-Object { $null -ne $_ })
+
+        if ($smRows.Count -eq 0 -and $dgRows.Count -eq 0) {
+            throw "Keine Daten in der JSON-Datei. Erwartet werden die Arrays 'sharedMailboxes' und/oder 'distributionGroups'."
+        }
     }
     else {
-        $excelFromConfig = Get-SafeTrim $Config.general.excelFile
-        if ([string]::IsNullOrWhiteSpace($excelFromConfig)) {
-            throw "general.excelFile fehlt in config.json und kein -ExcelFileName angegeben."
+        # -- Excel-Datei bestimmen --
+        if ($PSBoundParameters.ContainsKey('ExcelFileName') -and -not [string]::IsNullOrWhiteSpace($ExcelFileName)) {
+            $ExcelFile = Join-Path $ScriptPath $ExcelFileName
         }
-        $ExcelFile = Join-Path $ScriptPath $excelFromConfig
-    }
+        else {
+            $excelFromConfig = Get-SafeTrim $Config.general.excelFile
+            if ([string]::IsNullOrWhiteSpace($excelFromConfig)) {
+                throw "general.excelFile fehlt in config.json und kein -ExcelFileName angegeben."
+            }
+            $ExcelFile = Join-Path $ScriptPath $excelFromConfig
+        }
 
-    Write-Log "Excel-Datei: $ExcelFile"
+        Write-Log "Excel-Datei: $ExcelFile"
 
-    if (-not (Test-Path -LiteralPath $ExcelFile)) {
-        throw "Excel-Datei nicht gefunden: $ExcelFile"
-    }
+        if (-not (Test-Path -LiteralPath $ExcelFile)) {
+            throw "Excel-Datei nicht gefunden: $ExcelFile"
+        }
 
-    # -- Tabellen aus Excel lesen --
-    $smRows = @(Import-Excel -Path $ExcelFile -TableName "SharedMailboxes" -ErrorAction SilentlyContinue)
-    $dgRows = @(Import-Excel -Path $ExcelFile -TableName "DistributionGroups" -ErrorAction SilentlyContinue)
+        # -- Tabellen aus Excel lesen (benannte ListObjects über EPPlus) --
+        try {
+            $smRows = @(Get-ExcelTableData -Path $ExcelFile -TableName "SharedMailboxes")
+        }
+        catch {
+            Write-Log "Tabelle 'SharedMailboxes' nicht gefunden oder nicht lesbar: $($_.Exception.Message)" "WARN"
+            $smRows = @()
+        }
+        try {
+            $dgRows = @(Get-ExcelTableData -Path $ExcelFile -TableName "DistributionGroups")
+        }
+        catch {
+            Write-Log "Tabelle 'DistributionGroups' nicht gefunden oder nicht lesbar: $($_.Exception.Message)" "WARN"
+            $dgRows = @()
+        }
 
-    if ($smRows.Count -eq 0 -and $dgRows.Count -eq 0) {
-        throw "Keine Daten gefunden. Stelle sicher, dass die Excel-Tabellen 'SharedMailboxes' und/oder 'DistributionGroups' existieren."
+        if ($smRows.Count -eq 0 -and $dgRows.Count -eq 0) {
+            throw "Keine Daten gefunden. Stelle sicher, dass die Excel-Tabellen 'SharedMailboxes' und/oder 'DistributionGroups' existieren."
+        }
     }
 
     Write-Log "Shared Mailbox Zeilen: $($smRows.Count)" "INFO"
@@ -678,7 +1050,7 @@ try {
             Write-Log $issue "ERROR"
         }
 
-        $SkippedCount = $allIssues.Count
+        $SkippedCount = $smValidation.InvalidRowCount + $dgValidation.InvalidRowCount
 
         if ($totalValid -eq 0) {
             throw "Keine gültigen Zeilen verfügbar. Abbruch."
@@ -707,19 +1079,35 @@ try {
                 $result = New-SharedMailboxFromRow -Row $row -Config $Config
                 if ($null -ne $result) {
                     $Results.Add($result)
-                    $CreatedCount++
+                    if ($result.Action -eq 'Created') { $CreatedCount++ }
                 }
             }
             catch {
                 $errMsg = $_.Exception.Message
                 Write-Log "Fehler bei Shared Mailbox (Zeile $TotalCount): $errMsg" "ERROR"
                 $FailedCount++
+                $rawAlias = "$(Get-RowProp $row 'Vorname').$(Get-RowProp $row 'Nachname').$(Get-RowProp $row 'Zusatz')"
+                $partialAction = "Failed"
+                if ($errMsg -notmatch "existiert bereits") {
+                    # Lookup mit der tatsächlich verwendeten Identität (explizite Adresse oder normalisierter Alias)
+                    $lookupId = Get-SafeTrim (Get-RowProp $row 'PrimaereAdresse')
+                    if ([string]::IsNullOrWhiteSpace($lookupId)) {
+                        try { $lookupId = Convert-ToMailboxAlias -Value $rawAlias } catch { $lookupId = '' }
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($lookupId)) {
+                        $partialCheck = Get-Mailbox -Identity $lookupId -ErrorAction SilentlyContinue
+                        if ($partialCheck) {
+                            Write-Log "  TEILFEHLER: Mailbox '$lookupId' wurde angelegt aber nicht vollständig konfiguriert. Manuelle Prüfung und ggf. Bereinigung erforderlich." "WARN"
+                            $partialAction = "PartiallyCreated"
+                        }
+                    }
+                }
                 $Results.Add([PSCustomObject]@{
                     Type        = "SharedMailbox"
-                    Alias       = Get-SafeTrim $row.Vorname
-                    PrimarySmtp = ""
-                    DisplayName = Get-SafeTrim $row.Anzeigename
-                    Action      = "Failed"
+                    Alias       = $rawAlias
+                    PrimarySmtp = Get-SafeTrim (Get-RowProp $row 'PrimaereAdresse')
+                    DisplayName = Get-SafeTrim (Get-RowProp $row 'Anzeigename')
+                    Action      = $partialAction
                     Error       = $errMsg
                 })
             }
@@ -735,19 +1123,35 @@ try {
                 $result = New-DistributionGroupFromRow -Row $row -Config $Config
                 if ($null -ne $result) {
                     $Results.Add($result)
-                    $CreatedCount++
+                    if ($result.Action -eq 'Created') { $CreatedCount++ }
                 }
             }
             catch {
                 $errMsg = $_.Exception.Message
                 Write-Log "Fehler bei Distribution Group (Zeile $TotalCount): $errMsg" "ERROR"
                 $FailedCount++
+                $rawAlias = "$(Get-RowProp $row 'Vorname').$(Get-RowProp $row 'Nachname').$(Get-RowProp $row 'Zusatz')"
+                $partialAction = "Failed"
+                if ($errMsg -notmatch "existiert bereits") {
+                    # Lookup mit der tatsächlich verwendeten Identität (explizite Adresse oder normalisierter Alias)
+                    $lookupId = Get-SafeTrim (Get-RowProp $row 'PrimaereAdresse')
+                    if ([string]::IsNullOrWhiteSpace($lookupId)) {
+                        try { $lookupId = Convert-ToMailboxAlias -Value $rawAlias } catch { $lookupId = '' }
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($lookupId)) {
+                        $partialCheck = Get-DistributionGroup -Identity $lookupId -ErrorAction SilentlyContinue
+                        if ($partialCheck) {
+                            Write-Log "  TEILFEHLER: Distribution Group '$lookupId' wurde angelegt aber nicht vollständig konfiguriert. Manuelle Prüfung und ggf. Bereinigung erforderlich." "WARN"
+                            $partialAction = "PartiallyCreated"
+                        }
+                    }
+                }
                 $Results.Add([PSCustomObject]@{
                     Type        = "DistributionGroup"
-                    Alias       = Get-SafeTrim $row.Vorname
-                    PrimarySmtp = ""
-                    DisplayName = Get-SafeTrim $row.Anzeigename
-                    Action      = "Failed"
+                    Alias       = $rawAlias
+                    PrimarySmtp = Get-SafeTrim (Get-RowProp $row 'PrimaereAdresse')
+                    DisplayName = Get-SafeTrim (Get-RowProp $row 'Anzeigename')
+                    Action      = $partialAction
                     Error       = $errMsg
                 })
             }
@@ -761,11 +1165,16 @@ try {
     Write-Log "  Erstellt:     $CreatedCount" "SUCCESS"
     Write-Log "  Übersprungen: $SkippedCount" "WARN"
     Write-Log "  Fehler:       $FailedCount" $(if ($FailedCount -gt 0) { "ERROR" } else { "INFO" })
+    $script:FailedRowCount = $FailedCount
     Write-Log "============================================================"
 
     if ($Results.Count -gt 0) {
-        $Results | Export-Csv -LiteralPath $script:ResultsFile -NoTypeInformation -Encoding UTF8
+        Write-ResultsFile -Data $Results.ToArray() -Path $script:ResultsFile
         Write-Log "Ergebnis-CSV: $script:ResultsFile" "SUCCESS"
+    }
+
+    if ($script:AclProtectionFailed) {
+        Write-Log "SICHERHEITSHINWEIS: Mindestens eine Ausgabedatei konnte nicht ACL-geschützt werden. Log/CSV enthalten Berechtigungsdaten - bitte manuell absichern." "WARN"
     }
 
     Write-Log "Logdatei: $script:LogFile"
@@ -773,6 +1182,7 @@ try {
 catch {
     Write-Log "Unerwarteter Fehler: $($_.Exception.Message)" "ERROR"
     Write-Log $_.ScriptStackTrace "ERROR"
+    $script:FatalError = $true
 }
 finally {
     if ($ConnectedToExchange) {
@@ -786,3 +1196,12 @@ finally {
     }
     Write-Log "Scriptende"
 }
+
+# Exitcode setzen. Ohne das endete das Script auch nach einem Abbruch mit 0 und
+# ein Scheduled Task oder eine CI-Pipeline meldete den Fehlschlag als Erfolg.
+#   0 = alles durchgelaufen
+#   1 = Lauf abgebrochen (Login, Config, Modul ...)
+#   2 = Lauf beendet, aber mindestens eine Zeile fehlgeschlagen
+if ($script:FatalError) { exit 1 }
+if ($script:FailedRowCount -gt 0) { exit 2 }
+exit 0

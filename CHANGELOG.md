@@ -7,6 +7,32 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [2.4.3] - 2026-04-09 CET
+
+### Security
+- **Export-EnterpriseAppOwnerList.ps1 (v1.5)**: Excel formula-injection protection – tenant-controlled values (DisplayName, Tags, Category, Owners) with a leading `=` are neutralized before export, since Export-Excel would otherwise write them as executable formulas into a file the script auto-opens.
+- **Import-EnterpriseAppOwners.ps1 (v1.2)**: AppObjectId from the department-filled Excel is now validated as a plain GUID before being used in the Graph request URI (prevents endpoint redirection via tampered rows).
+
+### Fixed
+- **All list-based scripts (Export v1.5, Assign-OwnerByCategory v1.2, Assign-EnterpriseAppOwners v1.2)**: Now target only real Enterprise Apps – `servicePrincipalType eq 'Application'` filter plus exclusion of Microsoft first-party apps (well-known Microsoft tenant IDs). Managed identities and ~2000+ built-in Microsoft SPs are no longer processed.
+- **Export-EnterpriseAppOwnerList.ps1 (v1.5)**: Service-principal owners are now resolved via the directory object's properties instead of Get-MgUser – apps owned only by a service principal are no longer mislabeled as "No Owner". File open now works on macOS (`open` instead of executing the .xlsx).
+- **Import-EnterpriseAppOwners.ps1 (v1.2)**: Excel cell values are cast to `[string]` before `.Trim()` – numeric cells no longer crash the import loop.
+
+## [2.4.2] - 2026-04-09 CET
+
+### Security
+- **Enterprise Apps Owner Assignment**: OData filter injection fixed in all three mutating scripts – UPN inputs (Excel cells, interactive prompts, configuration) are now quote-escaped before being interpolated into Graph API filters. UPNs containing apostrophes (e.g. o'connor@domain.com) no longer break queries or allow filter manipulation.
+
+### Fixed
+- **Import-EnterpriseAppOwners.ps1 (v1.1)**: Critical fail-open behavior fixed – previously ANY `-Mode` value other than exactly "WhatIf" executed live changes (e.g. a typo like `-Mode Dry` mutated the tenant). Now only the exact value "Apply" performs changes, enforced by `[ValidateSet]`, and the dry-run check is inverted to fail-safe (`$Mode -ne "Apply"`). Also added `Test-Path` validation on `-ExcelPath` before the Graph login.
+- **Assign-OwnerByCategory.ps1 (v1.1)**: Negative-index bug fixed – entering `0` as part of a multi-selection (e.g. `0,2`) resolved to `$Categories[-1]` (PowerShell's last-element accessor) and silently mutated the wrong category. Selection input is now validated (numeric only, in range). Added a confirmation prompt before any change and summary counters (assigned/skipped/errors).
+- **Export-EnterpriseAppOwnerList.ps1 (v1.4)**: Performance – owners were fetched twice per app (category summary + export build); now cached with a single Graph call per app. Replaced O(n²) array `+=` with `Generic.List` for large tenants.
+
+### Technical Details
+- **Changed Scripts**: 4 (Export v1.4, Import v1.1, Assign-OwnerByCategory v1.1, Assign-EnterpriseAppOwners v1.1)
+- **Origin**: Full code review (security, resilience, effectiveness) with adversarial verification of all findings
+- **Branch**: claude/enterprise-apps-owner-assignment-YTrKR
+
 ## [2.4.1] - 2026-04-09 CET
 
 ### Fixed / Improved

@@ -1,7 +1,7 @@
 # Exchange Mailbox Provisioner
 
 **Pfad:** `scripts/exchange-mailbox-provisioner/Provisioning.ps1`
-**Version:** 4.0 | **Autor:** Farpoint Technologies
+**Version:** 4.1 | **Autor:** Farpoint Technologies
 **Sprache:** Deutsch
 
 ## Was macht dieses Script?
@@ -67,7 +67,8 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
     "delimiter": ";",
     "displayNamePrefixSharedMailbox": "SM - ",
     "displayNamePrefixDistributionGroup": "DG - ",
-    "defaultHiddenFromGAL": false
+    "defaultHiddenFromGAL": false,
+    "allowExternalForwarding": false
   },
   "authentication": {
     "mode": "interactive",
@@ -88,6 +89,7 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
 | `general.displayNamePrefixSharedMailbox` | Präfix für Shared-Mailbox-Anzeigenamen |
 | `general.displayNamePrefixDistributionGroup` | Präfix für Verteilergruppen-Anzeigenamen |
 | `general.defaultHiddenFromGAL` | Standardwert für `HiddenFromGAL` |
+| `general.allowExternalForwarding` | `true` erlaubt Weiterleitungen zu fremden Domains; Standard `false` = externe Ziele werden bei der Validierung abgewiesen |
 | `authentication.mode` | `interactive` (Web-Login) oder `app` (App-Registrierung) |
 | `authentication.appId` | App-ID (nur bei `mode=app`) |
 | `authentication.organization` | Tenant (z. B. `contoso.onmicrosoft.com`, nur bei `mode=app`) |
@@ -99,8 +101,10 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
 |-----------|-----|-------------|----------|
 | `-ConfigFileName` | String | Name der Konfigurationsdatei | `config.json` |
 | `-ExcelFileName` | String | Überschreibt den Excel-Dateinamen aus der Config | – |
+| `-JsonInputFile` | String | Liest Zeilen aus einer JSON-Datei der Browser-App statt aus Excel (ImportExcel entfällt; ideal für Azure Cloud Shell) | – |
 | `-WhatIf` | Switch | Zeigt geplante Aktionen ohne Ausführung | – |
 | `-Confirm` | Switch | Fordert bei jeder Aktion Bestätigung | – |
+| `-Force` | Switch | Unterdrückt alle interaktiven Rückfragen (für Scheduled Tasks / unbeaufsichtigte Läufe) | – |
 
 ## Verwendungsbeispiele
 
@@ -116,7 +120,45 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
 
 # Andere Konfigurationsdatei verwenden
 .\Provisioning.ps1 -ConfigFileName "config-prod.json"
+
+# Unbeaufsichtigter Lauf ohne Rückfragen (Scheduled Task / CI-Pipeline)
+.\Provisioning.ps1 -Force
+
+# Daten aus der Browser-App (JSON) statt Excel - z. B. in Azure Cloud Shell
+./Provisioning.ps1 -JsonInputFile provisioning-data.json -WhatIf
+./Provisioning.ps1 -JsonInputFile provisioning-data.json
 ```
+
+## Browser-Option (Zero-Storage)
+
+`browser/ExchangeProvisioner.html` ist eine **einzelne, vollständig offline-fähige HTML-Datei** - einfach per Doppelklick im Browser öffnen, kein Server, keine Installation.
+
+### Sicherheitsmodell
+
+| Garantie | Umsetzung |
+|----------|-----------|
+| Daten verlassen den Browser nicht | Content-Security-Policy mit `connect-src 'none'` / `default-src 'none'` - jeder Netzwerkaufruf wird vom Browser selbst blockiert (nachprüfbar: DevTools → Netzwerk-Tab bleibt leer) |
+| Keine Speicherung | Kein localStorage, keine sessionStorage, keine IndexedDB, keine Cookies - alle Daten leben nur im RAM des Tabs |
+| Tab zu = Daten weg | Zustand wird zusätzlich bei `beforeunload` aktiv gelöscht; „Alle Daten löschen"-Button jederzeit verfügbar |
+| Kein Tracking | `referrer: no-referrer`, keine externen Ressourcen, keine Fonts/CDNs |
+
+### Ablauf: komplett im Browser, ohne dass etwas gespeichert bleibt
+
+1. **`ExchangeProvisioner.html` öffnen** (lokal, Doppelklick) - Daten per CSV-Upload oder direkt aus Excel hineinkopieren (Strg+C/Strg+V)
+2. **Validieren & Vorschau** - identische Regeln wie das PowerShell-Script (Aliase, E-Mails, Duplikate, Weiterleitungs-Policy)
+3. **JSON exportieren** - `provisioning-data.json` enthält nur die gültigen Zeilen
+4. **[shell.azure.com](https://shell.azure.com) öffnen** → PowerShell → **„Kein Speicherkonto erforderlich" (ephemeral)** → einmal einloggen (MFA)
+5. **3 Dateien hochladen** (`Provisioning.ps1`, `config.json`, `provisioning-data.json`) und ausführen:
+   `./Provisioning.ps1 -JsonInputFile provisioning-data.json -WhatIf` → dann scharf ohne `-WhatIf`
+6. **Browser schließen** - der ephemere Cloud-Shell-Container wird vernichtet, nichts bleibt gespeichert
+
+Das ExchangeOnlineManagement-Modul ist in Cloud Shell vorinstalliert; ImportExcel wird im JSON-Modus nicht benötigt. Das Script validiert alle Zeilen serverseitig erneut (Defense in Depth).
+
+**Zur CSV-Kodierung:** Deutsches Excel exportiert CSV standardmäßig als ANSI/Windows-1252, nicht als UTF-8. Die Browser-App erkennt das automatisch, liest die Datei entsprechend und weist mit einer Meldung darauf hin - die Umlaute sollten trotzdem kurz in der Vorschau kontrolliert werden. Wer auf Nummer sicher gehen will, exportiert aus Excel als „CSV UTF-8" oder kopiert die Tabelle direkt per Strg+C/Strg+V in die Seite.
+
+### Warum kein Direkt-Provisioning aus der HTML-Seite?
+
+Microsoft Graph kann **keine Shared Mailboxes und keine klassischen Verteilergruppen** anlegen, und die Exchange-Admin-REST-API ist für Browser-Aufrufe gesperrt (kein CORS, nicht dokumentiert). Azure Cloud Shell ist der von Microsoft unterstützte Weg, der trotzdem vollständig im Browser bleibt - mit demselben Zero-Storage-Ergebnis.
 
 ## Benötigte Module
 
@@ -135,6 +177,28 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
 | `Provisioning_<Zeitstempel>.log` | Vollständiges Ausführungslog |
 | `Provisioning_Results_<Zeitstempel>.csv` | Ergebnisübersicht aller verarbeiteten Zeilen |
 
+Beide Dateien werden unter Windows mit **restriktiven NTFS-ACLs** angelegt (nur ausführender Benutzer, SYSTEM und lokale Administratoren), da sie die Berechtigungsstruktur und Weiterleitungsadressen enthalten.
+
+### Werte der CSV-Spalte `Action`
+
+| Wert | Bedeutung |
+|------|-----------|
+| `Created` | Objekt vollständig erstellt und konfiguriert |
+| `WhatIf` | Trockenlauf - Objekt wurde nicht erstellt |
+| `Failed` | Erstellung fehlgeschlagen, kein Objekt vorhanden |
+| `Declined` | Benutzer hat die Aktion bei einer `-Confirm`-Abfrage abgelehnt |
+| `PartiallyCreated` | **Achtung:** Objekt wurde angelegt, aber die Konfiguration (Weiterleitung, Berechtigungen, Mitglieder) ist unvollständig - manuelle Prüfung erforderlich |
+
+### Exitcodes
+
+Für Scheduled Tasks und CI-Pipelines relevant - das Script signalisiert das Ergebnis über den Exitcode:
+
+| Code | Bedeutung |
+|------|-----------|
+| `0` | Lauf vollständig durchgelaufen |
+| `1` | Lauf abgebrochen (Anmeldung, Konfiguration, fehlendes Modul ...) |
+| `2` | Lauf beendet, aber mindestens eine Zeile ist fehlgeschlagen |
+
 ## Funktionsmerkmale
 
 - **Automatische Alias-Normalisierung** - Umlaute (ä/ö/ü/ß) werden ersetzt, Sonderzeichen entfernt
@@ -143,4 +207,17 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
 - **Existenzprüfung** - Vor dem Anlegen wird geprüft, ob Alias oder SMTP-Adresse bereits belegt sind
 - **Idempotente Berechtigungen** - Bereits gesetzte FullAccess-/SendAs-Berechtigungen werden übersprungen
 - **Fehlertoleranz** - Fehlschläge einzelner Zeilen unterbrechen nicht die gesamte Ausführung
-- **-WhatIf Unterstützung** - Vollständige Trockenlauf-Funktionalität
+- **Teilfehler-Erkennung** - Unvollständig konfigurierte Objekte werden als `PartiallyCreated` markiert
+- **-WhatIf Unterstützung** - Vollständige Trockenlauf-Funktionalität mit Log-Banner
+- **Anzeigename-Sanitierung** - AD-ungültige Zeichen (`/ \ : * ? " < > |`) werden automatisch ersetzt
+
+## Sicherheitsmerkmale (Blue Team)
+
+- **Least Privilege Session** - Die Exchange-Verbindung lädt via `-CommandName` nur die 12 tatsächlich benötigten Cmdlets, nicht das gesamte EXO-Modul
+- **Externe Weiterleitungen standardmäßig blockiert** - Weiterleitungen zu fremden Domains werden bei der Validierung abgewiesen, solange `general.allowExternalForwarding` nicht explizit auf `true` steht; erlaubte Fälle erzeugen zusätzlich einen `SICHERHEITSHINWEIS` im Log (Datenabfluss-Prävention)
+- **CSV-Injection-Schutz** - Zellwerte mit führenden Formelzeichen (`= + - @` Tab/CR) werden im Ergebnis-CSV neutralisiert, damit beim Öffnen in Excel kein Code ausgeführt wird
+- **Log-Sanitierung** - Zeilenumbrüche und Steuerzeichen aus Excel-Zellen werden entfernt, bevor sie ins Log geschrieben werden (kein Log-Forging)
+- **Geschützte Ausgabedateien** - Log und CSV erhalten restriktive ACLs (sprachneutral über SIDs); schlägt der ACL-Schutz fehl, erscheint ein deutlicher `SICHERHEITSHINWEIS` in Log und Zusammenfassung
+- **Kein Silent Fallback** - Unbekannte Auth-Modi brechen ab statt still interaktiv zu verbinden
+- **Config-Validierung** - Fehlende Pflichtfelder in der config.json werden beim Start mit klarer Meldung abgewiesen
+- **WhatIf-sichere Berichte** - Log und Ergebnis-CSV werden auch im `-WhatIf`-Lauf geschrieben (die Simulation betrifft nur Exchange-Objekte, nicht das Reporting)

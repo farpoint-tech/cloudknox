@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   AuthenticatedTemplate,
   UnauthenticatedTemplate,
@@ -63,14 +64,22 @@ export default function Home() {
             Read-only Entra ID / IAM posture check · runs entirely in your browser
           </p>
         </div>
-        <AuthenticatedTemplate>
-          <button
-            onClick={signOut}
+        <div className="flex items-center gap-2">
+          <Link
+            href="/owners"
             className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
           >
-            Sign out
-          </button>
-        </AuthenticatedTemplate>
+            App Owners
+          </Link>
+          <AuthenticatedTemplate>
+            <button
+              onClick={signOut}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+            >
+              Sign out
+            </button>
+          </AuthenticatedTemplate>
+        </div>
       </header>
 
       {!configured && (
