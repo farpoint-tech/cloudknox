@@ -36,6 +36,11 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "DevicePolicyRemovalTool",
+    "Test_API_calls",
+    "m365-assessment",
+    "node_modules",
+    "scripts",
+    "skills"
   ]
 }
