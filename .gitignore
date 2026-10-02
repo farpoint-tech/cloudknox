@@ -1,0 +1,6 @@
+# Next.js build output and dependencies of the website at the repository root
+.next/
+out/
+node_modules/
+*.tsbuildinfo
+.vercel/
