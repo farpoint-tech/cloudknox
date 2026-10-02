@@ -27,12 +27,14 @@
     - Microsoft.Graph
     - ImportExcel
 
-    Version: 1.4
+    Version: 1.5
     Author: Farpoint Technologies
     Created:  2026-04-08
     Modified: 2026-04-09 - v1.3: Module checks, ConditionalText, auto export path
                            v1.4: Owner cache (single Graph call per app), List
                                  instead of array += for large tenants
+                           v1.5: Excel formula-injection protection, Enterprise-App
+                                 filter, SP owners resolved correctly, macOS file open
 #>
 
 # ============================================================
@@ -75,7 +77,11 @@ Import-Module ImportExcel
 Connect-MgGraph -Scopes "Application.Read.All", "Directory.Read.All"
 
 Write-Host "`n🔍 Fetching all Enterprise Applications..." -ForegroundColor Cyan
-$AllSPs = Get-MgServicePrincipal -All -Property "Id,DisplayName,AppId,ServicePrincipalType,Tags"
+# Only real Enterprise Apps: exclude managed identities/legacy SPs and Microsoft first-party apps
+$MicrosoftTenantIds = @("f8cdef31-a31e-4b4a-93e4-5f571e91255a", "72f988bf-86f1-41af-91ab-2d7cd011db47")
+$AllSPs = Get-MgServicePrincipal -All -Filter "servicePrincipalType eq 'Application'" `
+    -Property "Id,DisplayName,AppId,ServicePrincipalType,Tags,AppOwnerOrganizationId" |
+    Where-Object { "$($_.AppOwnerOrganizationId)" -notin $MicrosoftTenantIds }
 
 # --- RESOLVE OWNERS (one Graph call per app, reused for summary and export) ---
 Write-Host "🔍 Resolving owners for $($AllSPs.Count) apps..." -ForegroundColor Cyan
@@ -116,13 +122,22 @@ Write-Host ("=" * 55)
 
 # --- BUILD EXPORT DATA ---
 Write-Host "`n📤 Building export list..." -ForegroundColor Cyan
+
+# Neutralize a leading '=' so tenant-controlled names cannot become Excel formulas
+function Protect-CellValue([string]$Value) {
+    if ($Value -and $Value.StartsWith("=")) { "'" + $Value } else { $Value }
+}
+
 $ExportData = [System.Collections.Generic.List[object]]::new()
 
 foreach ($SP in $AllSPs) {
     $Owners = $OwnerCache[$SP.Id]
     $OwnerUPNs = if ($Owners) {
         ($Owners | ForEach-Object {
-            (Get-MgUser -UserId $_.Id -ErrorAction SilentlyContinue).UserPrincipalName
+            # User owners have a UPN; service-principal owners are shown by display name
+            if ($_.AdditionalProperties.userPrincipalName) { $_.AdditionalProperties.userPrincipalName }
+            elseif ($_.AdditionalProperties.displayName) { "$($_.AdditionalProperties.displayName) (ServicePrincipal)" }
+            else { $_.Id }
         }) -join "; "
     } else { "" }
 
@@ -132,12 +147,12 @@ foreach ($SP in $AllSPs) {
 
     $ExportData.Add([PSCustomObject]@{
         AppObjectId            = $SP.Id
-        DisplayName            = $SP.DisplayName
+        DisplayName            = Protect-CellValue $SP.DisplayName
         "AppId (Client ID)"    = $SP.AppId
         ServicePrincipalType   = $SP.ServicePrincipalType
-        Tags                   = $TagString
-        "Category (Tag)"       = $Category
-        "Current Owner(s)"     = $OwnerUPNs
+        Tags                   = Protect-CellValue $TagString
+        "Category (Tag)"       = Protect-CellValue $Category
+        "Current Owner(s)"     = Protect-CellValue $OwnerUPNs
         "Owner Status"         = $Status
         "NEW Owner UPN"        = ""
         Department             = ""
@@ -161,6 +176,10 @@ Write-Host "`n✅ Export saved to: $ExportPath" -ForegroundColor Green
 Write-Host "📧 Send this file to each department. They fill in columns I, J, K." -ForegroundColor Cyan
 
 # --- OPEN FILE ---
-Start-Process $ExportPath
+if ($IsMacOS) {
+    Start-Process "open" -ArgumentList $ExportPath
+} else {
+    Start-Process $ExportPath
+}
 
 Disconnect-MgGraph

@@ -27,11 +27,13 @@
     Required Modules:
     - Microsoft.Graph
 
-    Version: 1.1
+    Version: 1.2
     Author: Farpoint Technologies
     Created:  2026-04-08
-    Modified: 2026-04-09 - Fix: selection input validation (negative-index bug),
+    Modified: 2026-04-09 - v1.1: selection input validation (negative-index bug),
                            confirmation prompt, summary counters, OData quote escaping
+                           v1.2: Enterprise-App filter (excludes managed identities
+                           and Microsoft first-party apps)
 #>
 
 #Requires -Modules Microsoft.Graph
@@ -43,7 +45,11 @@
 
 Connect-MgGraph -Scopes "Application.ReadWrite.All", "Directory.ReadWrite.All"
 
-$AllSPs = Get-MgServicePrincipal -All -Property "Id,DisplayName,Tags"
+# Only real Enterprise Apps: exclude managed identities/legacy SPs and Microsoft first-party apps
+$MicrosoftTenantIds = @("f8cdef31-a31e-4b4a-93e4-5f571e91255a", "72f988bf-86f1-41af-91ab-2d7cd011db47")
+$AllSPs = Get-MgServicePrincipal -All -Filter "servicePrincipalType eq 'Application'" `
+    -Property "Id,DisplayName,Tags,AppOwnerOrganizationId" |
+    Where-Object { "$($_.AppOwnerOrganizationId)" -notin $MicrosoftTenantIds }
 
 # Show categories
 $Categories = $AllSPs | Group-Object {

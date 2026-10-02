@@ -2,7 +2,7 @@
 
 **Farpoint Technologies - Microsoft Intune & Azure AD Management Scripts**
 
-> Letzte Aktualisierung: 2026-04-09 | Version: 2.4.2
+> Letzte Aktualisierung: 2026-04-09 | Version: 2.4.3
 
 ---
 
@@ -104,9 +104,12 @@ cloudknox/
 │   ├── same-devops-environment/                    # DevOps-Umgebungs-Standardisierung
 │   │   ├── sameDevOpsEnvironment.ps1
 │   │   └── README.md
-│   └── exchange-mailbox-provisioner/                # Exchange Mailbox & DL-Provisioning
-│       ├── Provisioning.ps1
-│       ├── config.json
+│   ├── exchange-mailbox-provisioner/                # Exchange Mailbox & DL-Provisioning
+│   │   ├── Provisioning.ps1
+│   │   ├── config.json
+│   │   ├── browser/
+│   │   │   └── ExchangeProvisioner.html             # Zero-Storage Browser-Validierung
+│   │   └── README.md
 │   └── enterprise-apps-owner-assignment/            # Enterprise App Owner-Verwaltung
 │       ├── Export-EnterpriseAppOwnerList.ps1
 │       ├── Import-EnterpriseAppOwners.ps1
@@ -525,7 +528,7 @@ Das Script konfiguriert folgende Hilfsfunktionen in allen PS-Profilen:
 ### 9. Exchange Mailbox Provisioner
 
 **Pfad:** `scripts/exchange-mailbox-provisioner/Provisioning.ps1`
-**Version:** 4.0 | **Autor:** Farpoint Technologies
+**Version:** 4.1 | **Autor:** Farpoint Technologies
 **Sprache:** Deutsch
 
 #### Was macht dieses Script?
@@ -550,6 +553,7 @@ Provisioniert Shared Mailboxes und Verteilergruppen (Distribution Groups) in Exc
 |-----------|-----|--------------|----------|
 | `-ConfigFileName` | String | Name der Konfigurationsdatei | `config.json` |
 | `-ExcelFileName` | String | Überschreibt den Excel-Dateinamen aus der Config | – |
+| `-JsonInputFile` | String | Zeilen aus JSON der Browser-App statt Excel (Cloud-Shell-tauglich) | – |
 | `-WhatIf` | Switch | Trockenlauf ohne echte Änderungen | – |
 | `-Force` | Switch | Unterdrückt alle Rückfragen (unbeaufsichtigte Ausführung) | – |
 
@@ -631,6 +635,7 @@ pwsh -Command "Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeEnforce -Dry
 - **Teilfehler-Erkennung** - Unvollständig konfigurierte Objekte werden als `PartiallyCreated` markiert
 - **Externe Weiterleitungen standardmäßig blockiert** - Freigabe nur per Config (`allowExternalForwarding`); erlaubte Fälle werden im Log hervorgehoben
 - **CSV-Injection-Schutz** - Formelzeichen im Ergebnis-CSV werden neutralisiert
+- **Zero-Storage Browser-Option** - `browser/ExchangeProvisioner.html`: CSV/Excel-Daten lokal im Browser validieren (CSP blockiert jeden Netzwerkzugriff, keine Speicherung), JSON exportieren und über ephemere Azure Cloud Shell ausführen - Browser zu, alles weg
 ### 9. Enterprise Apps Owner Assignment
 
 **Path:** `scripts/enterprise-apps-owner-assignment/`

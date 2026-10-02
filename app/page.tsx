@@ -10,8 +10,9 @@ import {
   Mail,
   MonitorCheck,
   ChevronRight,
-  Github,
 } from "lucide-react";
+import { GithubIcon } from "./github-icon";
+
 
 const scripts = [
   {
@@ -139,7 +140,7 @@ function Header() {
             rel="noopener noreferrer"
             className="flex items-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/80"
           >
-            <Github className="h-4 w-4" />
+            <GithubIcon className="h-4 w-4" />
             GitHub
           </a>
         </nav>
@@ -174,7 +175,7 @@ function HeroSection() {
             rel="noopener noreferrer"
             className="flex items-center gap-2 rounded-lg bg-primary px-6 py-3 font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            <Github className="h-5 w-5" />
+            <GithubIcon className="h-5 w-5" />
             Repository ansehen
           </a>
           <a
@@ -286,7 +287,7 @@ function CTASection() {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
-          <Github className="h-5 w-5" />
+          <GithubIcon className="h-5 w-5" />
           Jetzt starten
         </a>
       </div>
