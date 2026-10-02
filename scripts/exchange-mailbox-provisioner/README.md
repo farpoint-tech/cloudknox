@@ -139,7 +139,9 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
 |----------|-----------|
 | Daten verlassen den Browser nicht | Content-Security-Policy mit `connect-src 'none'` / `default-src 'none'` - jeder Netzwerkaufruf wird vom Browser selbst blockiert (nachprüfbar: DevTools → Netzwerk-Tab bleibt leer) |
 | Keine Speicherung | Kein localStorage, keine sessionStorage, keine IndexedDB, keine Cookies - alle Daten leben nur im RAM des Tabs |
-| Tab zu = Daten weg | Zustand wird zusätzlich bei `beforeunload` aktiv gelöscht; „Alle Daten löschen"-Button jederzeit verfügbar |
+| Tab zu = Daten im Tab weg | Zustand wird zusätzlich bei `beforeunload` aktiv gelöscht; „Alle Daten löschen"-Button jederzeit verfügbar |
+
+> **Eine Ausnahme, die man kennen muss:** Der JSON-Export ist ein gewöhnlicher Browser-Download. `provisioning-data.json` liegt danach **unverschlüsselt im Download-Ordner** und enthält Postfachnamen, Adressen, Weiterleitungsziele, Mitglieder und Berechtigungen. Diese Datei überlebt das Schließen des Tabs, und weder „Alle Daten löschen" noch `beforeunload` können sie entfernen - das kann eine Webseite technisch nicht. **Nach dem Upload in die Cloud Shell selbst löschen**, Papierkorb inklusive. Ohne Datei gibt es keinen Transferweg in die Cloud Shell; die Zero-Storage-Zusage gilt für die Seite, nicht für den Download.
 | Kein Tracking | `referrer: no-referrer`, keine externen Ressourcen, keine Fonts/CDNs |
 
 ### Ablauf: komplett im Browser, ohne dass etwas gespeichert bleibt
@@ -150,7 +152,8 @@ Beide Tabellen teilen sich ein Worksheet. Die Spalten werden über die Tabellen�
 4. **[shell.azure.com](https://shell.azure.com) öffnen** → PowerShell → **„Kein Speicherkonto erforderlich" (ephemeral)** → einmal einloggen (MFA)
 5. **3 Dateien hochladen** (`Provisioning.ps1`, `config.json`, `provisioning-data.json`) und ausführen:
    `./Provisioning.ps1 -JsonInputFile provisioning-data.json -WhatIf` → dann scharf ohne `-WhatIf`
-6. **Browser schließen** - der ephemere Cloud-Shell-Container wird vernichtet, nichts bleibt gespeichert
+6. **Browser schließen** - der ephemere Cloud-Shell-Container wird vernichtet
+7. **`provisioning-data.json` lokal löschen** (Papierkorb inklusive) - der Container verschwindet von selbst, die heruntergeladene Datei nicht
 
 Das ExchangeOnlineManagement-Modul ist in Cloud Shell vorinstalliert; ImportExcel wird im JSON-Modus nicht benötigt. Das Script validiert alle Zeilen serverseitig erneut (Defense in Depth).
 
@@ -195,9 +198,11 @@ Für Scheduled Tasks und CI-Pipelines relevant - das Script signalisiert das Erg
 
 | Code | Bedeutung |
 |------|-----------|
-| `0` | Lauf vollständig durchgelaufen |
-| `1` | Lauf abgebrochen (Anmeldung, Konfiguration, fehlendes Modul ...) |
-| `2` | Lauf beendet, aber mindestens eine Zeile ist fehlgeschlagen |
+| `0` | Lauf vollständig durchgelaufen, jede Zeile angelegt |
+| `1` | Lauf abgebrochen - Anmeldung, Konfiguration, fehlendes Modul, oder der Benutzer hat eine Rückfrage mit „Nein" beantwortet |
+| `2` | Lauf beendet, aber mindestens eine Zeile wurde **nicht** angelegt: beim Anlegen gescheitert (`Failed`) **oder** bei der Validierung verworfen (`Übersprungen`) |
+
+Wichtig für `-Force`-Läufe: Eine Datei mit 10 Zeilen, von denen 3 die Validierung nicht bestehen, legt 7 Objekte an und endet mit `2`, nicht mit `0`. Ein Monitor, der nur auf `0` prüft, bekommt also keinen falschen Erfolg gemeldet.
 
 ## Funktionsmerkmale
 

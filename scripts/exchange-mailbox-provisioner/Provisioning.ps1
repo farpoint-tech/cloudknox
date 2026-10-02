@@ -50,9 +50,11 @@
 
 .NOTES
     Exitcodes (wichtig für Scheduled Tasks und CI-Pipelines):
-      0 = Lauf vollständig durchgelaufen
-      1 = Lauf abgebrochen (Anmeldung, Konfiguration, fehlendes Modul ...)
-      2 = Lauf beendet, aber mindestens eine Zeile ist fehlgeschlagen
+      0 = Lauf vollständig durchgelaufen, jede Zeile angelegt
+      1 = Lauf abgebrochen (Anmeldung, Konfiguration, fehlendes Modul,
+          Abbruch durch den Benutzer bei einer Rückfrage)
+      2 = Lauf beendet, aber mindestens eine Zeile wurde nicht angelegt -
+          entweder beim Anlegen gescheitert oder bei der Validierung verworfen
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
@@ -78,7 +80,9 @@ $script:LogFile     = Join-Path $ScriptPath "Provisioning_$TimeStamp.log"
 $script:ResultsFile = Join-Path $ScriptPath "Provisioning_Results_$TimeStamp.csv"
 $script:AclProtectionFailed = $false
 $script:FatalError          = $false
+$script:Aborted             = $false
 $script:FailedRowCount      = 0
+$script:SkippedRowCount     = 0
 
 # Alle bekannten Eingabespalten - identisch zu KNOWN_COLS in
 # browser/ExchangeProvisioner.html. Wird gebraucht, um wirklich leere Zeilen von
@@ -1058,6 +1062,9 @@ try {
 
         if (-not (Confirm-Action -Message "Trotz $($allIssues.Count) Problem(en) mit $totalValid gültigen Zeile(n) fortfahren?")) {
             Write-Log "Vom Benutzer abgebrochen." "WARN"
+            # Als Abbruch markieren, sonst meldete der Lauf Erfolg: 'return' beendet
+            # das Script hier, die Exitcode-Entscheidung liegt deshalb im finally.
+            $script:Aborted = $true
             return
         }
     }
@@ -1165,7 +1172,10 @@ try {
     Write-Log "  Erstellt:     $CreatedCount" "SUCCESS"
     Write-Log "  Übersprungen: $SkippedCount" "WARN"
     Write-Log "  Fehler:       $FailedCount" $(if ($FailedCount -gt 0) { "ERROR" } else { "INFO" })
-    $script:FailedRowCount = $FailedCount
+    # Beides zählt für den Exitcode: eine bei der Validierung verworfene Zeile ist
+    # genauso wenig angelegt wie eine, die beim Anlegen gescheitert ist.
+    $script:FailedRowCount  = $FailedCount
+    $script:SkippedRowCount = $SkippedCount
     Write-Log "============================================================"
 
     if ($Results.Count -gt 0) {
@@ -1195,13 +1205,15 @@ finally {
         }
     }
     Write-Log "Scriptende"
-}
 
-# Exitcode setzen. Ohne das endete das Script auch nach einem Abbruch mit 0 und
-# ein Scheduled Task oder eine CI-Pipeline meldete den Fehlschlag als Erfolg.
-#   0 = alles durchgelaufen
-#   1 = Lauf abgebrochen (Login, Config, Modul ...)
-#   2 = Lauf beendet, aber mindestens eine Zeile fehlgeschlagen
-if ($script:FatalError) { exit 1 }
-if ($script:FailedRowCount -gt 0) { exit 2 }
-exit 0
+    # Exitcode hier im finally setzen, nicht nach dem try/catch/finally: der Abbruch
+    # bei der Fortfahren-Rückfrage verlässt das Script per 'return', womit jeder Code
+    # unterhalb dieses Blocks übersprungen würde und der Lauf Erfolg melden würde.
+    #   0 = alles durchgelaufen, jede Zeile angelegt
+    #   1 = Lauf abgebrochen (Anmeldung, Konfiguration, Modul, Benutzerabbruch ...)
+    #   2 = Lauf beendet, aber mindestens eine Zeile wurde nicht angelegt
+    #       (beim Anlegen gescheitert oder bei der Validierung verworfen)
+    if ($script:FatalError -or $script:Aborted) { exit 1 }
+    if ($script:FailedRowCount -gt 0 -or $script:SkippedRowCount -gt 0) { exit 2 }
+    exit 0
+}
