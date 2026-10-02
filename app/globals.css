@@ -1,4 +1,5 @@
-@import "tailwindcss";
+/* Scan only the website: scripts/ and m365-assessment/ carry their own markup. */
+@import "tailwindcss" source("../app");
 @config "../tailwind.config.mts";
 
 :root {
