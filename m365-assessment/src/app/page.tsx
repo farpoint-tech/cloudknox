@@ -8,18 +8,20 @@ import {
   useMsal,
 } from "@azure/msal-react";
 import { GRAPH_SCOPES, isMsalConfigured } from "@/lib/auth/msalConfig";
-import { useGraphClient } from "@/lib/auth/useGraphClient";
-import { AssessmentResult, runIamAssessment } from "@/lib/assessment/iam";
+import { buildAssessmentContext } from "@/lib/auth/buildContext";
+import { AssessmentResult, runAssessment } from "@/lib/assessment";
 import { AssessmentView } from "@/components/AssessmentView";
+import { toJson, toMarkdown } from "@/lib/engine/report";
+import { downloadText, timestampSlug } from "@/lib/engine/download";
 
 export default function Home() {
   const { instance, accounts } = useMsal();
-  const graph = useGraphClient();
   const [result, setResult] = useState<AssessmentResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const configured = isMsalConfigured();
+  const account = accounts[0];
 
   const signIn = () => {
     setError(null);
@@ -30,15 +32,26 @@ export default function Home() {
     setResult(null);
   };
   const run = async () => {
-    if (!graph) return;
+    if (!account) return;
     setRunning(true);
     setError(null);
     try {
-      setResult(await runIamAssessment(graph));
+      const ctx = await buildAssessmentContext(instance, account);
+      setResult(await runAssessment(ctx, { account: account.username }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setRunning(false);
+    }
+  };
+
+  const exportReport = (format: "json" | "md") => {
+    if (!result) return;
+    const slug = timestampSlug(result.meta.generatedAt);
+    if (format === "json") {
+      downloadText(`m365-assessment-${slug}.json`, toJson(result), "application/json");
+    } else {
+      downloadText(`m365-assessment-${slug}.md`, toMarkdown(result), "text/markdown");
     }
   };
 
@@ -106,13 +119,29 @@ export default function Home() {
             <div className="mt-6 flex items-center gap-3">
               <button
                 onClick={run}
-                disabled={running || !graph}
+                disabled={running || !account}
                 className="rounded-lg bg-sky-600 px-4 py-2 font-medium text-white hover:bg-sky-500 disabled:opacity-50"
               >
-                {running ? "Running assessment…" : "Run IAM assessment"}
+                {running ? "Running assessment…" : "Run assessment"}
               </button>
-              {accounts[0] && (
-                <span className="text-sm text-slate-400">{accounts[0].username}</span>
+              {account && (
+                <span className="text-sm text-slate-400">{account.username}</span>
+              )}
+              {result && (
+                <div className="ml-auto flex gap-2">
+                  <button
+                    onClick={() => exportReport("md")}
+                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+                  >
+                    Export Markdown
+                  </button>
+                  <button
+                    onClick={() => exportReport("json")}
+                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+                  >
+                    Export JSON
+                  </button>
+                </div>
               )}
             </div>
 
@@ -122,8 +151,10 @@ export default function Home() {
       )}
 
       <footer className="mt-10 border-t border-slate-800 pt-4 text-xs text-slate-500">
-        Domain covered: IAM (identity, MFA, Conditional Access, PIM/licensing).
-        Defender, Exchange, DLP and Intune are on the roadmap.
+        Domains covered: IAM (identity, MFA, Conditional Access, PIM/licensing),
+        Intune (device compliance) and Defender (Microsoft Secure Score). Deep
+        Exchange/DLP configuration needs data outside the browser sandbox — see
+        the README.
       </footer>
     </main>
   );

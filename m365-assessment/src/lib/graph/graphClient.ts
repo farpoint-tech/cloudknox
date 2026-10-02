@@ -14,9 +14,15 @@
 export type GraphVersion = "v1.0" | "beta";
 
 export interface GraphClientOptions {
-  /** Returns a bearer access token for Microsoft Graph. */
+  /** Returns a bearer access token for the target API. */
   getToken: () => Promise<string>;
   baseUrl?: string;
+  /**
+   * Fixed path prefix placed before every request path. When set it overrides
+   * the per-request `version` segment. Graph uses `/v1.0` (the default via
+   * `version`); the Defender for Endpoint API uses `/api`.
+   */
+  pathPrefix?: string;
   fetchFn?: typeof fetch;
   /** Max retries for throttled/5xx responses. */
   maxRetries?: number;
@@ -58,6 +64,7 @@ const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 export class GraphClient {
   private readonly getToken: () => Promise<string>;
   private readonly baseUrl: string;
+  private readonly pathPrefix?: string;
   private readonly fetchFn: typeof fetch;
   private readonly maxRetries: number;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -65,6 +72,7 @@ export class GraphClient {
   constructor(opts: GraphClientOptions) {
     this.getToken = opts.getToken;
     this.baseUrl = opts.baseUrl ?? "https://graph.microsoft.com";
+    this.pathPrefix = opts.pathPrefix;
     this.fetchFn = opts.fetchFn ?? fetch;
     this.maxRetries = opts.maxRetries ?? 5;
     this.sleep = opts.sleep ?? defaultSleep;
@@ -73,10 +81,10 @@ export class GraphClient {
   private buildUrl(path: string, opts?: GraphRequestOptions): string {
     // Absolute URLs (e.g. an @odata.nextLink) are used verbatim.
     if (/^https?:\/\//i.test(path)) return path;
-    const version = opts?.version ?? "v1.0";
+    const prefix = this.pathPrefix ?? `/${opts?.version ?? "v1.0"}`;
     const clean = path.startsWith("/") ? path : `/${path}`;
     const query = opts?.query ? `?${opts.query}` : "";
-    return `${this.baseUrl}/${version}${clean}${query}`;
+    return `${this.baseUrl}${prefix}${clean}${query}`;
   }
 
   /** Single GET returning the raw JSON body of type T. */

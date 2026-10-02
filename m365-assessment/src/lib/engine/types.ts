@@ -3,7 +3,13 @@
  * renders them grouped by domain and sorted by severity.
  */
 
-export type Domain = "iam" | "defender" | "exchange" | "dlp" | "intune";
+export type Domain =
+  | "iam"
+  | "intune"
+  | "defender"
+  | "defenderEndpoint"
+  | "exchange"
+  | "dlp";
 
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
@@ -42,6 +48,34 @@ export interface Finding {
   /** Link to Microsoft documentation for the control. */
   docsUrl?: string;
 }
+
+/** Context about a completed assessment run, shown in the report header. */
+export interface AssessmentMetadata {
+  /** ISO timestamp when the run completed. */
+  generatedAt: string;
+  tenantName?: string;
+  tenantId?: string;
+  /** Signed-in account (UPN) that ran the assessment. */
+  account?: string;
+}
+
+export const DOMAIN_ORDER: Domain[] = [
+  "iam",
+  "intune",
+  "defender",
+  "defenderEndpoint",
+  "exchange",
+  "dlp",
+];
+
+export const DOMAIN_LABEL: Record<Domain, string> = {
+  iam: "Identity & Access (IAM)",
+  intune: "Intune — Device Compliance",
+  defender: "Defender — Secure Score",
+  defenderEndpoint: "Defender for Endpoint",
+  exchange: "Exchange Online — Anti-Phishing",
+  dlp: "Purview — Data Loss Prevention",
+};
 
 export const SEVERITY_ORDER: Record<Severity, number> = {
   critical: 0,

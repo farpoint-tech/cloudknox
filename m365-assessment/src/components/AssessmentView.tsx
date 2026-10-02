@@ -1,5 +1,12 @@
-import { AssessmentResult } from "@/lib/assessment/iam";
-import { CheckStatus } from "@/lib/engine/types";
+import { AssessmentResult } from "@/lib/assessment";
+import {
+  CheckStatus,
+  DOMAIN_LABEL,
+  DOMAIN_ORDER,
+  Domain,
+  Finding,
+  sortFindings,
+} from "@/lib/engine/types";
 import { FindingCard } from "./FindingCard";
 
 const COUNT_ORDER: CheckStatus[] = ["fail", "warning", "manual", "error", "pass"];
@@ -19,19 +26,34 @@ export function AssessmentView({ result }: { result: AssessmentResult }) {
     return acc;
   }, {});
 
+  const byDomain = new Map<Domain, Finding[]>();
+  for (const f of result.findings) {
+    const list = byDomain.get(f.domain) ?? [];
+    list.push(f);
+    byDomain.set(f.domain, list);
+  }
+  const domains = DOMAIN_ORDER.filter((d) => byDomain.has(d));
+
   return (
     <section className="mt-6">
-      <div className="flex flex-wrap gap-4 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-        {COUNT_ORDER.map((status) => (
-          <div key={status} className="min-w-[72px]">
-            <div className={`text-2xl font-semibold ${COUNT_STYLE[status]}`}>
-              {counts[status] ?? 0}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+        <div className="mb-3 text-xs text-slate-400">
+          {result.meta.tenantName && (
+            <span className="text-slate-300">{result.meta.tenantName}</span>
+          )}
+          {result.meta.tenantId && <span> · {result.meta.tenantId}</span>}
+          <span> · {new Date(result.meta.generatedAt).toLocaleString()}</span>
+        </div>
+        <div className="flex flex-wrap gap-4">
+          {COUNT_ORDER.map((status) => (
+            <div key={status} className="min-w-[72px]">
+              <div className={`text-2xl font-semibold ${COUNT_STYLE[status]}`}>
+                {counts[status] ?? 0}
+              </div>
+              <div className="text-xs uppercase tracking-wide text-slate-500">{status}</div>
             </div>
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              {status}
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
       {result.errors.length > 0 && (
@@ -45,11 +67,18 @@ export function AssessmentView({ result }: { result: AssessmentResult }) {
         </div>
       )}
 
-      <div className="mt-4 grid gap-3">
-        {result.findings.map((f) => (
-          <FindingCard key={f.id} finding={f} />
-        ))}
-      </div>
+      {domains.map((domain) => (
+        <div key={domain} className="mt-6">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+            {DOMAIN_LABEL[domain]}
+          </h2>
+          <div className="grid gap-3">
+            {sortFindings(byDomain.get(domain) ?? []).map((f) => (
+              <FindingCard key={f.id} finding={f} />
+            ))}
+          </div>
+        </div>
+      ))}
     </section>
   );
 }

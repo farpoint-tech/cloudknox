@@ -12,7 +12,29 @@ export const GRAPH_SCOPES = [
   "AuditLog.Read.All",
   "RoleManagement.Read.Directory",
   "Organization.Read.All",
+  // Intune (device compliance) — read-only.
+  "DeviceManagementConfiguration.Read.All",
+  "DeviceManagementManagedDevices.Read.All",
+  // Defender / Microsoft Secure Score — read-only.
+  "SecurityEvents.Read.All",
 ];
+
+/**
+ * Per-resource scope sets. The Defender for Endpoint API is a SEPARATE resource
+ * from Microsoft Graph (the WindowsDefenderATP API), so it needs its own token
+ * with a different audience. Used only by the desktop build.
+ *
+ * NOTE: the DfE API is served from the host api.security.microsoft.com, but it
+ * validates the token AUDIENCE against the LEGACY resource
+ * api.securityCENTER.microsoft.com — a mismatch returns 403. So the scope must
+ * target securitycenter, not security. The app registration needs the
+ * WindowsDefenderATP *delegated* permission "Machine.Read" admin-consented, and
+ * the signed-in user needs the Defender "View Data" RBAC role.
+ */
+export const RESOURCE_SCOPES = {
+  graph: GRAPH_SCOPES,
+  defenderEndpoint: ["https://api.securitycenter.microsoft.com/.default"],
+};
 
 /**
  * Write scope for the Enterprise App Owners module ONLY. Never part of
