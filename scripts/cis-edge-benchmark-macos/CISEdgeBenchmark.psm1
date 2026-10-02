@@ -18,6 +18,7 @@ $script:OutputPath          = Join-Path $script:ModuleRoot "audit_results.json"
 $script:JsPath              = Join-Path $script:ModuleRoot "audit_results.js"
 $script:LogFile             = Join-Path $script:ModuleRoot "enforcement_log.txt"
 $script:DashPath            = Join-Path $script:ModuleRoot "dashboard.html"
+$script:BackupDir           = Join-Path $script:ModuleRoot "backups"
 $script:ServerPort          = 18989
 
 # CSRF capability token. Generated once per PowerShell session (on first use)
@@ -151,6 +152,34 @@ function Test-CISNumericEqual {
         return ($c -eq $e)
     }
     return ("$Current".Trim() -eq "$Expected".Trim())
+}
+
+# Creates a timestamped backup of the Edge system-preferences plist before
+# enforcement mutates it. Returns the backup file path, or $null when there is
+# nothing to back up (the plist does not exist yet) or the copy failed. Backups
+# are chmod 600 because they can contain the full Edge policy set. Callers must
+# treat a $null return during a real (non-dry) run as "no safety net" and let
+# the operator decide whether to continue.
+function New-CISEdgeBackup {
+    $plist = "$($script:EdgeSystemDomain).plist"
+    if (-not (Test-Path $plist)) {
+        Write-CISLog "Backup skipped: $plist does not exist yet (nothing to back up)."
+        return $null
+    }
+    if (-not (Test-Path $script:BackupDir)) {
+        New-Item -ItemType Directory -Path $script:BackupDir -Force | Out-Null
+    }
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $dest  = Join-Path $script:BackupDir "com.microsoft.Edge.$stamp.plist"
+    try {
+        Copy-Item -Path $plist -Destination $dest -Force
+        try { & /bin/chmod 600 $dest 2>$null } catch {}
+        Write-CISLog "Backup created: $dest"
+        return $dest
+    } catch {
+        Write-CISLog "Backup FAILED: $($_.Exception.Message)"
+        return $null
+    }
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -617,7 +646,9 @@ function Invoke-CISEdgeEnforce {
 
         [switch]$DryRun,
 
-        [switch]$AutoConfirm
+        [switch]$AutoConfirm,
+
+        [switch]$NoBackup
     )
 
     $isAdmin = Test-IsAdmin
@@ -726,6 +757,20 @@ function Invoke-CISEdgeEnforce {
         return
     }
 
+    # Safety net: back up the current Edge system plist before mutating it, so
+    # the operator can roll back with Invoke-CISEdgeRestore. Skipped with
+    # -NoBackup. A failed/absent backup is surfaced but does not hard-stop
+    # (there may simply be no plist yet on a fresh machine).
+    if (-not $NoBackup) {
+        $backupPath = New-CISEdgeBackup
+        if ($backupPath) {
+            Write-Host "  Backup created    : $backupPath" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  Backup            : none (no existing plist or copy failed - see log)" -ForegroundColor DarkYellow
+        }
+        Write-Host ""
+    }
+
     Write-Host ""
     Write-Host "Applying..." -ForegroundColor Cyan
     Write-Host ("-" * 70) -ForegroundColor DarkGray
@@ -778,6 +823,145 @@ function Invoke-CISEdgeEnforce {
     Write-Host "  Log: $($script:LogFile)" -ForegroundColor DarkGray
     Write-Host ""
     Write-CISLog "--- Enforcement done --- OK=$okCount Failed=$errCount"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PUBLIC: Invoke-CISEdgeRestore
+# ═══════════════════════════════════════════════════════════════════════════
+
+function Invoke-CISEdgeRestore {
+    <#
+    .SYNOPSIS
+        Restores the Edge system-preferences plist from a backup created by
+        Invoke-CISEdgeEnforce.
+
+    .DESCRIPTION
+        Every enforcement run (unless started with -NoBackup) copies the current
+        /Library/Preferences/com.microsoft.Edge.plist into the module's backups/
+        folder with a timestamp. This cmdlet copies a chosen backup back over the
+        live plist, undoing enforcement changes. Requires root (run with sudo).
+
+        After restoring, macOS may keep the old values cached in cfprefsd; the
+        cmdlet refreshes the cache and recommends restarting Edge.
+
+    .PARAMETER BackupFile
+        Path to a specific backup file. When omitted, the most recent backup is
+        used. Accepts either a bare filename (resolved inside backups/) or a
+        full path.
+
+    .PARAMETER List
+        List available backups (newest first) and exit without restoring.
+
+    .PARAMETER AutoConfirm
+        Skip the confirmation prompt.
+
+    .EXAMPLE
+        Invoke-CISEdgeRestore -List
+        Show all available backups.
+
+    .EXAMPLE
+        sudo pwsh -Command 'Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeRestore'
+        Restore the most recent backup.
+
+    .EXAMPLE
+        sudo pwsh -Command 'Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeRestore -BackupFile com.microsoft.Edge.20260721-120000.plist'
+        Restore a specific backup.
+
+    .NOTES
+        Must be run as root to write /Library/Preferences (except -List).
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$BackupFile,
+
+        [switch]$List,
+
+        [switch]$AutoConfirm
+    )
+
+    $backups = @()
+    if (Test-Path $script:BackupDir) {
+        $backups = @(Get-ChildItem -Path $script:BackupDir -Filter "com.microsoft.Edge.*.plist" -File |
+                        Sort-Object LastWriteTime -Descending)
+    }
+
+    if ($List) {
+        Write-Host ""
+        Write-Host "  Available Edge plist backups:" -ForegroundColor Cyan
+        Write-Host ("-" * 70) -ForegroundColor DarkGray
+        if ($backups.Count -eq 0) {
+            Write-Host "  (none) - no backups in $($script:BackupDir)" -ForegroundColor DarkGray
+        } else {
+            foreach ($b in $backups) {
+                $when = $b.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+                $size = "{0:N0} bytes" -f $b.Length
+                Write-Host ("  {0}   {1,-14}  {2}" -f $when, $size, $b.Name) -ForegroundColor White
+            }
+        }
+        Write-Host ""
+        return
+    }
+
+    if ($backups.Count -eq 0) {
+        Write-Host "ERROR: No backups found in $($script:BackupDir)." -ForegroundColor Red
+        Write-Host "Backups are created automatically by Invoke-CISEdgeEnforce (unless -NoBackup)." -ForegroundColor DarkGray
+        return
+    }
+
+    # Resolve which backup to restore.
+    if ($BackupFile) {
+        $candidate = if (Test-Path $BackupFile) { $BackupFile } else { Join-Path $script:BackupDir $BackupFile }
+        if (-not (Test-Path $candidate)) {
+            Write-Host "ERROR: Backup not found: $BackupFile" -ForegroundColor Red
+            Write-Host "Use -List to see available backups." -ForegroundColor DarkGray
+            return
+        }
+        $target = Get-Item $candidate
+    } else {
+        $target = $backups[0]
+    }
+
+    if (-not (Test-IsAdmin)) {
+        Write-Host "ERROR: Restore requires root. Run with:" -ForegroundColor Red
+        Write-Host "  sudo pwsh -Command 'Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeRestore'" -ForegroundColor Yellow
+        return
+    }
+
+    $plist = "$($script:EdgeSystemDomain).plist"
+
+    Write-Host ""
+    Write-Host ("=" * 70) -ForegroundColor Cyan
+    Write-Host "  CIS Microsoft Edge Benchmark - Restore (macOS)" -ForegroundColor Cyan
+    Write-Host ("=" * 70) -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Restore from : $($target.FullName)" -ForegroundColor White
+    Write-Host "  Backup date  : $($target.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor White
+    Write-Host "  Restore to   : $plist" -ForegroundColor White
+    Write-Host ""
+
+    if (-not $AutoConfirm) {
+        Write-Host "This overwrites the current Edge policy plist. Continue? [Y/N] " -ForegroundColor Yellow -NoNewline
+        $resp = Read-Host
+        if ($resp -notmatch '^[Yy]') {
+            Write-Host "Aborted." -ForegroundColor Yellow
+            Write-CISLog "Restore aborted by user."
+            return
+        }
+    }
+
+    try {
+        Copy-Item -Path $target.FullName -Destination $plist -Force
+        try { & /bin/chmod 600 $plist 2>$null } catch {}
+        # Drop the cached prefs so Edge reads the restored values on next launch.
+        try { & /usr/bin/killall cfprefsd 2>$null } catch {}
+        Write-Host "  [OK] Restored $plist from $($target.Name)" -ForegroundColor Green
+        Write-Host "  Restart Microsoft Edge for the restored values to take effect." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-CISLog "Restore OK: $plist <- $($target.FullName)"
+    } catch {
+        Write-Host "  [FAIL] Restore failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-CISLog "Restore FAILED: $($_.Exception.Message)"
+    }
 }
 
 # ═══════════════════════════════════════════════════════════════════════════

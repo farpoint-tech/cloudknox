@@ -1,0 +1,7 @@
+# Generated at runtime by Invoke-CISEdgeAudit / Invoke-CISEdgeEnforce
+audit_results.json
+audit_results.js
+enforcement_log.txt
+
+# Plist backups created before enforcement (may contain full policy set)
+backups/

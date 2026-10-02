@@ -10,6 +10,7 @@
     FunctionsToExport = @(
         'Invoke-CISEdgeAudit',
         'Invoke-CISEdgeEnforce',
+        'Invoke-CISEdgeRestore',
         'Show-CISEdgeDashboard'
     )
     CmdletsToExport   = @()
