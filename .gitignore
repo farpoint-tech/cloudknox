@@ -1,6 +1,17 @@
-# Next.js build output and dependencies of the website at the repository root
+# Dependencies
+node_modules/
+
+# Next.js build output
 .next/
 out/
-node_modules/
-*.tsbuildinfo
+
+# Vercel
 .vercel/
+
+# Env files
+.env
+.env*.local
+
+# Misc
+*.tsbuildinfo
+.DS_Store

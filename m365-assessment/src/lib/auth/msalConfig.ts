@@ -14,6 +14,13 @@ export const GRAPH_SCOPES = [
   "Organization.Read.All",
 ];
 
+/**
+ * Write scope for the Enterprise App Owners module ONLY. Never part of
+ * GRAPH_SCOPES: it is requested via incremental consent when an admin opens
+ * the owners page, so the assessment itself stays strictly read-only.
+ */
+export const OWNER_WRITE_SCOPES = ["Application.ReadWrite.All"];
+
 const clientId = process.env.NEXT_PUBLIC_AAD_CLIENT_ID ?? "";
 // "organizations" = any work/school tenant; override with a specific tenant id.
 const tenant = process.env.NEXT_PUBLIC_AAD_TENANT_ID ?? "organizations";
