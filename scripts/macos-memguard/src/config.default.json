@@ -1,0 +1,12 @@
+{
+  "language": "en",
+  "notifications": true,
+  "interval": 10,
+  "warn_free_percent": 20,
+  "critical_free_percent": 10,
+  "warn_swapfiles": 20,
+  "critical_swapfiles": 40,
+  "warn_repeat_seconds": 600,
+  "terminate_grace_seconds": 8,
+  "targets": []
+}

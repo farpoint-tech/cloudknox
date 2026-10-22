@@ -1,0 +1,6 @@
+#!/bin/zsh
+LABEL="tech.farpoint.memguard"
+CU=$(stat -f %Su /dev/console)
+[[ "$CU" == root || "$CU" == loginwindow ]] && exit 0
+launchctl bootout "gui/$(id -u "$CU")/$LABEL" 2>/dev/null
+exit 0

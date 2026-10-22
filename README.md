@@ -63,7 +63,8 @@ cloudknox/
 │   ├── same-devops-environment/               # DevOps-Umgebungs-Standardisierung
 │   │
 │   └── [macOS Scripts]
-│       └── cis-edge-benchmark-macos/          # CIS Edge Benchmark v4.0.0 (macOS)
+│       ├── cis-edge-benchmark-macos/          # CIS Edge Benchmark v4.0.0 (macOS)
+│       └── macos-memguard/                    # Schutz vor Watchdog-Panics bei Speicherdruck
 │
 ├── README.md                                  # Diese Datei
 └── CHANGELOG.md                               # Änderungsprotokoll
@@ -613,6 +614,25 @@ sudo pwsh -Command "Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeEnforce
 
 # Nur Vorschau ohne Änderungen
 pwsh -Command "Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeEnforce -DryRun"
+```
+
+---
+
+### 10. MemGuard – Schutz vor Speicher-Panics (macOS)
+**Pfad:** `scripts/macos-memguard/`
+**Dokumentation:** [`scripts/macos-memguard/README.md`](scripts/macos-memguard/README.md)
+
+Verhindert, dass ein Mac unter extremem Speicherdruck einfriert und mit `watchdog timeout` neu startet. Prüft alle 10 Sekunden den freien Speicher und die Swap-Dateien.
+
+- Unter 20 % frei: Mitteilung mit den drei größten Apps.
+- Unter 10 % frei: beendet nur Prozesse, die in `targets` eingetragen sind, etwa lokale Video- oder KI-Jobs. Andere Apps fasst MemGuard nie an.
+- Reines zsh, keine Abhängigkeiten, keine Admin-Rechte für die Einzelplatz-Installation.
+- Für viele Macs per `.pkg` über Intune oder Jamf verteilbar.
+
+```bash
+cd scripts/macos-memguard
+./install.sh
+memguard status
 ```
 
 ---

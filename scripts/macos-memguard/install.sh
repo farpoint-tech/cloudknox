@@ -1,0 +1,30 @@
+#!/bin/zsh
+# Per-user install of MemGuard. No admin rights needed.
+# Usage: ./install.sh [--config path/to/config.json]
+set -eu
+SRC="${0:A:h}/src"
+LABEL="tech.farpoint.memguard"
+DIR="$HOME/Library/Application Support/MemGuard"
+BIN="$DIR/memguard"
+AGENT="$HOME/Library/LaunchAgents/$LABEL.plist"
+UID_=$(id -u)
+
+if [[ -f "/Library/LaunchAgents/$LABEL.plist" ]]; then
+  print "A system-wide MemGuard (pkg) is already installed. Use that one or remove it first."; exit 1
+fi
+mkdir -p "$DIR" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/MemGuard"
+launchctl bootout "gui/$UID_/$LABEL" 2>/dev/null || true
+install -m 755 "$SRC/memguard" "$BIN"
+if [[ "${1:-}" == "--config" && -n "${2:-}" ]]; then
+  install -m 644 "$2" "$DIR/config.json"; print "config: copied from $2"
+elif [[ ! -f "$DIR/config.json" ]]; then
+  install -m 644 "$SRC/config.default.json" "$DIR/config.json"; print "config: default (warn only, no targets)"
+else
+  print "config: kept existing $DIR/config.json"
+fi
+sed "s|__BIN__|$BIN|" "$SRC/$LABEL.plist" > "$AGENT"
+plutil -lint -s "$AGENT"
+launchctl bootstrap "gui/$UID_" "$AGENT"
+sleep 2
+"$BIN" status
+print "\nInstalled. Optional: ln -s \"$BIN\" /usr/local/bin/memguard"

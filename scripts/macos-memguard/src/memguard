@@ -1,0 +1,174 @@
+#!/bin/zsh
+# MemGuard - prevents macOS watchdog panics caused by memory pressure.
+# Watches free memory and swap files. Warns early. On critical pressure it
+# terminates ONLY processes matching the configured target patterns.
+# No dependencies beyond macOS itself.
+emulate -L zsh
+setopt no_unset pipe_fail
+
+VERSION="1.0.0"
+SYS_DIR="/Library/Application Support/MemGuard"
+USER_DIR="$HOME/Library/Application Support/MemGuard"
+LOG_DIR="$HOME/Library/Logs/MemGuard"
+LOG="$LOG_DIR/memguard.log"
+PAUSE_FILE="$HOME/.memguard-off"
+
+# ---------- config ----------
+cfg_file() {
+  if [[ -n "${MEMGUARD_CONFIG:-}" ]]; then print -r -- "$MEMGUARD_CONFIG"; return; fi
+  for f in "$USER_DIR/config.json" "$SYS_DIR/config.json"; do
+    [[ -r "$f" ]] && { print -r -- "$f"; return; }
+  done
+}
+cfg() { # cfg <key> <default>
+  local f; f=$(cfg_file)
+  local v=""
+  [[ -n "$f" ]] && v=$(plutil -extract "$1" raw -o - "$f" 2>/dev/null)
+  print -r -- "${v:-$2}"
+}
+cfg_targets() {
+  local f i=0 v; f=$(cfg_file); [[ -z "$f" ]] && return
+  while v=$(plutil -extract "targets.$i" raw -o - "$f" 2>/dev/null); do
+    [[ -n "$v" ]] && print -r -- "${v//\~/$HOME}"
+    (( i++ ))
+  done
+}
+load_cfg() {
+  INTERVAL=$(cfg interval 10)
+  WARN_FREE=$(cfg warn_free_percent 20)
+  CRIT_FREE=$(cfg critical_free_percent 10)
+  WARN_SWAP=$(cfg warn_swapfiles 20)
+  CRIT_SWAP=$(cfg critical_swapfiles 40)
+  WARN_REPEAT=$(cfg warn_repeat_seconds 600)
+  GRACE=$(cfg terminate_grace_seconds 8)
+  LANG_UI=$(cfg language en)
+  NOTIFY=$(cfg notifications true)
+  if [[ -n "${MEMGUARD_TARGETS:-}" ]]; then TARGETS=(${(s:|:)MEMGUARD_TARGETS}); else TARGETS=(${(f)"$(cfg_targets)"}); fi
+}
+
+# ---------- helpers ----------
+ts() { date "+%Y-%m-%d %H:%M:%S"; }
+log() { mkdir -p "$LOG_DIR"; print -r -- "$(ts) $*" >> "$LOG"; }
+t() { # t <en> <de>
+  [[ "$LANG_UI" == de ]] && print -r -- "$2" || print -r -- "$1"
+}
+notify() {
+  [[ "$NOTIFY" == true ]] || return 0
+  local title=${1//\"/\'} body=${2//\"/\'}
+  osascript -e "display notification \"$body\" with title \"$title\" sound name \"Basso\"" >/dev/null 2>&1
+}
+measure() {
+  if [[ -n "${MEMGUARD_FAKE_FREE:-}" ]]; then FREE=$MEMGUARD_FAKE_FREE
+  else FREE=$(sysctl -n kern.memorystatus_level 2>/dev/null); [[ "$FREE" == <-> ]] || FREE=100; fi
+  SWAPFILES=$(ls /System/Volumes/VM 2>/dev/null | grep -c '^swapfile')
+}
+top_apps() { # biggest apps by resident memory, grouped by .app bundle
+  ps -Axo rss=,comm= | awk '
+    { rss=$1; $1=""; sub(/^ /,""); n=$0
+      if (match(n,/\/[^\/]+\.app\//)) { n=substr(n,RSTART+1,RLENGTH-6) } else { k=split(n,a,"/"); n=a[k] }
+      s[n]+=rss }
+    END { for (k in s) printf "%.1f\t%s\n", s[k]/1048576, k }' | sort -rn | head -${1:-3} |
+    awk -F'\t' '{printf "%s%s %s GB", (NR>1?", ":""), $2, $1}'
+}
+find_targets() { # prints "pid<TAB>args" for matching processes
+  (( ${#TARGETS} )) || return 0
+  local self=$$ pat
+  ps -Axo pid=,args= | while read -r pid args; do
+    [[ "$pid" == "$self" || "$args" == *memguard* ]] && continue
+    for pat in $TARGETS; do
+      [[ -n "$pat" && "$args" == *"$pat"* ]] && { print -r -- "$pid	$args"; break; }
+    done
+  done
+}
+
+# ---------- core ----------
+typeset -g LAST_WARN=0 LAST_CRIT=0
+step() {
+  measure
+  local now=$(date +%s) crit=0 warn=0
+  (( FREE <= CRIT_FREE || SWAPFILES >= CRIT_SWAP )) && crit=1
+  (( FREE <= WARN_FREE || SWAPFILES >= WARN_SWAP )) && warn=1
+  (( crit || warn )) || return 0
+  local top; top=$(top_apps 3)
+  if (( crit )) && [[ ! -e "$PAUSE_FILE" ]]; then
+    local found; found=$(find_targets)
+    if [[ -n "$found" ]]; then
+      local pids=() names=() line
+      for line in ${(f)found}; do pids+=(${line%%	*}); names+=("${${line#*	}%% *}"); done
+      kill -TERM $pids 2>/dev/null
+      sleep $GRACE
+      local hard=() p
+      for p in $pids; do kill -0 $p 2>/dev/null && { kill -KILL $p 2>/dev/null; hard+=($p); }; done
+      log "CRITICAL free=${FREE}% swapfiles=$SWAPFILES terminated pids=${(j:,:)pids} sigkill=${(j:,:)hard} names=${(j:,:)${names:t}} top=[$top]"
+      notify "MemGuard: $(t 'process stopped' 'Prozess gestoppt')" \
+        "$(t "Only ${FREE}% free. Stopped: ${(j:, :)${names:t}}" "Nur ${FREE}% frei. Gestoppt: ${(j:, :)${names:t}}")"
+      LAST_WARN=$now; return 0
+    fi
+    if (( now - LAST_CRIT > 120 )); then
+      log "CRITICAL free=${FREE}% swapfiles=$SWAPFILES no-target top=[$top]"
+      notify "MemGuard: $(t 'memory critical' 'Speicher kritisch')" \
+        "$(t "Only ${FREE}% free. Largest: $top. Close apps now." "Nur ${FREE}% frei. Größte: $top. Apps jetzt schließen.")"
+      LAST_CRIT=$now
+    fi
+    return 0
+  fi
+  if (( now - LAST_WARN > WARN_REPEAT )); then
+    log "WARN free=${FREE}% swapfiles=$SWAPFILES paused=$([[ -e $PAUSE_FILE ]] && echo yes || echo no) top=[$top]"
+    notify "MemGuard: $(t 'memory low' 'Speicher knapp')" \
+      "$(t "${FREE}% free, $SWAPFILES swap files. Largest: $top" "${FREE}% frei, $SWAPFILES Swap-Dateien. Größte: $top")"
+    LAST_WARN=$now
+  fi
+}
+
+# ---------- commands ----------
+cmd_run() {
+  load_cfg
+  log "START v$VERSION config=$(cfg_file) warn=${WARN_FREE}% crit=${CRIT_FREE}% targets=${(j:|:)TARGETS}"
+  local n=0
+  while true; do
+    step
+    sleep $INTERVAL
+    (( ++n % 30 == 0 )) && load_cfg   # pick up config changes every ~5 min
+  done
+}
+cmd_status() {
+  load_cfg; measure
+  print "MemGuard $VERSION"
+  print "  config:      $(cfg_file || true)"
+  print "  free memory: ${FREE}%   (warn <= $WARN_FREE, critical <= $CRIT_FREE)"
+  print "  swap files:  $SWAPFILES   (warn >= $WARN_SWAP, critical >= $CRIT_SWAP)"
+  print "  paused:      $([[ -e $PAUSE_FILE ]] && echo yes || echo no)"
+  print "  largest:     $(top_apps 5)"
+  print "  targets:     ${(j:, :)TARGETS:-none (warn only)}"
+  local m; m=$(find_targets)
+  print "  matching now: ${${m:+$(print -r -- "$m" | cut -c1-90 | tr '\n' ';')}:-none}"
+  local agent; agent=$(launchctl print "gui/$(id -u)/tech.farpoint.memguard" 2>/dev/null | awk '/^\tstate =/{print $3; exit}')
+  print "  agent:       ${agent:-not loaded}"
+  [[ -f "$LOG" ]] && { print "  last log:"; tail -3 "$LOG" | sed 's/^/    /'; }
+}
+cmd_selftest() {
+  load_cfg
+  local dummy="memgu4rd-selftest-dummy" rc=0
+  ( exec -a "$dummy" /bin/sleep 300 ) & local dp=$!
+  sleep 1
+  NOTIFY=false; GRACE=1; LOG="$LOG_DIR/selftest.log"; TARGETS=("$dummy")
+  MEMGUARD_FAKE_FREE=5; step
+  if kill -0 $dp 2>/dev/null; then print "FAIL: dummy target still running"; kill $dp; rc=1
+  else print "OK   critical + target  -> target terminated"; fi
+  TARGETS=(); LAST_CRIT=0; step; print "OK   critical, no target -> warning only"
+  MEMGUARD_FAKE_FREE=15; LAST_WARN=0; step; print "OK   low memory -> warning"
+  MEMGUARD_FAKE_FREE=80; step; print "OK   normal -> nothing"
+  print "log: $LOG_DIR/selftest.log"
+  return $rc
+}
+case "${1:-status}" in
+  run) cmd_run ;;
+  once) load_cfg; step ;;
+  status) cmd_status ;;
+  pause) touch "$PAUSE_FILE"; print "paused: MemGuard keeps measuring but will not terminate anything" ;;
+  resume) rm -f "$PAUSE_FILE"; print "resumed" ;;
+  selftest) cmd_selftest ;;
+  log) tail -${2:-30} "$LOG" ;;
+  version) print $VERSION ;;
+  *) print "usage: memguard [status|pause|resume|selftest|log [n]|version]"; exit 2 ;;
+esac

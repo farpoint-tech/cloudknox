@@ -1,0 +1,18 @@
+#!/bin/zsh
+# System-wide install: agent runs in every user's GUI session.
+LABEL="tech.farpoint.memguard"
+AGENT="/Library/LaunchAgents/$LABEL.plist"
+BIN="/Library/Application Support/MemGuard/memguard"
+chown root:wheel "$AGENT"; chmod 644 "$AGENT"; chmod 755 "$BIN"
+mkdir -p /usr/local/bin && ln -sf "$BIN" /usr/local/bin/memguard
+CU=$(stat -f %Su /dev/console)
+[[ "$CU" == root || "$CU" == loginwindow ]] && exit 0
+CUID=$(id -u "$CU")
+UHOME=$(dscl . -read "/Users/$CU" NFSHomeDirectory | awk '{print $2}')
+# A previous per-user install would start a second copy at next login: disable it.
+if [[ -f "$UHOME/Library/LaunchAgents/$LABEL.plist" ]]; then
+  launchctl bootout "gui/$CUID/$LABEL" 2>/dev/null
+  mv "$UHOME/Library/LaunchAgents/$LABEL.plist" "$UHOME/Library/LaunchAgents/$LABEL.plist.replaced-by-pkg"
+fi
+launchctl bootstrap "gui/$CUID" "$AGENT" 2>/dev/null || launchctl kickstart -k "gui/$CUID/$LABEL"
+exit 0
