@@ -1,0 +1,28 @@
+name: MemGuard
+on:
+  pull_request:
+    paths:
+      - 'scripts/macos-memguard/**'
+      - '.github/workflows/memguard.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos-tests:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: scripts/macos-memguard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax
+        run: |
+          zsh -n src/memguard MemGuard.command
+          node --check app/server.mjs
+          node --check app/public/app.js
+      - name: Unit, API and disposable-process integration tests
+        run: npm --prefix app test
