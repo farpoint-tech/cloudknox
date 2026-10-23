@@ -10,7 +10,7 @@ import { defaults, validateConfig, classify, command, parseProcesses } from './c
 
 const here = dirname(fileURLToPath(import.meta.url));
 const hash = text => createHash('sha256').update(text).digest('hex');
-const version = '1.1.0';
+const version = '1.1.1';
 const errorText = error => error.message.split('\n')[0];
 export async function createApp({home=homedir(), port=0, sampleCommand=command, testMode=false}={}) {
   const userConfig = join(home,'Library/Application Support/MemGuard/config.json');
@@ -78,7 +78,7 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
     } catch(error) { if(error.code==='ENOENT') return 'Noch keine Protokolle vorhanden.'; throw error; }
   }
   function send(res,status,value,type='application/json') {
-    res.writeHead(status,{'Content-Type':type+'; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"});
+    res.writeHead(status,{'Content-Type':type+(type.startsWith('font/')?'':'; charset=utf-8'),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"});
     res.end(type==='application/json'?JSON.stringify(value):value);
   }
   async function body(req) {
@@ -95,7 +95,9 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
       const path=new URL(req.url,origin).pathname;
       if(req.method==='GET') {
         if(path==='/favicon.ico') { res.writeHead(204); return res.end(); }
-        const files={'/':'index.html','/app.js':'app.js','/style.css':'style.css'};
+        const fonts=['raleway-latin-700-normal.woff2','raleway-latin-800-normal.woff2','ibm-plex-sans-latin-400-normal.woff2','ibm-plex-sans-latin-500-normal.woff2','ibm-plex-sans-latin-600-normal.woff2'];
+        if(fonts.some(name=>path===`/fonts/${name}`)) return send(res,200,await readFile(join(here,'public',path.slice(1))),'font/woff2');
+        const files={'/':'index.html','/app.js':'app.js','/theme.js':'theme.js','/style.css':'style.css'};
         if(path in files) return send(res,200,await readFile(join(here,'public',files[path])) ,path==='/'?'text/html':path.endsWith('js')?'text/javascript':'text/css');
         if(path==='/api/session') return send(res,200,{token,version});
         if(path==='/api/status') return send(res,200,await getSample());

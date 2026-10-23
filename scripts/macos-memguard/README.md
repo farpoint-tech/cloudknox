@@ -1,4 +1,4 @@
-# MemGuard 1.1
+# MemGuard 1.1.1
 
 Lokale Speicherüberwachung für macOS mit Weboberfläche. MemGuard kann Speicherengpässe abmildern, garantiert aber keinen Schutz vor Kernel-Panics.
 
@@ -21,6 +21,14 @@ Der Start der Oberfläche aktiviert keine Prozessbeendigung und ersetzt keine In
 - Responsive deutsche Oberfläche, Tastaturbedienung, native Bestätigungsdialoge.
 
 Die Prozentanzeige stammt aus `kern.memorystatus_level`. Sie ist ein Kernel-Indikator, kein RAM-Belegungswert der Aktivitätsanzeige und keine Absturzprognose. Fehlende Pflichtmesswerte erscheinen als unbekannt. Ein gesunder Zustand wird daraus nicht abgeleitet.
+
+## Darstellung und farpoint-CI
+
+Schwarz ist der Standard. Der Schalter oben rechts wechselt zwischen Schwarz und Hell und merkt die Auswahl im lokalen Browserspeicher für diese Adresse. Bei einem anderen Port gilt eine andere Browseradresse; für dieselbe Auswahl über Serverneustarts einen festen MEMGUARD_PORT verwenden.
+
+Grundlage ist der maßgebliche CI-Steckbrief „CI_farpoint“ (Juli 2026): Orange #FF6A00 für Hauptaktionen, Navy #1E2A47 und Türkis #00CED1 für Status. Die schwarze Basis ist die angeforderte dunkle Variante. Helle Textakzente bzw. dunklere Akzente im Hellmodus sichern die Lesbarkeit. Raleway und IBM Plex Sans werden lokal aus mitgelieferten WOFF2-Dateien geladen; die OFL-Lizenzen liegen unter app/public/fonts. Es entstehen keine Font-CDN-Anfragen.
+
+MemGuard bleibt der Produktname, „powered by farpoint Solution“ benennt den Absender. Die Oberfläche verwendet sachliche Sie-Ansprache. Die Signallogik wurde für diese Gestaltungsänderung nicht verändert.
 
 ## Konfiguration
 

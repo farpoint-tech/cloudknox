@@ -6,7 +6,7 @@
 emulate -L zsh
 setopt no_unset pipe_fail
 
-VERSION="1.1.0"
+VERSION="1.1.1"
 SYS_DIR="/Library/Application Support/MemGuard"
 USER_DIR="$HOME/Library/Application Support/MemGuard"
 LOG_DIR="${MEMGUARD_LOG_DIR:-$HOME/Library/Logs/MemGuard}"

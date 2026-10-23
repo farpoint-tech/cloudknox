@@ -1,10 +1,11 @@
 'use strict';
 const $=selector=>document.querySelector(selector);
 let state=null,token=null,dirty=false,configLoaded=false,pending=null,inFlight=false,tab='overview',configRevision=null;
-const titles={overview:'Alles im Blick.',processes:'Prozesse verstehen.',settings:'Deine Regeln.',logs:'Nachvollziehbar bleiben.'};
+const titles={overview:'Speicher im Blick.',processes:'Prozesse im Überblick.',settings:'Überwachung konfigurieren.',logs:'Ereignisse nachvollziehen.'};
 const labels={normal:'Speicher im Normalbereich',warning:'Speicher wird knapp',critical:'Speicher kritisch',unknown:'Messung unvollständig'};
-const copy={normal:'Die gemessenen Werte liegen innerhalb deiner konfigurierten Schwellen.',warning:'Eine Warnschwelle ist erreicht. Prüfe die größten Prozesse und laufenden Aufgaben.',critical:'Eine kritische Schwelle ist erreicht. Ein aktiver, nicht pausierter Monitor darf konfigurierte Ziele beenden.',unknown:'Mindestens eine erforderliche Messung oder die Konfiguration fehlt. Daraus lässt sich kein gesunder Zustand ableiten.'};
-const colors={normal:'#166a54',warning:'#b87416',critical:'#b7443c',unknown:'#71817d'};
+const copy={normal:'Die gemessenen Werte liegen innerhalb Ihrer konfigurierten Schwellen.',warning:'Eine Warnschwelle ist erreicht. Prüfen Sie die größten Prozesse und laufenden Aufgaben.',critical:'Eine kritische Schwelle ist erreicht. Ein aktiver, nicht pausierter Monitor darf konfigurierte Ziele beenden.',unknown:'Mindestens eine erforderliche Messung oder die Konfiguration fehlt. Daraus lässt sich kein gesunder Zustand ableiten.'};
+function statusColor(level){return getComputedStyle(document.documentElement).getPropertyValue(`--state-${level}`).trim();}
+document.addEventListener('memguard:themechange',()=>{if(state)render();});
 function text(selector,value){$(selector).textContent=value;}
 function bytes(value){return value===null||value===undefined?'—':value>=1024**3?(value/1024**3).toFixed(1)+' GiB':(value/1024**2).toFixed(0)+' MiB';}
 function error(message){text('#error',message);$('#error').hidden=false;}
@@ -35,8 +36,9 @@ function fillConfig(){
 }
 function render(){
   const level=state.state;
-  text('#connection','● Live · lokal');text('#health',labels[level]);text('#health-copy',copy[level]);$('#state-dot').style.background=colors[level];
-  text('#free',state.free===null?'—':`${state.free}%`);$('#gauge-value').style.stroke=colors[level];$('#gauge-value').style.strokeDashoffset=421*(1-(state.free??0)/100);
+  const color=statusColor(level);
+  text('#connection','● Live · lokal');text('#health',labels[level]);text('#health-copy',copy[level]);$('#state-dot').style.background=color;
+  text('#free',state.free===null?'—':`${state.free}%`);$('#gauge-value').style.stroke=color;$('#gauge-value').style.strokeDashoffset=421*(1-(state.free??0)/100);
   text('#ram',bytes(state.totalBytes));text('#swap',bytes(state.swapUsedBytes));text('#swap-files',`${state.swapfiles??'—'} Swap-Dateien`);text('#target-count',state.config.value.targets.length);text('#target-matches',`${state.processes.filter(p=>p.target).length} Treffer in den Top 100`);
   const running=state.agent?.state==='running',external=state.agent?.source==='launchagent';
   text('#monitor-status',running?'Aktiv':state.agent?.source?'Geladen':'Inaktiv');text('#monitor-source',external?'Installierter LaunchAgent':state.agent?.source==='app'?'Durch diese App gestartet':'Nur Anzeige · kein Schutz aktiv');
@@ -47,7 +49,7 @@ function render(){
   const points=state.history;let segments=[],current=[];
   points.forEach((p,i)=>{if(p.free===null){if(current.length)segments.push(current);current=[];}else current.push(`${points.length===1?0:i/(points.length-1)*640},${145-p.free*1.4}`);});if(current.length)segments.push(current);
   const svg=$('#chart');svg.querySelectorAll('.series').forEach(el=>el.remove());$('#chart-line').setAttribute('points','');
-  for(const points of segments){const line=document.createElementNS('http://www.w3.org/2000/svg','polyline');line.classList.add('series');line.setAttribute('points',points.join(' '));line.setAttribute('fill','none');line.setAttribute('stroke',colors[level]);line.setAttribute('stroke-width','2.5');svg.append(line);}
+  for(const points of segments){const line=document.createElementNS('http://www.w3.org/2000/svg','polyline');line.classList.add('series');line.setAttribute('points',points.join(' '));line.setAttribute('fill','none');line.setAttribute('stroke',color);line.setAttribute('stroke-width','2.5');svg.append(line);}
   renderProcesses('#top-processes',state.processes.slice(0,5));filterProcesses();if(!configLoaded||!dirty)fillConfig();
   text('#updated',`Messung: ${new Date(state.time).toLocaleTimeString('de-DE')}`);
   const errors=[...state.errors,...(state.monitorError?[state.monitorError]:[]),...(state.agent?.error?[state.agent.error]:[])];$('#error').hidden=!errors.length;if(errors.length)error(errors.join(' · '));

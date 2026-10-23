@@ -1,4 +1,4 @@
-# MemGuard 1.1 – Entwicklungs- und Prüfbericht
+# MemGuard 1.1.1 – Entwicklungs- und Prüfbericht
 
 Stand: 23. Oktober 2026. Ausgangspunkt: `claude/macos-memguard`, Commit `1cc95fe`. Die Überarbeitung ergänzt eine lokale Webanwendung und härtet den vorhandenen zsh-Monitor. Keine bestehende Installation wurde ersetzt und kein echter Benutzerprozess für Tests beendet.
 
@@ -39,6 +39,12 @@ Die Entwicklung ist als lokale macOS-Webanwendung abgeschlossen und lokal geprü
 Der bestehende PKG-/Installationsweg wurde nicht auf dem Benutzergerät ausgeführt. Die neue ZIP-Auslieferung benötigt Node.js 22 oder neuer. Apple-Signierung/Notarisierung und eine eigenständige native App gehören nicht zu diesem Lieferumfang. GitHub-CI ist separat zum lokalen Prüfstand zu bewerten; ein neuer Workflow allein ist noch kein bestandener CI-Lauf.
 
 Die Standardschwellen sind nicht anhand eines repräsentativen Workloads kalibriert. Ein gespeicherter Wert beweist keine Übernahme durch einen externen Monitor. Die Oberfläche erkennt den Dienst, bestätigt aber dessen Binärversion nicht. Eine frühere Version erhält ihre neuen Sicherheitsprüfungen erst durch ein freigegebenes Update.
+
+## Nachprüfung 1.1.1: Schwarzmodus und farpoint-CI
+
+Die Oberfläche wurde auf die vorgegebenen farpoint-Farben, lokale Raleway-/IBM-Plex-Sans-Schriften und Sie-Ansprache umgestellt. Schwarz ist Standard, Hell bleibt wählbar. Der frühe Theme-Loader verhindert ein helles Aufblitzen beim Laden einer gespeicherten dunklen Auswahl. Die Einstellung wird pro Browseradresse gespeichert; gesperrter Browserspeicher verhindert nicht das Umschalten für die aktuelle Seite.
+
+Erneut bestanden: 19 automatisierte Tests und der erweiterte Browserdurchlauf mit beiden Modi, gespeichertem Zustand nach Reload, Tastaturumschaltung, lokal geladenen Schriften und Desktop-/Mobilansicht. Sieben definierte Text-/Hintergrundpaare wurden in beiden Modi mit mindestens 4,5:1 geprüft. Dies ist keine vollständige WCAG-Zertifizierung. Keine JavaScript- oder CSP-Fehler im Browserdurchlauf. Prozess- und Signalverhalten unverändert.
 
 ## Offene Punkte
 

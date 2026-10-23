@@ -22,6 +22,28 @@ try {
   const page=await browser.newPage({viewport:{width:1440,height:1100}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
   await page.goto(app.url);await page.waitForFunction(()=>document.querySelector('#connection').textContent.includes('Live'));
+  await page.evaluate(()=>document.fonts.ready);
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+  assert.equal(await page.locator('#theme-toggle').getAttribute('aria-pressed'),'true');
+  const checkContrast=async()=>{
+    const ratios=await page.evaluate(()=>{
+      const css=getComputedStyle(document.documentElement);
+      function luminance(token){const hex=css.getPropertyValue(token).trim().replace('#','');const rgb=[0,2,4].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;}
+      return [['--ink','--surface'],['--muted','--surface'],['--link','--accent-tint'],['--on-accent','--accent'],['--state-normal','--success-bg'],['--state-warning','--warning-bg'],['--state-critical','--error-bg']].map(([fg,bg])=>{const a=luminance(fg),b=luminance(bg);return {fg,bg,ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)};});
+    });
+    for(const pair of ratios)assert.ok(pair.ratio>=4.5,`${pair.fg}/${pair.bg}: ${pair.ratio}`);
+  };
+  await checkContrast();
+  assert.equal(await page.evaluate(()=>document.fonts.check('700 16px Raleway')&&document.fonts.check('400 16px "IBM Plex Sans"')),true);
+  await page.screenshot({path:join(output,'desktop-dark.png'),fullPage:true});
+  await page.locator('#theme-toggle').click();
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+  await checkContrast();
+  await page.screenshot({path:join(output,'desktop-light.png'),fullPage:true});
+  await page.reload();await page.waitForFunction(()=>document.querySelector('#connection').textContent.includes('Live'));
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'light','theme survives reload');
+  await page.locator('#theme-toggle').focus();await page.keyboard.press('Space');
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark','keyboard theme switch');
   assert.equal(await page.locator('#health').innerText(),'Speicher im Normalbereich');
   await page.screenshot({path:join(output,'desktop.png'),fullPage:true});
   await page.locator('nav [data-tab="processes"]').click();await page.locator('#search').fill('worker');
@@ -50,5 +72,5 @@ try {
   const downloadPromise=page.waitForEvent('download');await page.locator('#export').click();assert.equal((await downloadPromise).suggestedFilename(),'memguard-diagnose.json');
   free='unavailable';await page.locator('nav [data-tab="overview"]').click();await page.waitForFunction(()=>document.querySelector('#health').textContent==='Messung unvollständig');
   assert.deepEqual(errors,[]);
-  console.log('PASS: desktop/mobile, navigation, filtering, dirty form preservation, cancel/confirm/save/readback, pause, critical/unknown states, log, export, no JS/CSP errors.');
+  console.log('PASS: black/light modes, saved selection, keyboard toggle, local fonts, text contrast >=4.5:1, desktop/mobile, navigation, filtering, dirty form preservation, cancel/confirm/save/readback, pause, critical/unknown states, log, export, no JS/CSP errors.');
 } finally {await browser.close();await app.close();await rm(home,{recursive:true,force:true});}

@@ -75,6 +75,6 @@ test('test server cannot start real processes and static files have CSP',async t
   assert.equal((await post('/api/monitor',{confirm:true,action:'start',revision})).status,409);
   const res=await fetch(app.url);
   assert.match(res.headers.get('content-security-policy'),/frame-ancestors 'none'/);
-  assert.match(await res.text(),/Alles im Blick/);
+  assert.match(await res.text(),/Speicher im Blick/);
   assert.equal((await fetch(app.url+'/../server.mjs')).status,404);
 });
