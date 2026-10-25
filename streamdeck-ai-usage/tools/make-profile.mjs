@@ -54,6 +54,8 @@ const actionByUuid = Object.fromEntries(plugin.Actions.map((a) => [a.UUID, a]));
 const P = "tech.farpoint.ai-usage";
 
 // Key order, row-major. 5x3 gives exactly the agreed layout; larger grids keep the order.
+// 5x3, rows 0-based: row 1 = Codex Kosten, GH Copilot Abo/Tokens/Kosten, Übersicht; row 2 = Resets, Gemini, Grok, M365 Copilot (3,2), frei (4,2).
+// "copilot" = GH Copilot (GitHub), "m365copilot" = M365 Copilot (tenantId in its key settings, see README).
 const p = (provider, metric) => ({ uuid: `${P}.provider`, settings: { provider, metric, showApiCost: false } });
 const KEYS = [
 	p("claude", "sub"), p("claude", "tokens"), p("claude", "kosten"), p("codex", "sub"), p("codex", "tokens"),
@@ -61,6 +63,7 @@ const KEYS = [
 	{ uuid: `${P}.overview`, settings: {} },
 	{ uuid: `${P}.resets`, settings: { blinkWindowHours: "24" } },
 	p("gemini", "auto"), p("grok", "auto"),
+	p("m365copilot", "auto"), // (3,2); tenantId stays empty here, set it in the key's property inspector
 ];
 if (KEYS.length > cols * rows) throw new Error(`${KEYS.length} Tasten passen nicht in ${cols}x${rows}.`);
 

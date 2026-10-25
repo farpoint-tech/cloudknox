@@ -32,6 +32,9 @@ function lastSundaySlot(now = /* @__PURE__ */ new Date()) {
   return d;
 }
 var comma = (s) => s.replace(".", ",");
+function fmtPct(p) {
+  return `${Math.round(p)}%`;
+}
 function fmtTokens(n) {
   if (n < 1e3) return String(Math.round(n));
   if (n < 1e6) return comma((n / 1e3).toFixed(n < 1e4 ? 1 : 0)) + "k";
@@ -70,7 +73,7 @@ function fmtWait(ms) {
 }
 
 // src/cost.ts
-var COST_SOURCE = { claude: true, codex: true, copilot: true, gemini: false, grok: false };
+var COST_SOURCE = { claude: true, codex: true, copilot: true, m365copilot: true, gemini: false, grok: false };
 var SYMBOL = { EUR: "\u20AC", USD: "$", GBP: "\xA3" };
 function fmtNum(n) {
   const whole = Math.abs(n) >= 100 || Math.abs(n - Math.round(n)) < 5e-3;
@@ -240,11 +243,12 @@ function parseRetryAfter(v, now = Date.now()) {
 }
 
 // src/providers/types.ts
-var PROVIDER_IDS = ["claude", "codex", "copilot", "gemini", "grok"];
+var PROVIDER_IDS = ["claude", "codex", "copilot", "m365copilot", "gemini", "grok"];
 var META = {
   claude: { name: "CLAUDE", abbr: "CL", color: "#D97757" },
   codex: { name: "CODEX", abbr: "CX", color: "#10A37F" },
-  copilot: { name: "COPILOT", abbr: "CP", color: "#8957E5" },
+  copilot: { name: "GH COPILOT", abbr: "GH", color: "#8957E5" },
+  m365copilot: { name: "M365 COPILOT", abbr: "M365", color: "#00A4EF" },
   gemini: { name: "GEMINI", abbr: "GE", color: "#4285F4" },
   grok: { name: "GROK", abbr: "GK", color: "#E5E5E5" }
 };
@@ -279,7 +283,8 @@ var SHOWN_EVENTS = 2;
 var PROVIDER_DISPLAY = {
   claude: "Claude",
   codex: "Codex",
-  copilot: "Copilot",
+  copilot: "GH Copilot",
+  m365copilot: "M365 Copilot",
   gemini: "Gemini",
   grok: "Grok"
 };
@@ -671,6 +676,10 @@ async function collectAndSum(provider, sinceIso) {
           available = false;
           detail = "keine lokalen Logs";
           break;
+        case "m365copilot":
+          available = false;
+          detail = "Microsoft ver\xF6ffentlicht keine Token-Zahlen";
+          break;
       }
       lastRun.set(provider, Date.now());
       lastAvail.set(provider, { available, detail });
@@ -682,7 +691,7 @@ async function collectAndSum(provider, sinceIso) {
       available = false;
       detail = "keine Usage-Felder in Gemini-Logs";
     }
-    if (provider === "grok") available = false;
+    if (provider === "grok" || provider === "m365copilot") available = false;
     return { available, detail, ...sumBuckets(s, provider, localDay(new Date(sinceIso))) };
   });
 }
@@ -1090,6 +1099,211 @@ var copilot = {
   }, (detail) => apiOnly("copilot", { status: "error", month: monthLabel(monthStartIso), detail, fetchedAt: nowIso() }))
 };
 
+// src/providers/m365copilot.ts
+import { execFile as execFile4 } from "node:child_process";
+var M365_TENANT_ENV = "AI_USAGE_DECK_M365_TENANT";
+var GRAPH = "https://graph.microsoft.com";
+var AZ_TIMEOUT_MS = 2e4;
+var AZ_EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin"];
+var REPORT_URLS = [
+  `${GRAPH}/v1.0/reports/getMicrosoft365CopilotUsageUserDetail(period='D30')?$format=application/json`,
+  `${GRAPH}/beta/reports/getMicrosoft365CopilotUsageUserDetail(period='D30')?$format=application/json`
+];
+var REPORT_MAX_PAGES = 20;
+var SLOW_TTL_MS = 30 * 6e4;
+function azLoginHint(tenant) {
+  return `az login --tenant ${tenant} --scope https://graph.microsoft.com//.default`;
+}
+var GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var DOMAIN = /^(?=.{3,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+function normalizeTenant(v) {
+  if (typeof v !== "string") return void 0;
+  const t = v.trim();
+  return GUID.test(t) || DOMAIN.test(t) ? t.toLowerCase() : void 0;
+}
+async function resolveTenant() {
+  const s = await loadState().catch(() => void 0);
+  const raw = (s?.m365TenantId || process.env[M365_TENANT_ENV] || "").trim();
+  if (!raw) return {};
+  const tenant = normalizeTenant(raw);
+  return tenant ? { tenant } : { raw };
+}
+var runAz = (file, args2, timeoutMs) => new Promise((resolve) => {
+  const env = { ...process.env, PATH: [process.env.PATH ?? "", ...AZ_EXTRA_PATH].filter(Boolean).join(":") };
+  execFile4(file, args2, { timeout: timeoutMs, env, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
+    const e = err;
+    resolve({ ok: !e, stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), code: e?.code, timedOut: !!e && (e.killed === true || e.signal === "SIGTERM") });
+  });
+});
+async function readAzGraphToken(tenant, run2 = runAz) {
+  const args2 = ["account", "get-access-token", "--tenant", tenant, "--resource-type", "ms-graph", "--query", "accessToken", "-o", "tsv"];
+  const r = await run2("az", args2, AZ_TIMEOUT_MS);
+  if (r.ok) {
+    const token = r.stdout.trim();
+    if (/^ey[\w-]+\.[\w-]+\.[\w-]*$/.test(token)) return { status: "found", token };
+    return { status: "error", detail: "az: unerwartete Ausgabe (kein Token)" };
+  }
+  if (r.code === "ENOENT") return { status: "missing", detail: "az CLI fehlt (brew install azure-cli)" };
+  if (r.timedOut) return { status: "error", detail: `az: keine Antwort in ${AZ_TIMEOUT_MS / 1e3} s` };
+  const aad = r.stderr.match(/AADSTS\d+/)?.[0];
+  return { status: "login", detail: aad ? `${azLoginHint(tenant)} (${aad})` : azLoginHint(tenant) };
+}
+function isCopilotSku(sku) {
+  return typeof sku === "string" && sku.toUpperCase().includes("COPILOT");
+}
+function copilotSkus(json) {
+  const v = pick(json, "value");
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map((x) => pick(x, "skuPartNumber")).filter(isCopilotSku))];
+}
+function copilotRenewal(json, userSkus = [], now = Date.now()) {
+  const v = pick(json, "value");
+  if (!Array.isArray(v)) return { skus: [] };
+  const all = v.filter((x) => isCopilotSku(pick(x, "skuPartNumber")));
+  const mine = all.filter((x) => userSkus.some((u) => u.toLowerCase() === String(pick(x, "skuPartNumber")).toLowerCase()));
+  const subs = mine.length ? mine : all;
+  if (!subs.length) return { skus: [] };
+  const live = subs.filter((x) => {
+    const st = pick(x, "status");
+    return st === void 0 || st === null || String(st).toLowerCase() === "enabled";
+  });
+  const dates = (live.length ? live : subs).map((x) => isoOrUndefined(pick(x, "nextLifecycleDateTime"))).filter((d) => !!d && Date.parse(d) > now).sort();
+  const counts = subs.map((x) => num(pick(x, "totalLicenses"))).filter((n) => n !== void 0);
+  return {
+    resetsAt: dates[0],
+    licenses: counts.length ? counts.reduce((a, b) => a + b, 0) : void 0,
+    skus: [...new Set(subs.map((x) => String(pick(x, "skuPartNumber"))))]
+  };
+}
+var ACTIVITY_FIELDS = [
+  ["microsoftTeamsCopilotLastActivityDate", "Teams"],
+  ["wordCopilotLastActivityDate", "Word"],
+  ["excelCopilotLastActivityDate", "Excel"],
+  ["powerPointCopilotLastActivityDate", "PowerPoint"],
+  ["outlookCopilotLastActivityDate", "Outlook"],
+  ["oneNoteCopilotLastActivityDate", "OneNote"],
+  ["loopCopilotLastActivityDate", "Loop"],
+  ["copilotChatLastActivityDate", "Chat"]
+];
+var DAY = 864e5;
+var dateOnly = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : void 0;
+function activityFromRow(row, now = Date.now()) {
+  const refresh = dateOnly(pick(row, "reportRefreshDate"));
+  const ref = refresh ? Date.parse(`${refresh}T00:00:00Z`) : now;
+  const from = ref - 30 * DAY;
+  const apps = ACTIVITY_FIELDS.filter(([f]) => {
+    const d = dateOnly(pick(row, f));
+    return !!d && Date.parse(`${d}T00:00:00Z`) >= from;
+  }).map(([, name]) => name);
+  const out = { status: "ok", apps };
+  const last = dateOnly(pick(row, "lastActivityDate"));
+  if (last) out.lastActivity = last;
+  if (refresh) out.refreshDate = refresh;
+  return out;
+}
+var CONCEALED = /^[0-9A-F]{32}$/i;
+function findReportRow(json, upn) {
+  const v = pick(json, "value");
+  if (!Array.isArray(v)) return { concealed: false, rows: 0 };
+  const want = upn.toLowerCase();
+  const row = v.find((x) => String(pick(x, "userPrincipalName") ?? "").toLowerCase() === want);
+  const concealed = !row && v.length > 0 && v.every((x) => CONCEALED.test(String(pick(x, "userPrincipalName") ?? "")));
+  return { row, concealed, rows: v.length };
+}
+async function reportActivity(get, upn, now = Date.now()) {
+  let res;
+  for (const url of REPORT_URLS) {
+    res = await get(url);
+    if (!(res.kind === "http" && (res.status === 400 || res.status === 404))) break;
+  }
+  let concealedAll = true;
+  let rows = 0;
+  for (let page = 0; res && page < REPORT_MAX_PAGES; page++) {
+    if (res.kind === "offline") return { status: "error", apps: [], detail: `Nutzung: offline` };
+    if (res.kind === "http") {
+      if (res.status === 403 || res.status === 401) return { status: "forbidden", apps: [], detail: "Nutzung: keine Berechtigung" };
+      return { status: "error", apps: [], detail: `Nutzung: HTTP ${res.status}` };
+    }
+    const f = findReportRow(res.json, upn);
+    rows += f.rows;
+    if (f.row) return activityFromRow(f.row, now);
+    if (!f.concealed && f.rows > 0) concealedAll = false;
+    const next = pick(res.json, "@odata.nextLink");
+    if (typeof next !== "string" || !next.startsWith(`${GRAPH}/`)) break;
+    res = await get(next);
+  }
+  if (rows > 0 && concealedAll) return { status: "concealed", apps: [], detail: "Nutzung: Bericht anonymisiert (Namen im Admin Center einblenden)" };
+  return { status: "none", apps: [], detail: "Nutzung: kein Eintrag im Bericht" };
+}
+function licenseCost(r) {
+  if (!r || r.licenses === void 0) return void 0;
+  const c = { label: "Lizenz", used: r.licenses, info: true };
+  if (r.resetsAt) c.resetAt = r.resetsAt;
+  return [c];
+}
+function renewalResets(r) {
+  return r?.resetsAt ? [{ provider: "m365copilot", window: "Verl\xE4ngerung", resetsAt: r.resetsAt }] : [];
+}
+function buildM365Sub(parts, tenant, fetchedAt = nowIso(), now = Date.now()) {
+  if (parts.license.kind !== "ok") {
+    const h = httpStatus(parts.license);
+    return { ...h, detail: h.status === "login" ? azLoginHint(tenant) : h.detail, fetchedAt };
+  }
+  const skus = copilotSkus(parts.license.json);
+  const notes2 = [];
+  let renewal;
+  const sr = parts.subscriptions;
+  if (sr?.kind === "ok") renewal = copilotRenewal(sr.json, skus, now);
+  else if (sr?.kind === "http" && (sr.status === 403 || sr.status === 401)) notes2.push("Verl\xE4ngerung: keine Berechtigung");
+  else if (sr) notes2.push(`Verl\xE4ngerung: ${sr.kind === "offline" ? "offline" : `HTTP ${sr.status}`}`);
+  if (parts.activity?.detail) notes2.push(parts.activity.detail);
+  const sub = {
+    status: "ok",
+    primary: { label: "Lizenz", pct: 0, text: skus.length ? "ja" : "nein", ...renewal?.resetsAt ? { resetAt: renewal.resetsAt } : {} },
+    resets: renewalResets(renewal),
+    fetchedAt
+  };
+  if (skus.length) sub.plan = skus.join(", ");
+  const cost = licenseCost(renewal);
+  if (cost) sub.cost = cost;
+  if (parts.activity) sub.activity = parts.activity;
+  if (notes2.length) sub.detail = notes2.join("; ");
+  return sub;
+}
+var slowCache = /* @__PURE__ */ new Map();
+var m365copilot = {
+  id: "m365copilot",
+  subscription: () => guard(async () => {
+    const fetchedAt = nowIso();
+    const t = await resolveTenant();
+    if (!t.tenant) {
+      const detail = t.raw ? "tenantId ung\xFCltig (GUID oder Domain)" : `tenantId fehlt (Taste-Einstellung oder ${M365_TENANT_ENV})`;
+      return subOnly("m365copilot", { status: "config", detail, fetchedAt });
+    }
+    const tenant = t.tenant;
+    const tok = await readAzGraphToken(tenant);
+    if (tok.status !== "found") return subOnly("m365copilot", { status: tok.status === "login" ? "login" : "error", detail: tok.detail, fetchedAt });
+    const h = { Authorization: `Bearer ${tok.token}` };
+    const get = (url) => getJson(url, h, { timeoutMs: 2e4 });
+    const license = await get(`${GRAPH}/v1.0/me/licenseDetails?$select=skuPartNumber,skuId`);
+    if (license.kind !== "ok") return subOnly("m365copilot", buildM365Sub({ license }, tenant, fetchedAt));
+    let slow = slowCache.get(tenant);
+    if (!slow || Date.now() - slow.at > SLOW_TTL_MS) {
+      const [subscriptions, me] = await Promise.all([
+        get(`${GRAPH}/v1.0/directory/subscriptions?$select=skuPartNumber,nextLifecycleDateTime,totalLicenses,status`),
+        get(`${GRAPH}/v1.0/me?$select=userPrincipalName`)
+      ]);
+      const upn = me.kind === "ok" ? pick(me.json, "userPrincipalName") : void 0;
+      const activity = typeof upn === "string" && upn ? await reportActivity(get, upn) : { status: "error", apps: [], detail: me.kind === "ok" ? "Nutzung: UPN fehlt" : `Nutzung: /me ${me.kind === "http" ? `HTTP ${me.status}` : "offline"}` };
+      slow = { at: Date.now(), subscriptions, activity };
+      if (subscriptions.kind !== "offline" && activity.status !== "error") slowCache.set(tenant, slow);
+    }
+    return subOnly("m365copilot", buildM365Sub({ license, subscriptions: slow.subscriptions, activity: slow.activity }, tenant, fetchedAt));
+  }, (detail) => subOnly("m365copilot", { status: "error", detail, fetchedAt: nowIso() })),
+  localTokens: async (sinceIso) => tokensOnly("m365copilot", { status: "na", since: sinceIso, in: 0, out: 0, cached: 0, detail: "Microsoft ver\xF6ffentlicht keine Token-Zahlen", fetchedAt: nowIso() }),
+  apiCost: async (monthStartIso) => apiOnly("m365copilot", { status: "na", month: monthLabel(monthStartIso), detail: "keine API-Kosten", fetchedAt: nowIso() })
+};
+
 // src/providers/grok.ts
 import fs8 from "node:fs/promises";
 var XAI_MANAGEMENT = "xai-management";
@@ -1161,7 +1375,7 @@ var gemini = {
 };
 
 // src/providers/index.ts
-var PROVIDERS = { claude, codex, copilot, gemini, grok };
+var PROVIDERS = { claude, codex, copilot, m365copilot, gemini, grok };
 
 // src/subgate.ts
 var FRESH_MS = 55e3;
@@ -1319,6 +1533,29 @@ async function doctor(opts = {}) {
   out.push({ provider: "copilot", source: "~/.copilot/data.db", result: await exists(COPILOT_DB) ? "found" : "missing" });
   out.push({ provider: "copilot", source: SQLITE_BIN, result: await exists(SQLITE_BIN) ? "found" : "missing" });
   out.push(await keyCheck("copilot", GITHUB_BILLING_PAT, api));
+  const mt = await resolveTenant();
+  if (!mt.tenant) {
+    out.push({ provider: "m365copilot", source: `tenantId (Taste / ${M365_TENANT_ENV})`, result: mt.raw ? "invalid" : "missing", note: mt.raw ? "GUID oder Domain erwartet" : `Taste-Einstellung oder ${M365_TENANT_ENV}=<tenant>` });
+  } else {
+    out.push({ provider: "m365copilot", source: "tenantId", result: "found", note: mt.tenant });
+    const az = await readAzGraphToken(mt.tenant);
+    out.push({ provider: "m365copilot", source: "az account get-access-token (ms-graph)", result: az.status === "found" ? "found" : az.status === "missing" ? "missing" : "invalid", note: az.status === "found" ? "Token vorhanden" : az.detail });
+    if (az.status === "found") {
+      const sub = await probe("m365copilot");
+      out.push(subCheck("m365copilot", "GET graph /me/licenseDetails", sub));
+      if (sub.primary) {
+        const a = sub.activity;
+        const renewal = sub.resets?.[0]?.resetsAt;
+        out.push({ provider: "m365copilot", source: "GET graph /directory/subscriptions", result: renewal ? "ok" : "info", note: renewal ? `Verl\xE4ngerung ${renewal.slice(0, 10)}` : sub.detail?.match(/Verlängerung: [^;]+/)?.[0] ?? "keine Copilot-Subscription gefunden" });
+        out.push({
+          provider: "m365copilot",
+          source: "GET graph Copilot-Nutzungsbericht D30",
+          result: a?.status === "ok" ? "ok" : a?.status === "forbidden" ? "info" : "warn",
+          note: a?.status === "ok" ? `aktiv in: ${a.apps.join(", ") || "\u2013"}` : a?.status === "forbidden" ? "Reports.Read.All / Reports Reader fehlt (optional)" : a?.detail ?? "kein Ergebnis"
+        });
+      }
+    }
+  }
   out.push({ provider: "gemini", source: "~/.gemini/oauth_creds.json", result: await exists(GEMINI_OAUTH) ? "found" : "missing", note: "Abo-Quota in v1 n/v" });
   const chats = await listFiles(GEMINI_TMP, (n) => n.startsWith("session-") && n.endsWith(".jsonl"));
   let withUsage = 0;
@@ -1376,6 +1613,27 @@ var Hub = class {
       }).catch(() => void 0);
     }
     if (added.length) await this.refreshApi(added);
+  }
+  /**
+   * Stores the M365 Copilot tenant from a provider-key setting in state.json (shared with CLI and reconcile).
+   * A changed tenant drops the old tenant's last value, cooldown and resets, then fetches anew.
+   * Invalid values are ignored here; the provider reports them as status "config".
+   */
+  async setM365Tenant(raw, opts = {}) {
+    const tenant = normalizeTenant(raw);
+    if (!tenant) return;
+    const changed = await withState((s) => {
+      if (s.m365TenantId === tenant) return false;
+      s.m365TenantId = tenant;
+      delete s.lastSub.m365copilot;
+      delete s.subGate.m365copilot;
+      return true;
+    });
+    if (!changed) return;
+    this.resetsBy.delete("m365copilot");
+    delete this.views.get("m365copilot").sub;
+    this.emit();
+    if (opts.refresh !== false) await this.refreshSub(["m365copilot"]);
   }
   /** Remembers the resets of a SubPart that carries a value. */
   noteResets(id, sub) {
@@ -1487,7 +1745,7 @@ async function reconcile(opts = {}) {
         ts: now.toISOString(),
         week: isoWeek(now),
         provider: id,
-        sub_pct: s.primary?.pct ?? null,
+        sub_pct: s.primary && s.primary.text === void 0 ? s.primary.pct : null,
         sub_reset: s.primary?.resetAt ?? null,
         tokens_week_in: tOk ? t.in : null,
         tokens_week_out: tOk ? t.out : null,
@@ -1514,8 +1772,12 @@ var STATUS_TEXT = {
   offline: "offline",
   na: "n/v",
   error: "Fehler",
-  stale: "veraltet"
+  stale: "veraltet",
+  config: "Setup fehlt"
 };
+function windowValue(w) {
+  return w.text ?? fmtPct(w.pct);
+}
 
 // src/cli.ts
 function table(rows) {
@@ -1526,8 +1788,9 @@ function subCell(v) {
   const s = v.sub;
   if (!s) return "\u2026";
   if (!s.primary) return STATUS_TEXT[s.status];
-  const parts = [`${s.primary.label} ${Math.round(s.primary.pct)}%`];
-  if (s.secondary) parts.push(`${s.secondary.label} ${Math.round(s.secondary.pct)}%`);
+  const parts = [`${s.primary.label} ${windowValue(s.primary)}`];
+  if (s.secondary) parts.push(`${s.secondary.label} ${windowValue(s.secondary)}`);
+  if (s.primary.text !== void 0 && s.plan) parts.push(s.plan);
   return parts.join(" \xB7 ") + (s.status === "ok" ? "" : ` (${STATUS_TEXT[s.status]})`);
 }
 function sourceCell(v, now) {
@@ -1548,6 +1811,19 @@ function tokCell(t) {
   if (t.status !== "ok") return STATUS_TEXT[t.status];
   return `${fmtTokens(t.in + t.out)} +${fmtTokens(t.cached)} cache`;
 }
+function activityCell(v) {
+  const s = v.sub;
+  if (!s) return "\u2026";
+  const a = s.activity;
+  if (!a) return s.primary ? "n/v" : STATUS_TEXT[s.status];
+  const stale = s.status === "ok" ? "" : "~ ";
+  if (a.status === "forbidden") return "Nutzung: keine Berechtigung";
+  if (a.status === "concealed") return "Nutzung: anonymisiert";
+  if (a.status === "none") return "Nutzung: kein Eintrag";
+  if (a.status === "error") return "Nutzung: Fehler";
+  const apps = a.apps.length ? `aktiv in: ${a.apps.join(", ")}` : "aktiv in: \u2013 (30 Tage)";
+  return stale + apps + (a.lastActivity ? `; zuletzt ${a.lastActivity}` : "");
+}
 function costCell(id, v, now) {
   if (!COST_SOURCE[id]) return "n/v";
   const s = v.sub;
@@ -1559,7 +1835,8 @@ function costCell(id, v, now) {
 function notes(v) {
   const n = [];
   if (v.sub && v.sub.status !== "ok" && v.sub.detail) n.push(`Abo: ${v.sub.detail}`);
-  if (v.today && v.today.status !== "ok" && v.today.detail) n.push(`Tokens: ${v.today.detail}`);
+  if (v.today && v.today.status !== "ok" && v.today.status !== "na" && v.today.detail) n.push(`Tokens: ${v.today.detail}`);
+  if (v.sub?.status === "ok" && v.sub.primary?.text !== void 0 && v.sub.detail) n.push(v.sub.detail);
   if (v.api && v.api.status !== "ok" && v.api.detail) n.push(`API: ${v.api.detail}`);
   return n.join("; ");
 }
@@ -1577,8 +1854,8 @@ async function status(fresh, api) {
       subCell(v),
       sourceCell(v, Date.now()),
       v.sub?.status === "ok" && v.sub.primary?.resetAt ? fmtCountdown(v.sub.primary.resetAt) : "",
-      tokCell(v.today),
-      tokCell(v.week),
+      id === "m365copilot" ? activityCell(v) : tokCell(v.today),
+      id === "m365copilot" ? "n/v" : tokCell(v.week),
       costCell(id, v, Date.now())
     ];
     if (api) row.push(v.api ? v.api.usd !== void 0 ? fmtUsd(v.api.usd) : STATUS_TEXT[v.api.status] : "\u2026");

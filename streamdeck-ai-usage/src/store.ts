@@ -53,6 +53,11 @@ export interface State {
 	 * showApiCost. Written by the plugin, read by the weekly reconcile (launchd). Absent = none.
 	 */
 	apiProviders?: ProviderId[];
+	/**
+	 * Entra tenant (GUID or domain) for M365 Copilot, from the provider-key setting tenantId. Written by the plugin,
+	 * read by CLI and reconcile; AI_USAGE_DECK_M365_TENANT is the fallback when absent.
+	 */
+	m365TenantId?: string;
 	lastTokensRun?: string;
 	lastApiRun?: string;
 	lastReconcile?: string;

@@ -10,7 +10,8 @@ export const SHOWN_EVENTS = 2;
 export const PROVIDER_DISPLAY: Record<ProviderId, string> = {
 	claude: "Claude",
 	codex: "Codex",
-	copilot: "Copilot",
+	copilot: "GH Copilot",
+	m365copilot: "M365 Copilot",
 	gemini: "Gemini",
 	grok: "Grok",
 };

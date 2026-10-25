@@ -10,7 +10,8 @@
 			<sdpi-select setting="provider" default="claude">
 				<option value="claude">Claude</option>
 				<option value="codex">ChatGPT / Codex</option>
-				<option value="copilot">GitHub Copilot</option>
+				<option value="copilot">GH Copilot (GitHub)</option>
+				<option value="m365copilot">M365 Copilot (Microsoft 365)</option>
 				<option value="gemini">Gemini</option>
 				<option value="grok">Grok</option>
 			</sdpi-select>
@@ -23,6 +24,15 @@
 				<option value="kosten">Kosten (Abo: Extra, Budget, Credits)</option>
 				<option value="api">API-Kosten Monat (nur mit Häkchen unten)</option>
 			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item label="M365 Tenant">
+			<sdpi-textfield setting="tenantId" placeholder="Tenant-ID oder contoso.onmicrosoft.com"></sdpi-textfield>
+		</sdpi-item>
+		<sdpi-item label="">
+			<p style="margin: 0; font-size: 9pt; color: #9a9a9a">
+				Nur für M365 Copilot. Anmeldung einmal im Terminal: az login --tenant &lt;id&gt; --scope https://graph.microsoft.com//.default.
+				Nutzungsbericht braucht Reports.Read.All bzw. Rolle Reports Reader (optional).
+			</p>
 		</sdpi-item>
 		<sdpi-item label="API-Kosten">
 			<sdpi-checkbox setting="showApiCost" label="anzeigen (nur Enterprise/Teams, Admin-Key nötig)"></sdpi-checkbox>

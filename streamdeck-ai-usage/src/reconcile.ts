@@ -50,7 +50,7 @@ export async function reconcile(opts: { scheduled?: boolean; api?: ProviderId[] 
 				ts: now.toISOString(),
 				week: isoWeek(now),
 				provider: id,
-				sub_pct: s.primary?.pct ?? null,
+				sub_pct: s.primary && s.primary.text === undefined ? s.primary.pct : null,
 				sub_reset: s.primary?.resetAt ?? null,
 				tokens_week_in: tOk ? t.in : null,
 				tokens_week_out: tOk ? t.out : null,

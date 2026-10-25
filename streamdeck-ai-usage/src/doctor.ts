@@ -5,6 +5,7 @@ import { CONFIG_DIR, COPILOT_DB, GEMINI_OAUTH, GEMINI_TMP, SQLITE_BIN } from "./
 import { ANTHROPIC_ADMIN, CLAUDE_KEYCHAIN, readClaudeCred } from "./providers/claude.js";
 import { OPENAI_ADMIN, readCodexCred } from "./providers/codex.js";
 import { GITHUB_BILLING_PAT, readGhToken } from "./providers/copilot.js";
+import { M365_TENANT_ENV, readAzGraphToken, resolveTenant } from "./providers/m365copilot.js";
 import { readGrokCred, XAI_MANAGEMENT, XAI_TEAM_ID } from "./providers/grok.js";
 import { parseGeminiLine } from "./collectors/gemini-jsonl.js";
 import type { ProviderId, SubPart } from "./providers/types.js";
@@ -95,6 +96,31 @@ export async function doctor(opts: { api?: boolean } = {}): Promise<Check[]> {
 	out.push({ provider: "copilot", source: "~/.copilot/data.db", result: (await exists(COPILOT_DB)) ? "found" : "missing" });
 	out.push({ provider: "copilot", source: SQLITE_BIN, result: (await exists(SQLITE_BIN)) ? "found" : "missing" });
 	out.push(await keyCheck("copilot", GITHUB_BILLING_PAT, api));
+
+	// M365 Copilot (Graph via az CLI). Token is checked for presence only, never printed.
+	const mt = await resolveTenant();
+	if (!mt.tenant) {
+		out.push({ provider: "m365copilot", source: `tenantId (Taste / ${M365_TENANT_ENV})`, result: mt.raw ? "invalid" : "missing", note: mt.raw ? "GUID oder Domain erwartet" : `Taste-Einstellung oder ${M365_TENANT_ENV}=<tenant>` });
+	} else {
+		out.push({ provider: "m365copilot", source: "tenantId", result: "found", note: mt.tenant });
+		const az = await readAzGraphToken(mt.tenant);
+		out.push({ provider: "m365copilot", source: "az account get-access-token (ms-graph)", result: az.status === "found" ? "found" : az.status === "missing" ? "missing" : "invalid", note: az.status === "found" ? "Token vorhanden" : az.detail });
+		if (az.status === "found") {
+			const sub = await probe("m365copilot");
+			out.push(subCheck("m365copilot", "GET graph /me/licenseDetails", sub));
+			if (sub.primary) {
+				const a = sub.activity;
+				const renewal = sub.resets?.[0]?.resetsAt;
+				out.push({ provider: "m365copilot", source: "GET graph /directory/subscriptions", result: renewal ? "ok" : "info", note: renewal ? `Verlängerung ${renewal.slice(0, 10)}` : (sub.detail?.match(/Verlängerung: [^;]+/)?.[0] ?? "keine Copilot-Subscription gefunden") });
+				out.push({
+					provider: "m365copilot",
+					source: "GET graph Copilot-Nutzungsbericht D30",
+					result: a?.status === "ok" ? "ok" : a?.status === "forbidden" ? "info" : "warn",
+					note: a?.status === "ok" ? `aktiv in: ${a.apps.join(", ") || "–"}` : a?.status === "forbidden" ? "Reports.Read.All / Reports Reader fehlt (optional)" : (a?.detail ?? "kein Ergebnis"),
+				});
+			}
+		}
+	}
 
 	// Gemini
 	out.push({ provider: "gemini", source: "~/.gemini/oauth_creds.json", result: (await exists(GEMINI_OAUTH)) ? "found" : "missing", note: "Abo-Quota in v1 n/v" });

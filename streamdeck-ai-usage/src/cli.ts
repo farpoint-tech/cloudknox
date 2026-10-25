@@ -6,7 +6,7 @@ import { STATE_FILE, HISTORY_FILE } from "./paths.js";
 import { META, PROVIDER_IDS, type ProviderId } from "./providers/types.js";
 import { reconcile } from "./reconcile.js";
 import { FRESH_MS } from "./subgate.js";
-import { STATUS_TEXT } from "./render.js";
+import { STATUS_TEXT, windowValue } from "./render.js";
 import { blinkInfo, BLINK_MIN_EVENTS, DEFAULT_BLINK_WINDOW_HOURS, fmtResetCountdown, fmtResetFull, normalizeBlinkHours, PROVIDER_DISPLAY, SHOWN_EVENTS } from "./resets.js";
 
 function table(rows: string[][]): string {
@@ -18,8 +18,9 @@ function subCell(v: View): string {
 	const s = v.sub;
 	if (!s) return "…";
 	if (!s.primary) return STATUS_TEXT[s.status];
-	const parts = [`${s.primary.label} ${Math.round(s.primary.pct)}%`];
-	if (s.secondary) parts.push(`${s.secondary.label} ${Math.round(s.secondary.pct)}%`);
+	const parts = [`${s.primary.label} ${windowValue(s.primary)}`];
+	if (s.secondary) parts.push(`${s.secondary.label} ${windowValue(s.secondary)}`);
+	if (s.primary.text !== undefined && s.plan) parts.push(s.plan);
 	return parts.join(" · ") + (s.status === "ok" ? "" : ` (${STATUS_TEXT[s.status]})`);
 }
 
@@ -45,6 +46,21 @@ function tokCell(t: View["today"]): string {
 	return `${fmtTokens(t.in + t.out)} +${fmtTokens(t.cached)} cache`;
 }
 
+/** M365 Copilot "Tokens heute" cell: no token counts; apps with Copilot activity in the last 30 days instead. */
+function activityCell(v: View): string {
+	const s = v.sub;
+	if (!s) return "…";
+	const a = s.activity;
+	if (!a) return s.primary ? "n/v" : STATUS_TEXT[s.status];
+	const stale = s.status === "ok" ? "" : "~ ";
+	if (a.status === "forbidden") return "Nutzung: keine Berechtigung";
+	if (a.status === "concealed") return "Nutzung: anonymisiert";
+	if (a.status === "none") return "Nutzung: kein Eintrag";
+	if (a.status === "error") return "Nutzung: Fehler";
+	const apps = a.apps.length ? `aktiv in: ${a.apps.join(", ")}` : "aktiv in: – (30 Tage)";
+	return stale + apps + (a.lastActivity ? `; zuletzt ${a.lastActivity}` : "");
+}
+
 /** "Kosten" column: subscription costs/budgets from the last subscription value (stale ones marked "~"). */
 function costCell(id: ProviderId, v: View, now: number): string {
 	if (!COST_SOURCE[id]) return "n/v";
@@ -58,7 +74,8 @@ function costCell(id: ProviderId, v: View, now: number): string {
 function notes(v: View): string {
 	const n: string[] = [];
 	if (v.sub && v.sub.status !== "ok" && v.sub.detail) n.push(`Abo: ${v.sub.detail}`);
-	if (v.today && v.today.status !== "ok" && v.today.detail) n.push(`Tokens: ${v.today.detail}`);
+	if (v.today && v.today.status !== "ok" && v.today.status !== "na" && v.today.detail) n.push(`Tokens: ${v.today.detail}`);
+	if (v.sub?.status === "ok" && v.sub.primary?.text !== undefined && v.sub.detail) n.push(v.sub.detail); // M365 partial failures
 	if (v.api && v.api.status !== "ok" && v.api.detail) n.push(`API: ${v.api.detail}`);
 	return n.join("; ");
 }
@@ -78,8 +95,8 @@ async function status(fresh: boolean, api: boolean): Promise<void> {
 			subCell(v),
 			sourceCell(v, Date.now()),
 			v.sub?.status === "ok" && v.sub.primary?.resetAt ? fmtCountdown(v.sub.primary.resetAt) : "",
-			tokCell(v.today),
-			tokCell(v.week),
+			id === "m365copilot" ? activityCell(v) : tokCell(v.today),
+			id === "m365copilot" ? "n/v" : tokCell(v.week),
 			costCell(id, v, Date.now()),
 		];
 		if (api) row.push(v.api ? (v.api.usd !== undefined ? fmtUsd(v.api.usd) : STATUS_TEXT[v.api.status]) : "…");

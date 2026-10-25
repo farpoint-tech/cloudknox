@@ -42,6 +42,10 @@ export async function collectAndSum(provider: ProviderId, sinceIso: string): Pro
 					available = false;
 					detail = "keine lokalen Logs";
 					break;
+				case "m365copilot":
+					available = false;
+					detail = "Microsoft veröffentlicht keine Token-Zahlen";
+					break;
 			}
 			lastRun.set(provider, Date.now());
 			lastAvail.set(provider, { available, detail });
@@ -53,7 +57,7 @@ export async function collectAndSum(provider: ProviderId, sinceIso: string): Pro
 			available = false;
 			detail = "keine Usage-Felder in Gemini-Logs";
 		}
-		if (provider === "grok") available = false;
+		if (provider === "grok" || provider === "m365copilot") available = false;
 		return { available, detail, ...sumBuckets(s, provider, localDay(new Date(sinceIso))) };
 	});
 }

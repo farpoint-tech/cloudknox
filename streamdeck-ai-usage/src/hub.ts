@@ -3,6 +3,7 @@ import { PROVIDERS, PROVIDER_IDS, type ApiPart, type ProviderId, type ResetEvent
 import { resetsOf, upcomingResets } from "./resets.js";
 import { loadState, withState } from "./store.js";
 import { gatedSub } from "./subgate.js";
+import { normalizeTenant } from "./providers/m365copilot.js";
 
 export interface View {
 	sub?: SubPart;
@@ -48,6 +49,28 @@ export class Hub {
 			}).catch(() => undefined);
 		}
 		if (added.length) await this.refreshApi(added);
+	}
+
+	/**
+	 * Stores the M365 Copilot tenant from a provider-key setting in state.json (shared with CLI and reconcile).
+	 * A changed tenant drops the old tenant's last value, cooldown and resets, then fetches anew.
+	 * Invalid values are ignored here; the provider reports them as status "config".
+	 */
+	async setM365Tenant(raw: string, opts: { refresh?: boolean } = {}): Promise<void> {
+		const tenant = normalizeTenant(raw);
+		if (!tenant) return;
+		const changed = await withState((s) => {
+			if (s.m365TenantId === tenant) return false;
+			s.m365TenantId = tenant;
+			delete s.lastSub.m365copilot;
+			delete s.subGate.m365copilot;
+			return true;
+		});
+		if (!changed) return;
+		this.resetsBy.delete("m365copilot");
+		delete this.views.get("m365copilot")!.sub;
+		this.emit();
+		if (opts.refresh !== false) await this.refreshSub(["m365copilot"]);
 	}
 
 	/** Remembers the resets of a SubPart that carries a value. */

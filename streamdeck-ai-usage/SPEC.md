@@ -33,13 +33,36 @@ Plugin-UUID: `tech.farpoint.ai-usage`  — Ablage: `streamdeck-ai-usage/` (diese
 - Lokale Tokens: `~/.codex/sessions/YYYY/MM/DD/*.jsonl` — `payload.type=="token_count"` →
   `payload.info.total_token_usage` (letzter Wert je Session = Sessionsumme), `payload.rate_limits`.
 
-### GitHub Copilot (Abo)  ✅ (gh-Token seit 2026-10-25 wieder gültig)
+### GitHub Copilot (Abo, Anzeige „GH Copilot“ / Kürzel `GH`, Provider-ID bleibt `copilot`)  ✅ (gh-Token seit 2026-10-25 wieder gültig)
 - GET https://api.github.com/copilot_internal/user, `Authorization: Bearer <gh-token>`, `Accept: application/json`
 - Token: `gh auth token` (Keychain-Eintrag `gh:github.com`). Stand 2026-10-25: gh meldet "token in keyring is invalid" →
   Nutzer muss `gh auth refresh -h github.com` ausführen. Plugin zeigt dann "gh login".
   NICHT den Keychain-Eintrag `github-copilot-app` lesen (löst Keychain-Dialog aus).
 - Response (live 2026-10-25): `quota_snapshots.{premium_interactions,chat,completions}.{entitlement,remaining,percent_remaining,unlimited,overage_count,overage_permitted}`, `quota_reset_date`, `copilot_plan`.
 - Lokale Tokens: `~/.copilot/data.db` (SQLite) Tabelle `sessions` → `total_input_tokens,total_output_tokens,total_cached_tokens,model,created_at,updated_at`.
+
+### Microsoft 365 Copilot (Lizenz, Provider-ID `m365copilot`, Anzeige „M365 Copilot“ / Kürzel `M365`)  ⚠️ nicht live getestet
+- Token: `az account get-access-token --tenant <tenantId> --resource-type ms-graph --query accessToken -o tsv` per execFile,
+  20 s Timeout, `az` aus PATH + `/opt/homebrew/bin` + `/usr/local/bin`. Kein Token → Status `login`, Detail
+  `az login --tenant <id> --scope https://graph.microsoft.com//.default` (Taste: `az login`). Nur AADSTS-Codes aus stderr werden übernommen.
+- Tenant: Setting `tenantId` der Anbieter-Taste (GUID oder Domain, validiert), gespeichert in `state.json` → `m365TenantId`;
+  Fallback `AI_USAGE_DECK_M365_TENANT`. Fehlt/ungültig → neuer Status `config` („Setup fehlt“), kein az-Aufruf.
+  Tenant-Wechsel löscht `lastSub`/`subGate` von `m365copilot`.
+- Abrufe (GET, über `subgate.ts`, jeder degradiert einzeln; nur 1. bestimmt den Status):
+  1. `/v1.0/me/licenseDetails?$select=skuPartNumber,skuId` → Lizenz ja, wenn eine `skuPartNumber` „COPILOT“ enthält.
+     `primary = {label "Lizenz", text "ja"|"nein", pct 0, resetAt}`; `Window.text` ersetzt die Prozentanzeige, kein Balken. `plan` = SKU(s).
+  2. `/v1.0/directory/subscriptions?$select=skuPartNumber,nextLifecycleDateTime,totalLicenses,status` → frühestes künftiges
+     `nextLifecycleDateTime` aktiver Copilot-SKUs = ResetEvent `Verlängerung`; Summe `totalLicenses` = CostItem `Lizenz`
+     (`info: true`, zählt nicht für die Kosten-Zeile der Übersicht). 403 → still, Detail `Verlängerung: keine Berechtigung`.
+  3. `/v1.0/me?$select=userPrincipalName` + `/v1.0/reports/getMicrosoft365CopilotUsageUserDetail(period='D30')?$format=application/json`
+     (bei 400/404 Fallback `/beta/reports/…`, laut Learn die dokumentierte JSON-Form; v1.0 GA liegt unter `/v1.0/copilot/reports/…` als CSV).
+     Zeile per UPN (ohne Groß/Klein), Folgeseiten nur über `graph.microsoft.com`-nextLinks. Apps = Felder
+     `microsoftTeams|word|excel|powerPoint|outlook|oneNote|loop…CopilotLastActivityDate`, `copilotChatLastActivityDate`
+     mit Datum ≥ `reportRefreshDate` − 30 Tage → `SubPart.activity {status, apps, lastActivity}`. 403 → `forbidden`,
+     Detail `Nutzung: keine Berechtigung`; gehashte UPNs → `concealed`.
+  Bericht + Subscriptions 30 min Prozess-Cache je Tenant.
+- Tokens: `n/v` (Microsoft veröffentlicht keine Token-Zahlen); die Tokens-Anzeige zeigt stattdessen `activity`.
+  Kosten: `Lizenz` mit Anzahl, sonst `n/v`. API-Kosten: keine.
 
 ### Gemini (Abo)  ⚠️ nur teilweise
 - Gemini-CLI-OAuth (`~/.gemini/oauth_creds.json`, access_token, refresh_token, expiry_date) → POST
@@ -72,7 +95,7 @@ im Zyklus `auto|sub|tokens|kosten`. Quelle sind die ohnehin geholten Abo-Antwort
 - Gemini/Grok → `n/v`.
 - Taste: Betrag groß (`251 / 250 $`), Label/Limit klein (`Budget 100%`, `Extra aus`), Balken aus `pct`, unten Reset oder
   Alter, `· +N` für weitere Posten. Gezeigt wird ein Posten mit erreichtem Limit, sonst einer > 0, sonst der erste.
-- Übersicht: sechste Zeile nur wenn ein Posten > 0 oder ein Limit erreicht ist (`CL 251 / 250 $`, gelb bei Limit).
+- Übersicht: sechs Anbieterzeilen; Kosten-Zeile (siebte) nur wenn ein Posten > 0 oder ein Limit erreicht ist (`CL 251 / 250 $`, gelb bei Limit).
 - CLI `status`: Spalte „Kosten“ statt „API Monat“.
 
 ### API-Kosten (optional, nur Enterprise/Teams)  — Schlüssel nötig, Details aus RESEARCH.md
@@ -93,7 +116,7 @@ streamdeck-ai-usage/
   tech.farpoint.ai-usage.sdPlugin/   # Build-Output (manifest.json, bin/plugin.js, imgs/, ui/)
   src/
     plugin.ts                        # Entry, registriert Actions, startet Scheduler
-    providers/{claude,codex,copilot,gemini,grok}.ts   # je: subscription(), localTokens(), apiCost()
+    providers/{claude,codex,copilot,m365copilot,gemini,grok}.ts   # je: subscription(), localTokens(), apiCost()
     providers/types.ts               # ProviderSnapshot {sub:{pct,resetAt,label}, tokens:{in,out,cached}, api:{usd,month}, status}
     collectors/{claude-jsonl,codex-jsonl,copilot-sqlite,gemini-jsonl}.ts   # inkrementell, Offsets in state
     keychain.ts                      # security find-generic-password Wrapper, 5s timeout, nie interaktiv (-a <user>)
@@ -120,7 +143,7 @@ streamdeck-ai-usage/
 - Daten: `ResetEvent {provider, window, resetsAt (ISO), pct?}`; jeder Anbieter legt seine Liste in `SubPart.resets`
   ab (wird mit `lastSub` in state.json gespeichert). Quellen: Claude `five_hour.resets_at` → `5h`, `seven_day.resets_at`
   → `Woche`, `extra_usage` → `Extra` nur wenn ein Reset-Feld da ist; Codex `primary_window`/`secondary_window.reset_at`,
-  Name aus `limit_window_seconds`; Copilot `quota_reset_date` → `Monat`; Grok `currentPeriod.end` → `Monat`; Gemini keine.
+  Name aus `limit_window_seconds`; Copilot `quota_reset_date` → `Monat`; M365 Copilot `nextLifecycleDateTime` → `Verlängerung`; Grok `currentPeriod.end` → `Monat`; Gemini keine.
 - `Hub.allResets(now)`: letzte bekannte Resets je Anbieter (bleiben bei login/Cooldown erhalten), nur Zeitpunkte > now,
   aufsteigend sortiert. Alte state.json ohne `resets` → aus `primary`/`secondary` abgeleitet.
 - Taste 144×144 SVG: die zwei nächsten Resets (Name, `in 2h 13m` / `in 3d 4h`, `So 21:00` / `Mi 04.11.`),

@@ -1,5 +1,6 @@
-export type ProviderId = "claude" | "codex" | "copilot" | "gemini" | "grok";
-export const PROVIDER_IDS: ProviderId[] = ["claude", "codex", "copilot", "gemini", "grok"];
+/** "copilot" = GitHub Copilot (shown as "GH Copilot"); "m365copilot" = Microsoft 365 Copilot license (Graph via az CLI). */
+export type ProviderId = "claude" | "codex" | "copilot" | "m365copilot" | "gemini" | "grok";
+export const PROVIDER_IDS: ProviderId[] = ["claude", "codex", "copilot", "m365copilot", "gemini", "grok"];
 
 /**
  * ok          value is current
@@ -9,14 +10,20 @@ export const PROVIDER_IDS: ProviderId[] = ["claude", "codex", "copilot", "gemini
  * na          source does not exist for this provider ("n/v")
  * error       unexpected response
  * stale       last good value shown because the current fetch failed or the endpoint is in cooldown
+ * config      a required setting is missing or invalid (M365 Copilot: tenantId)
  */
-export type Status = "ok" | "login" | "key_missing" | "offline" | "na" | "error" | "stale";
+export type Status = "ok" | "login" | "key_missing" | "offline" | "na" | "error" | "stale" | "config";
 
 export interface Window {
 	/** Short label shown on the key, e.g. "5h", "Wo", "Mo". */
 	label: string;
 	pct: number;
 	resetAt?: string;
+	/**
+	 * Text shown instead of the percentage (M365 Copilot: "ja"/"nein" for the license). When set, `pct` carries no
+	 * meaning and no bar is drawn.
+	 */
+	text?: string;
 }
 
 /** One upcoming quota reset of a subscription window. */
@@ -53,6 +60,27 @@ export interface CostItem {
 	unlimited?: boolean;
 	/** Raw reason for the CLI, e.g. extra_usage.disabled_reason "out_of_credits". */
 	note?: string;
+	/** Informational figure, not spending (M365 license count): never drives the overview cost row. */
+	info?: boolean;
+}
+
+/**
+ * Microsoft 365 Copilot usage of the signed-in user from the Graph report getMicrosoft365CopilotUsageUserDetail(D30).
+ * Microsoft publishes no token counts; this replaces the token figure for that provider.
+ *  ok         row found; `apps` = apps with Copilot activity in the last 30 days (may be empty)
+ *  none       report has no row for the user (not licensed, or no data yet)
+ *  concealed  report shows hashed names (admin setting "concealed user names"), no UPN match possible
+ *  forbidden  403: Reports.Read.All / report reader role missing
+ *  error      any other failure
+ */
+export interface M365Activity {
+	status: "ok" | "none" | "concealed" | "forbidden" | "error";
+	apps: string[];
+	/** lastActivityDate of the row (YYYY-MM-DD). */
+	lastActivity?: string;
+	/** reportRefreshDate of the row (YYYY-MM-DD). */
+	refreshDate?: string;
+	detail?: string;
 }
 
 export interface SubPart {
@@ -65,6 +93,8 @@ export interface SubPart {
 	resets?: ResetEvent[];
 	/** Subscription costs/budgets from the same response; [] = endpoint reports none. */
 	cost?: CostItem[];
+	/** M365 Copilot only: app activity from the usage report (persisted with lastSub). */
+	activity?: M365Activity;
 	detail?: string;
 	fetchedAt: string;
 	/** Where the value came from in this refresh: network, shared 55 s cache, or last-good fallback. */
@@ -117,7 +147,8 @@ export interface Provider {
 export const META: Record<ProviderId, { name: string; abbr: string; color: string }> = {
 	claude: { name: "CLAUDE", abbr: "CL", color: "#D97757" },
 	codex: { name: "CODEX", abbr: "CX", color: "#10A37F" },
-	copilot: { name: "COPILOT", abbr: "CP", color: "#8957E5" },
+	copilot: { name: "GH COPILOT", abbr: "GH", color: "#8957E5" },
+	m365copilot: { name: "M365 COPILOT", abbr: "M365", color: "#00A4EF" },
 	gemini: { name: "GEMINI", abbr: "GE", color: "#4285F4" },
 	grok: { name: "GROK", abbr: "GK", color: "#E5E5E5" },
 };

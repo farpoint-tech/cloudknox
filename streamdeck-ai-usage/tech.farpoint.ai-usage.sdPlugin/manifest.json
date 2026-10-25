@@ -4,7 +4,7 @@
 	"Name": "AI Usage",
 	"Version": "1.0.0.0",
 	"Author": "farpoint",
-	"Description": "Abo-Verbrauch, lokale Tokens und API-Kosten für Claude, Codex, Copilot, Gemini und Grok.",
+	"Description": "Abo-Verbrauch, lokale Tokens und API-Kosten für Claude, Codex, GitHub Copilot, Microsoft 365 Copilot, Gemini und Grok.",
 	"Category": "AI Usage",
 	"CategoryIcon": "imgs/plugin/category",
 	"Icon": "imgs/plugin/icon",

@@ -1,6 +1,7 @@
 # AI Usage Deck – Stream-Deck-Plugin
 
-Zeigt pro Anbieter (Claude, ChatGPT/Codex, GitHub Copilot, Gemini, Grok) den Abo-Verbrauch, die lokal
+Zeigt pro Anbieter (Claude, ChatGPT/Codex, GH Copilot = GitHub Copilot, M365 Copilot = Microsoft-365-Copilot-Lizenz,
+Gemini, Grok) den Abo-Verbrauch, die lokal
 gezählten Tokens und die Abo-Kosten (Extra Usage, Budgets, Credits, Overage). API-Kosten über Admin-Schlüssel
 sind optional und nur für Enterprise/Teams-Konten gedacht (siehe unten). Plugin-UUID `tech.farpoint.ai-usage`,
 Stream Deck ab 7.1, nur macOS, Node 24 (vom Stream-Deck-Programm mitgeliefert).
@@ -9,11 +10,12 @@ Stream Deck ab 7.1, nur macOS, Node 24 (vom Stream-Deck-Programm mitgeliefert).
 
 ### „Anbieter“
 Einstellungen im Property Inspector: **Anbieter**, **Anzeige** (`auto`, `Abo-Limit %`, `Tokens heute`, `Kosten`,
-`API-Kosten Monat`) und das Häkchen **API-Kosten anzeigen** (Setting `showApiCost`, Standard aus).
+`API-Kosten Monat`), das Häkchen **API-Kosten anzeigen** (Setting `showApiCost`, Standard aus) und, nur für
+M365 Copilot, **M365 Tenant** (Setting `tenantId`: Tenant-GUID oder `contoso.onmicrosoft.com`).
 
 | Zeile | Inhalt |
 |---|---|
-| oben | Anbieterkürzel (CLAUDE, CODEX, COPILOT, GEMINI, GROK) |
+| oben | Anbietername (CLAUDE, CODEX, GH COPILOT, M365 COPILOT, GEMINI, GROK) |
 | Mitte groß | Abo: Fenster + Prozent, z. B. `5h 36%` · Tokens: `1,3M` · Kosten: `251 / 250 $` · API: `$ 12,40` |
 | darunter | Abo: zweites Fenster (`Wo 7%`) · Tokens: `heute · Wo 33M` · Kosten: `Budget 100%`, `Extra aus` · API: `API 2026-10` |
 | Balken | Abo: Auslastung des Hauptfensters; Kosten: Auslastung des Budgets (grün < 70 %, gelb < 90 %, rot) |
@@ -31,7 +33,16 @@ Einstellungen im Property Inspector: **Anbieter**, **Anzeige** (`auto`, `Abo-Lim
 
 Statustexte: `login` (Anmeldung fehlt/abgelaufen), `Key fehlt` (nur bei eingeschaltetem `showApiCost`: Admin-Schlüssel nicht angelegt),
 `offline`, `n/v` (für diesen Anbieter gibt es die Quelle nicht), `veraltet` (letzter guter Wert, CLI),
-`Fehler` (unerwartete Antwort, noch nie ein guter Wert).
+`Fehler` (unerwartete Antwort, noch nie ein guter Wert), `Setup fehlt` (M365 Copilot ohne gültige `tenantId`, unten `Tenant-ID`).
+
+**M365 Copilot** zeigt keine Prozente und keine Tokens (Microsoft veröffentlicht keine Token-Zahlen):
+
+| Anzeige | Inhalt |
+|---|---|
+| Abo | `Lizenz ja` / `Lizenz nein`, darunter die SKU (`M365 Copilot`), unten die nächste Verlängerung (`↻ 51d4h`), kein Balken |
+| Tokens | Apps mit Copilot-Aktivität in den letzten 30 Tagen: `3 Apps`, darunter `Teams, Word, Out…`, unten `zuletzt 24.10.`; ohne Berechtigung `n/v` + `k. Berechtigung` |
+| Kosten | `Lizenz` mit Anzahl der Lizenzen der Copilot-Subscription (z. B. `15`), sonst `n/v`; keine API-Kosten |
+| ohne Anmeldung | `login`, unten `az login` (voller Befehl in CLI und `doctor`) |
 
 **Tokens** = Input + Cache-Write + Output. Cache-Reads werden getrennt gezählt (CLI zeigt `+… cache`),
 weil sie bei Claude und Codex das Hundertfache ausmachen und die Zahl sonst nichtssagend wird.
@@ -40,17 +51,18 @@ weil sie bei Claude und Codex das Hundertfache ausmachen und die Zahl sonst nich
 Abo-Kosten behalten ihre Währung (Claude Extra in €, Claude-Budgets in $), es wird nichts umgerechnet.
 
 ### „Übersicht“
-Fünf Zeilen, je Anbieter Kürzel + Abo-Prozent mit Minibalken bzw. Statustext. Drücken aktualisiert alles.
-Eine sechste Zeile **Kosten** erscheint nur, wenn bei einem Anbieter etwas verbraucht wurde (Betrag > 0) oder ein
+Sechs Zeilen, je Anbieter Kürzel (`CL`, `CX`, `GH`, `M365`, `GE`, `GK`) + Abo-Prozent mit Minibalken bzw. Statustext;
+M365 zeigt `ja`/`nein` (Lizenz) ohne Balken. Drücken aktualisiert alles.
+Eine siebte Zeile **Kosten** erscheint nur, wenn bei einem Anbieter etwas verbraucht wurde (Betrag > 0) oder ein
 Limit erreicht ist, z. B. `CL 251 / 250 $` (gelb, wenn ein Limit erreicht ist; `+1`, wenn weitere Anbieter betroffen
-sind). Sonst bleibt die Taste bei fünf Zeilen.
+sind). Die M365-Lizenzanzahl zählt dafür nicht (kein Verbrauch). Sonst bleibt die Taste bei sechs Zeilen.
 
 ### „Nächste Resets“
 Zeigt die zwei nächsten Abo-Resets aller Anbieter, je Reset drei Zeilen:
 
 | Zeile | Inhalt |
 |---|---|
-| Name (Anbieterfarbe) | Anbieter + Fenster, z. B. `Claude 5h`, `Codex Woche`, `Copilot Monat`, `Claude Extra` |
+| Name (Anbieterfarbe) | Anbieter + Fenster, z. B. `Claude 5h`, `Codex Woche`, `GH Copilot Monat`, `Claude Extra`; zu lange Namen mit Kürzel und kleiner, z. B. `M365 Verlängerung` |
 | groß | Countdown: `in 13m`, `in 2h 13m`, `in 3d 4h` (abgerundet) |
 | klein | Ortszeit: `So 21:00` (innerhalb der nächsten 6 Tage), sonst `Mi 04.11.` |
 | oben rechts | gelbes Badge `+N`: so viele weitere Resets stehen an, passen aber nicht auf die Taste |
@@ -72,7 +84,7 @@ ein (Feld **Blink-Fenster (h)**, Standard 24, Kommazahlen erlaubt, ungültig →
 
 ## Kosten (Abo-Kosten statt API)
 
-Persönliche Abos (Claude Max, ChatGPT Pro, Copilot Individual) haben keine Admin-Schlüssel – die gibt es nur für
+Persönliche Abos (Claude Max, ChatGPT Pro, GH Copilot Individual) haben keine Admin-Schlüssel – die gibt es nur für
 Enterprise/Teams-Organisationen. Deshalb zeigt die Anzeige **Kosten** die Beträge, die der Abo-Endpunkt ohnehin
 mitliefert. Kein zusätzlicher Aufruf, kein Schlüssel: die Werte kommen aus derselben Antwort wie die Abo-Prozente,
 werden mit dem letzten guten Wert in `state.json` → `lastSub` gespeichert und bei 429/Cooldown genauso grau mit
@@ -84,7 +96,8 @@ werden mit dem letzten guten Wert in `state.json` → `lastSub` gespeichert und 
 | Claude | `Budget` | jedes Objekt der obersten Ebene mit `limit_dollars > 0` (+ `used_dollars`, `remaining_dollars`, `utilization`, `resets_at`) | `251 / 250 $`, darunter `Budget 100%`, Balken, `↻ 10d10h` |
 | Codex | `Credits` | `credits.{balance, has_credits, unlimited, overage_limit_reached}`, `spend_control.{reached, individual_limit}` | `0` + `Credits`; `∞` + `Credits unbegrenzt`; `Credits Limit erreicht` |
 | Codex | `Reset-Credits` | `rate_limit_reset_credits.available_count` | nur wenn > 0 |
-| Copilot | `Overage` | `quota_snapshots.premium_interactions.{overage_count, overage_permitted}` | `0` + `Overage aus` (nicht erlaubt) bzw. `Overage` |
+| GH Copilot | `Overage` | `quota_snapshots.premium_interactions.{overage_count, overage_permitted}` | `0` + `Overage aus` (nicht erlaubt) bzw. `Overage` |
+| M365 Copilot | `Lizenz` | `/directory/subscriptions` → `totalLicenses` der Copilot-SKUs (Summe) | Anzahl, z. B. `15` + `Lizenz`, unten Verlängerung; ohne Berechtigung `n/v`. Nur Information, kein Verbrauch |
 | Gemini, Grok | – | keine Daten | `n/v` |
 
 - **Claude Extra in Minor-Units:** `monthly_limit` und `used_credits` werden durch `10^decimal_places` geteilt. Live-Antwort
@@ -134,7 +147,8 @@ Welche Reset-Fenster jeder Anbieter hat und aus welchem Feld der Zeitpunkt kommt
 | Claude | `Budget` | laut Antwort (heute bis 2026-11-05) | `resets_at` jedes Objekts mit `limit_dollars > 0` (siehe „Kosten“) |
 | Codex | `Woche` | 7 Tage (primäres Fenster) | `rate_limit.primary_window.reset_at` (Unix-Sekunden), Länge aus `limit_window_seconds` = 604800 |
 | Codex | `5h` | 5 h, optional | `rate_limit.secondary_window.reset_at`; ist derzeit `null` und wird dann übersprungen |
-| Copilot | `Monat` | monatlich | `quota_reset_date` (Datum, als 00:00 UTC gelesen) |
+| GH Copilot | `Monat` | monatlich | `quota_reset_date` (Datum, als 00:00 UTC gelesen) |
+| M365 Copilot | `Verlängerung` | Laufzeit der Subscription (meist jährlich) | frühestes künftiges `nextLifecycleDateTime` der aktiven Copilot-Subscriptions aus `/directory/subscriptions` (bevorzugt die SKU des Nutzers); bei 403 kein Reset, Hinweis `Verlängerung: keine Berechtigung` |
 | Gemini | – | unbekannt | kein Quota-Endpunkt (siehe Grenzen) |
 | Grok | `Monat` | unbekannt, vermutlich monatlich | `currentPeriod.end` von `/v1/billing` – nur mit `~/.grok/auth.json`, ungetestet |
 
@@ -147,7 +161,8 @@ Der Fenstername von Codex wird aus `limit_window_seconds` abgeleitet (≤ 24 h �
 |---|---|---|---|
 | Claude | `api.anthropic.com/api/oauth/usage`, Token aus Keychain `Claude Code-credentials` (Fallback `~/.claude/.credentials.json`) | `~/.claude/projects/**/*.jsonl`, Dedupe über `message.id`+`requestId` | Admin-API `cost_report`, Keychain `anthropic-admin` |
 | Codex | `chatgpt.com/backend-api/wham/usage`, Token aus `~/.codex/auth.json` | `~/.codex/sessions/**/*.jsonl`, `token_count`-Ereignisse als Differenzen | `api.openai.com/v1/organization/costs`, Keychain `openai-admin` |
-| Copilot | `api.github.com/copilot_internal/user` mit `gh auth token` | `~/.copilot/data.db`, Tabelle `sessions` (per `/usr/bin/sqlite3`) | Premium-Request-Billing, Keychain `github-billing-pat` |
+| GH Copilot | `api.github.com/copilot_internal/user` mit `gh auth token` | `~/.copilot/data.db`, Tabelle `sessions` (per `/usr/bin/sqlite3`) | Premium-Request-Billing, Keychain `github-billing-pat` |
+| M365 Copilot | Microsoft Graph mit Token aus `az account get-access-token --tenant <tenantId> --resource-type ms-graph` (20 s Timeout, `az` aus PATH + `/opt/homebrew/bin`): `/v1.0/me/licenseDetails` (Lizenz), `/v1.0/directory/subscriptions` (Verlängerung, Anzahl), `/v1.0/me` (UPN) | n/v – stattdessen Copilot-Nutzungsbericht D30 (`/v1.0/reports/getMicrosoft365CopilotUsageUserDetail(period='D30')?$format=application/json`, bei 400/404 die dokumentierte Beta-Variante): Apps mit Aktivität, letzte Aktivität | keine |
 | Gemini | n/v (siehe Grenzen) | `~/.gemini/tmp/*/chats/session-*.jsonl` (Feld `tokens`), sonst n/v | n/v |
 | Grok | `cli-chat-proxy.grok.com/v1/billing`, nur wenn `~/.grok/auth.json` existiert; Kosten n/v | n/v | xAI Management-API, Keychain `xai-management` + `xai-team-id` |
 
@@ -157,13 +172,16 @@ Tagessummen werden 35 Tage aufbewahrt. Der Keychain-Eintrag `github-copilot-app`
 
 ## Fertige Seite importieren
 
-`npm run profile` erzeugt `tools/Nexus365-AI-Usage.streamDeckProfile`: eine Seite für das Stream Deck mit 15 Tasten (5×3).
+`npm run profile` erzeugt `tools/Nexus365-AI-Usage.streamDeckProfile`: eine Seite für das Stream Deck (5×3, 14 Tasten belegt).
 
 | | 1 | 2 | 3 | 4 | 5 |
 |---|---|---|---|---|---|
 | Reihe 1 | Claude Abo | Claude Tokens | Claude Kosten | Codex Abo | Codex Tokens |
-| Reihe 2 | Codex Kosten | Copilot Abo | Copilot Tokens | Copilot Kosten | Übersicht |
-| Reihe 3 | Nächste Resets (Blinken 24 h) | Gemini auto | Grok auto | leer | leer |
+| Reihe 2 | Codex Kosten | GH Copilot Abo | GH Copilot Tokens | GH Copilot Kosten | Übersicht |
+| Reihe 3 | Nächste Resets (Blinken 24 h) | Gemini auto | Grok auto | M365 Copilot auto | leer |
+
+Die M365-Copilot-Taste braucht danach im Property Inspector die **M365 Tenant**-ID (das Profil enthält keine);
+bis dahin zeigt sie `Setup fehlt`.
 
 1. Plugin installieren (siehe unten), sonst bleiben die Tasten leer.
 2. Doppelklick auf die Datei. Stream Deck fragt, auf welches Gerät das Profil soll.
@@ -206,7 +224,18 @@ node bin/cli.js resets --window 48  # wie resets, Blink-Fenster 48 h statt 24 h
 ```
 
 Plugin und CLI nutzen denselben Code (`src/providers`, `src/collectors`). Umgebungsvariablen:
-`AI_USAGE_DECK_HOME` (anderer Ordner für state/history), `NODE_USE_ENV_PROXY=1` (Node-`fetch` über `HTTPS_PROXY`).
+`AI_USAGE_DECK_HOME` (anderer Ordner für state/history), `NODE_USE_ENV_PROXY=1` (Node-`fetch` über `HTTPS_PROXY`),
+`AI_USAGE_DECK_M365_TENANT` (Tenant für M365 Copilot, wenn keine Taste eine `tenantId` gesetzt hat).
+
+M365 Copilot live prüfen (außerhalb der Sandbox, im eigenen Terminal):
+
+```bash
+az login --tenant <tenantId> --scope https://graph.microsoft.com//.default   # einmalig
+AI_USAGE_DECK_M365_TENANT=<tenantId> node bin/cli.js doctor                 # tenantId, az-Token, Lizenz, Verlängerung, Nutzungsbericht
+AI_USAGE_DECK_M365_TENANT=<tenantId> node bin/cli.js status --fresh
+```
+
+Setzt eine Taste eine `tenantId`, wird sie in `state.json` (`m365TenantId`) gespeichert und hat Vorrang vor der Variable.
 
 ## Zeitplan
 
@@ -238,7 +267,7 @@ kein Ausnahmefall:
 **Empfehlung:** die nicht genutzten dieser Plugins in der Stream-Deck-App deaktivieren bzw. ihre Tasten entfernen
 (nichts löschen – Deinstallation ist nicht nötig). Jedes weitere Plugin, das pollt, verbraucht dasselbe Kontingent.
 
-So geht dieses Plugin mit 429 um (gilt für alle Abo-Endpunkte: Claude, Codex, Copilot, Grok):
+So geht dieses Plugin mit 429 um (gilt für alle Abo-Endpunkte: Claude, Codex, GH Copilot, M365 Copilot (Graph), Grok):
 
 - **Cooldown je Anbieter:** bei 429 wird `Retry-After` gelesen (Sekunden oder HTTP-Datum, höchstens 6 h).
   Fehlt der Header: 5 min, bei Wiederholung 10, 20, 30 min (Obergrenze). Bei 5xx: 1, 2, 4, 8 min.
@@ -254,6 +283,16 @@ So geht dieses Plugin mit 429 um (gilt für alle Abo-Endpunkte: Claude, Codex, C
 
 ## Bekannte Grenzen
 
+- **M365 Copilot:** braucht `az login` für den gewählten Tenant (Scope `https://graph.microsoft.com//.default`); das Plugin
+  meldet sich nie selbst an und gibt das Token nie aus. Der Tenant wird je Taste gewählt; alle M365-Tasten teilen den zuletzt
+  gesetzten (eine `tenantId` gleichzeitig). Nutzung braucht `Reports.Read.All` und eine Rolle wie Reports Reader – optional,
+  ohne sie bleibt der Lizenzstatus sichtbar (`Nutzung: keine Berechtigung`). Ist im Admin Center „Benutzernamen
+  anonymisieren“ an, passt keine Zeile zum UPN (`Nutzung: anonymisiert`). `/directory/subscriptions` braucht Leserechte
+  im Verzeichnis; ohne sie keine Verlängerung und keine Lizenzanzahl (`n/v`). Laut Microsoft Learn gibt es den
+  Bericht als JSON nur unter `/beta/reports/…`; die v1.0-Variante liegt unter `/v1.0/copilot/reports/…` und liefert CSV.
+  Das Plugin ruft die angefragte v1.0-URL und fällt bei 400/404 auf die Beta-URL zurück. Bericht und Verlängerung werden
+  je Prozess 30 min zwischengespeichert (Bericht aktualisiert täglich). Alles ist gegen die dokumentierten Formen gebaut,
+  **nicht live getestet** (az läuft in der Entwicklungs-Sandbox nicht).
 - **Grok:** kein Abo-Wert ohne `~/.grok/auth.json` (Taste `login`). Format dieser Datei und der Billing-Endpunkt
   sind Community-Wissen, ungetestet; kein Token-Refresh. Keine lokalen Token-Logs. xAI-API-Kosten:
   Einheit von `amountBeforeVat` als Cent angenommen (laut Doku, nicht mit echtem Konto geprüft).
@@ -275,7 +314,7 @@ So geht dieses Plugin mit 429 um (gilt für alle Abo-Endpunkte: Claude, Codex, C
 - Kacheln sind als SVG gerendert und nur per Test geprüft, noch nicht auf einem echten Stream Deck angesehen
   (auch die Sanduhr, der `~`-Marker und die Taste „Nächste Resets“ mit Blinken und `+N`-Badge nicht).
 - „Nächste Resets“: Claude `Extra` erscheint erst, wenn die API ein Reset-Feld in `extra_usage` liefert (Feldname
-  geraten: `resets_at`, `reset_at`, `next_reset_at` oder `period_end`). Copilots `quota_reset_date` wird als Mitternacht UTC
+  geraten: `resets_at`, `reset_at`, `next_reset_at` oder `period_end`). GH Copilots `quota_reset_date` wird als Mitternacht UTC
   gelesen; ob GitHub tatsächlich dann zurücksetzt, ist nicht geprüft.
 - Der 55-s-Cache verhindert doppelte Abrufe nur, wenn der erste Abruf schon fertig ist. Starten Plugin und CLI
   in derselben Sekunde, können beide abfragen (prozessübergreifend kein Lock, nur innerhalb eines Prozesses).
@@ -298,4 +337,7 @@ So geht dieses Plugin mit 429 um (gilt für alle Abo-Endpunkte: Claude, Codex, C
 - [ ] Gemini-Abo-Quota über Antigravity-Login (Phase 2) – Entwicklung – niedrig
 - [ ] Taste „Nächste Resets“ am Gerät prüfen: Lesbarkeit, gelbes Blinken, `+N`-Badge, Lang-Drücken stumm – Philipp – mittel
 - [ ] Wenn Extra Usage aktiv ist: prüfen, ob `extra_usage` ein Reset-Feld liefert, und Feldnamen in `claudeResets` festziehen – Entwicklung – niedrig
+- [ ] M365 Copilot live: `az login --tenant <id> --scope https://graph.microsoft.com//.default`, dann `AI_USAGE_DECK_M365_TENANT=<id> node bin/cli.js doctor` – Philipp – hoch
+- [ ] M365 Copilot: Tenant-ID in der Taste (3,2) setzen und Lizenz-, Nutzungs- und Kosten-Anzeige am Gerät prüfen – Philipp – mittel
+- [ ] M365 Copilot: prüfen, ob die v1.0-Berichts-URL JSON liefert oder der Beta-Fallback greift; ggf. auf `/v1.0/copilot/reports/…` (CSV) umstellen – Entwicklung – mittel
 - [ ] Nach dem ersten Sonntag 20:00 `history.jsonl` und `launchd.log` prüfen (genau eine Zeile je Anbieter) – Philipp – mittel

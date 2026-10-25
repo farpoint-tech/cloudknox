@@ -34,6 +34,20 @@
   Header: Editor-Version, Editor-Plugin-Version, Copilot-Integration-Id: vscode-chat, User-Agent GitHubCopilotChat/… ; ob `gh auth token` reicht: UNVERIFIED (lokaler gh-Token ist derzeit ohnehin ungültig).
 - Keychain-Dienst (optional): `github-billing-pat`
 
+## Microsoft 365 Copilot (Microsoft Learn, abgefragt 2026-10-25; nicht live getestet)
+- Token: az CLI, `az account get-access-token --tenant <id> --resource-type ms-graph`; Login `az login --tenant <id> --scope https://graph.microsoft.com//.default`.
+- `GET /v1.0/me/licenseDetails` (User.Read) → `value[].skuPartNumber` (z. B. `Microsoft_365_Copilot`).
+- `GET /v1.0/directory/subscriptions` (companySubscription: `skuPartNumber`, `nextLifecycleDateTime`, `totalLicenses`, `status`), braucht Verzeichnis-Leserechte.
+- Nutzungsbericht: learn.microsoft.com/graph/api/reportroot-getmicrosoft365copilotusageuserdetail?view=graph-rest-beta –
+  JSON-Form `GET /beta/reports/getMicrosoft365CopilotUsageUserDetail(period='D7')?$format=application/json`, Felder
+  `reportRefreshDate, userPrincipalName, displayName, lastActivityDate, copilotChatLastActivityDate,
+  microsoftTeamsCopilotLastActivityDate, wordCopilotLastActivityDate, excelCopilotLastActivityDate,
+  powerPointCopilotLastActivityDate, outlookCopilotLastActivityDate, oneNoteCopilotLastActivityDate, loopCopilotLastActivityDate`.
+  v1.0 GA: learn.microsoft.com/microsoft-365/copilot/extensibility/api/admin-settings/reports/copilotreportroot-getmicrosoft365copilotusageuserdetail –
+  `GET /v1.0/copilot/reports/getMicrosoft365CopilotUsageUserDetail(period='D7')`, Antwort CSV. Rechte: Reports.Read.All
+  + Rolle (z. B. Reports Reader, AI Administrator). Nur Nutzer mit Copilot-Lizenz; Namen ggf. gehasht (Admin-Einstellung).
+- Plugin ruft `/v1.0/reports/…(period='D30')?$format=application/json` (wie beauftragt) und fällt bei 400/404 auf `/beta/reports/…` zurück.
+
 ## Grok-Abo (grok.com): nichts Belastbares
 - Keine offizielle API; Community-Wege via grok CLI auth.json + cli-chat-proxy.grok.com/v1/billing (siehe SPEC) — fragil, Cloudflare, AGB-Risiko. v1: nur wenn ~/.grok/auth.json existiert, sonst "grok login".
 

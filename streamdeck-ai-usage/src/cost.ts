@@ -2,7 +2,7 @@ import { fmtCountdown } from "./format.js";
 import type { CostItem, ProviderId } from "./providers/types.js";
 
 /** Providers whose subscription endpoint reports costs/budgets. Gemini and Grok: "n/v" until data exists. */
-export const COST_SOURCE: Record<ProviderId, boolean> = { claude: true, codex: true, copilot: true, gemini: false, grok: false };
+export const COST_SOURCE: Record<ProviderId, boolean> = { claude: true, codex: true, copilot: true, m365copilot: true, gemini: false, grok: false };
 
 const SYMBOL: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
 
@@ -38,6 +38,7 @@ export function costLabel(c: CostItem): string {
 
 /** A cost row is worth showing on the overview: something was used, or a limit is reached. */
 export function costNotable(c: CostItem): boolean {
+	if (c.info) return false;
 	return !!c.reached || (c.used !== undefined && c.used > 0);
 }
 

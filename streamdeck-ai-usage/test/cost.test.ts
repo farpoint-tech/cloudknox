@@ -160,7 +160,8 @@ test("overview: cost row only when something is non-zero or a limit is reached",
 test("settings: metric cycle without api by default; old 'api' becomes 'kosten'", () => {
 	assert.deepEqual(metricsFor(false), ["auto", "sub", "tokens", "kosten"]);
 	assert.deepEqual(metricsFor(true), ["auto", "sub", "tokens", "kosten", "api"]);
-	assert.deepEqual(normalizeProviderSettings({}), { provider: "claude", metric: "auto", showApiCost: false });
+	assert.deepEqual(normalizeProviderSettings({}), { provider: "claude", metric: "auto", showApiCost: false, tenantId: "" });
+	assert.equal(normalizeProviderSettings({ provider: "m365copilot", tenantId: " Contoso.onmicrosoft.com " }).tenantId, "contoso.onmicrosoft.com");
 	assert.equal(normalizeProviderSettings({ metric: "api" }).metric, "kosten");
 	assert.equal(normalizeProviderSettings({ metric: "api", showApiCost: true }).metric, "api");
 	assert.equal(normalizeProviderSettings({ showApiCost: "true" as unknown as boolean }).showApiCost, true);

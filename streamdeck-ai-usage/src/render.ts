@@ -1,7 +1,8 @@
 import { COST_SOURCE, costAmount, costLabel, costNotable, primaryCost } from "./cost.js";
 import { fmtAge, fmtCountdown, fmtPct, fmtTokens, fmtUsd, fmtWait } from "./format.js";
 import type { View } from "./hub.js";
-import { META, PROVIDER_IDS, type ProviderId, type ResetEvent, type Status } from "./providers/types.js";
+import { META, PROVIDER_IDS, type ProviderId, type ResetEvent, type Status, type SubPart, type Window } from "./providers/types.js";
+import { normalizeTenant, shortSku } from "./providers/m365copilot.js";
 import { fmtResetCountdown, fmtResetLocal, PROVIDER_DISPLAY } from "./resets.js";
 
 /** "kosten" = subscription costs/budgets (default); "api" = API-key costs, only with showApiCost (Enterprise/Teams). */
@@ -18,6 +19,8 @@ export type ProviderSettings = {
 	metric?: Metric;
 	/** API-key costs (admin keys, only Enterprise/Teams). Off by default: no keychain access for API keys. */
 	showApiCost?: boolean;
+	/** M365 Copilot only: Entra tenant (GUID or domain) for `az account get-access-token --tenant`. "" = not set. */
+	tenantId?: string;
 };
 
 /** Settings from the property inspector; "api" without showApiCost (and the old default "api") becomes "kosten". */
@@ -29,6 +32,7 @@ export function normalizeProviderSettings(s: ProviderSettings): Required<Provide
 		provider: PROVIDER_IDS.includes(s.provider as ProviderId) ? (s.provider as ProviderId) : "claude",
 		metric,
 		showApiCost,
+		tenantId: normalizeTenant(s.tenantId) ?? (typeof s.tenantId === "string" ? s.tenantId.trim() : ""),
 	};
 }
 
@@ -40,7 +44,32 @@ export const STATUS_TEXT: Record<Status, string> = {
 	na: "n/v",
 	error: "Fehler",
 	stale: "veraltet",
+	config: "Setup fehlt",
 };
+
+/** Value of a window: its text (M365 license "ja"/"nein") or the percentage. */
+export function windowValue(w: Window): string {
+	return w.text ?? fmtPct(w.pct);
+}
+
+/** Short hint for a provider without value (M365: "az login", "Tenant-ID"). */
+function hintFor(id: ProviderId, s: SubPart): string {
+	if (id !== "m365copilot") return "";
+	if (s.status === "login") return "az login";
+	if (s.status === "config") return "Tenant-ID";
+	return "";
+}
+
+/** "2026-10-24" → "24.10." */
+function dayMonth(d: string): string {
+	const [, m, day] = d.split("-");
+	return `${day}.${m}.`;
+}
+
+/** Fits a list into `max` characters: "Teams, Word, Ou…". */
+function fit(text: string, max: number): string {
+	return text.length > max ? text.slice(0, max - 1) + "…" : text;
+}
 
 export interface Tile {
 	title: string;
@@ -85,16 +114,17 @@ export function tileFor(id: ProviderId, view: View, metric: Metric, now = Date.n
 		const cooldown = inCooldown(s, now);
 		if (!s.primary) {
 			// Never had a good value: only now is "Fehler" shown; with the retry time when in cooldown.
-			const wait = cooldown ? `erneut ${fmtWait(Date.parse(s.cooldownUntil!) - now)}` : "";
-			return { ...base, big: STATUS_TEXT[s.status], small: s.httpCode === 429 ? "Abo · 429" : "Abo", bottom: wait, dim: true, cooldown };
+			const wait = cooldown ? `erneut ${fmtWait(Date.parse(s.cooldownUntil!) - now)}` : hintFor(id, s);
+			return { ...base, big: STATUS_TEXT[s.status], small: s.httpCode === 429 ? "Abo · 429" : id === "m365copilot" ? "Lizenz" : "Abo", bottom: wait, dim: true, cooldown };
 		}
 		const p = s.primary;
 		const fresh = s.status === "ok";
+		const plan = id === "m365copilot" ? (shortSku(s.plan) ?? "M365") : s.plan;
 		return {
 			...base,
-			big: `${p.label} ${fmtPct(p.pct)}`.trim(),
-			small: s.secondary ? `${s.secondary.label} ${fmtPct(s.secondary.pct)}` : (s.plan ?? "Abo"),
-			barPct: p.pct,
+			big: `${p.label} ${windowValue(p)}`.trim(),
+			small: s.secondary ? `${s.secondary.label} ${windowValue(s.secondary)}` : (plan ?? "Abo"),
+			barPct: p.text === undefined ? p.pct : undefined,
 			// Stale value stays visible; "~" marks it, the bottom line gives its age.
 			bottom: fresh ? (p.resetAt ? fmtCountdown(p.resetAt, now) : "") : `~ ${fmtAge(s.fetchedAt, now)}`,
 			dim: !fresh,
@@ -102,6 +132,7 @@ export function tileFor(id: ProviderId, view: View, metric: Metric, now = Date.n
 		};
 	}
 	if (which === "tokens") {
+		if (id === "m365copilot") return activityTile(view, base, now);
 		const t = view.today;
 		const w = view.week;
 		if (!t || t.status !== "ok") return { ...base, big: t ? STATUS_TEXT[t.status] : "…", small: "Tokens", bottom: "", dim: true };
@@ -118,6 +149,29 @@ export function tileFor(id: ProviderId, view: View, metric: Metric, now = Date.n
 	if (!a) return { ...base, big: "…", small: "API", bottom: "", dim: true };
 	if (a.usd === undefined) return { ...base, big: STATUS_TEXT[a.status], small: "API", bottom: "", dim: true };
 	return { ...base, big: fmtUsd(a.usd), small: `API ${a.month}`, bottom: fmtAge(a.fetchedAt, now), dim: a.status !== "ok" };
+}
+
+/**
+ * M365 Copilot has no token counts: the "tokens" slot shows the apps with Copilot activity in the last 30 days
+ * (usage report) and the last activity date.
+ */
+function activityTile(view: View, base: { title: string; color: string; dim: boolean }, now: number): Tile {
+	const s = view.sub;
+	if (!s) return { ...base, big: "…", small: "Nutzung", bottom: "", dim: true };
+	const a = s.activity;
+	if (!a) return { ...base, big: s.primary ? STATUS_TEXT.na : STATUS_TEXT[s.status], small: "Nutzung", bottom: s.primary ? "" : hintFor("m365copilot", s), dim: true };
+	const fresh = s.status === "ok";
+	const age = fresh ? "" : `~ ${fmtAge(s.fetchedAt, now)}`;
+	if (a.status === "forbidden") return { ...base, big: STATUS_TEXT.na, small: "Nutzung", bottom: "k. Berechtigung", dim: true };
+	if (a.status === "concealed") return { ...base, big: STATUS_TEXT.na, small: "Nutzung", bottom: "anonymisiert", dim: true };
+	if (a.status !== "ok") return { ...base, big: STATUS_TEXT.na, small: "Nutzung", bottom: a.status === "none" ? "kein Eintrag" : "Fehler", dim: true };
+	return {
+		...base,
+		big: a.apps.length ? `${a.apps.length} App${a.apps.length === 1 ? "" : "s"}` : "inaktiv",
+		small: a.apps.length ? fit(a.apps.join(", "), 17) : "30 Tage",
+		bottom: age || (a.lastActivity ? `zuletzt ${dayMonth(a.lastActivity)}` : ""),
+		dim: !fresh,
+	};
 }
 
 /** "Kosten" tile: amount line (big), label/limit line, bar from utilization, reset or age at the bottom. */
@@ -151,6 +205,7 @@ export function svgTile(t: Tile): string {
 			: `<rect x="12" y="110" width="120" height="8" rx="4" fill="#2A2A2A"/>` +
 				`<rect x="12" y="110" width="${Math.round(Math.min(100, Math.max(0, t.barPct)) * 1.2)}" height="8" rx="4" fill="${barColor(t.barPct)}"/>`;
 	const fg = t.dim ? "#8A8A8A" : "#FFFFFF";
+	const titleSize = t.title.length <= 10 ? 19 : 16;
 	// Hourglass drawn as paths (no font glyph needed).
 	const hourglass = t.cooldown
 		? `<g fill="none" stroke="#F5A524" stroke-width="2" stroke-linejoin="round"><path d="M124 10h12M124 30h12M126 10l8 10-8 10M134 10l-8 10 8 10"/></g>`
@@ -159,7 +214,7 @@ export function svgTile(t: Tile): string {
 		`<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">` +
 		`<rect width="144" height="144" fill="#111111"/>` +
 		`<rect x="0" y="0" width="144" height="5" fill="${t.color}"/>` +
-		`<text x="72" y="30" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="${t.color}">${esc(t.title)}</text>` +
+		`<text x="72" y="30" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${titleSize}" font-weight="700" fill="${t.color}">${esc(t.title)}</text>` +
 		hourglass +
 		`<text x="72" y="76" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${bigSize}" font-weight="700" fill="${fg}">${esc(t.big)}</text>` +
 		`<text x="72" y="100" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#A0A0A0">${esc(t.small)}</text>` +
@@ -172,8 +227,11 @@ export function svgTile(t: Tile): string {
 /** Compact one-line value per provider for the overview key. */
 export function overviewValue(view: View): { text: string; pct?: number; dim: boolean } {
 	const s = view.sub;
-	if (s?.primary) return { text: (s.status === "ok" ? "" : "~") + fmtPct(s.primary.pct), pct: s.primary.pct, dim: s.status !== "ok" };
-	if (s && s.status !== "na") return { text: s.status === "key_missing" ? "Key" : STATUS_TEXT[s.status], dim: true };
+	if (s?.primary) {
+		const text = (s.status === "ok" ? "" : "~") + windowValue(s.primary);
+		return s.primary.text === undefined ? { text, pct: s.primary.pct, dim: s.status !== "ok" } : { text, dim: s.status !== "ok" };
+	}
+	if (s && s.status !== "na") return { text: s.status === "key_missing" ? "Key" : s.status === "config" ? "Setup" : STATUS_TEXT[s.status], dim: true };
 	if (view.today?.status === "ok") return { text: fmtTokens(view.today.in + view.today.out), dim: false };
 	return { text: s ? STATUS_TEXT[s.status] : "…", dim: true };
 }
@@ -193,10 +251,10 @@ export function overviewCost(views: Map<ProviderId, View>): { text: string; aler
 export function svgOverview(views: Map<ProviderId, View>): string {
 	let rows = "";
 	const cost = overviewCost(views);
-	// Six rows when a cost row is shown, otherwise the original five.
-	const step = cost ? 22 : 27;
-	const size = cost ? 16 : 18;
-	const top = cost ? 20 : 26;
+	// One row per provider (six), plus the cost row when shown.
+	const step = cost ? 19 : 22;
+	const size = cost ? 14 : 16;
+	const top = cost ? 17 : 20;
 	PROVIDER_IDS.forEach((id, i) => {
 		const y = top + i * step;
 		const v = overviewValue(views.get(id) ?? {});
@@ -251,10 +309,13 @@ export function svgResets(f: ResetsFrame, now = Date.now()): string {
 	}
 	f.shown.forEach((e, i) => {
 		const y = 24 + i * 60;
-		const name = `${PROVIDER_DISPLAY[e.provider]} ${e.window}`;
+		// Long names ("M365 Copilot Verlängerung") use the short label and a smaller font.
+		const full = `${PROVIDER_DISPLAY[e.provider]} ${e.window}`;
+		const name = full.length > 16 ? `${META[e.provider].abbr} ${e.window}` : full;
+		const nameSize = name.length > 14 ? 13 : 16;
 		if (i > 0) body += `<rect x="10" y="${y - 1}" width="124" height="1" fill="${f.alt ? "#C88410" : "#2A2A2A"}"/>`;
 		body +=
-			`<text x="10" y="${y + 17}" ${FONT} font-size="16" font-weight="700" fill="${f.alt ? ink : META[e.provider].color}">${esc(name)}</text>` +
+			`<text x="10" y="${y + 17}" ${FONT} font-size="${nameSize}" font-weight="700" fill="${f.alt ? ink : META[e.provider].color}">${esc(name)}</text>` +
 			`<text x="10" y="${y + 37}" ${FONT} font-size="18" font-weight="700" fill="${ink}">${esc(fmtResetCountdown(e.resetsAt, now))}</text>` +
 			`<text x="10" y="${y + 54}" ${FONT} font-size="14" fill="${sub}">${esc(fmtResetLocal(e.resetsAt, now))}</text>`;
 	});

@@ -43,6 +43,7 @@ export class ProviderKey extends SingletonAction<ProviderSettings> {
 		this.sched.keyAppeared();
 		await this.render(ev.action.id);
 		await this.syncApi(ev.action.id);
+		await this.syncTenant(ev.action.id);
 	}
 
 	override onWillDisappear(ev: WillDisappearEvent<ProviderSettings>): void {
@@ -54,6 +55,14 @@ export class ProviderKey extends SingletonAction<ProviderSettings> {
 		this.settings.set(ev.action.id, normalize(ev.payload.settings));
 		await this.render(ev.action.id);
 		await this.syncApi(ev.action.id);
+		await this.syncTenant(ev.action.id);
+	}
+
+	/** M365 Copilot keys hand their tenantId to the hub (persisted in state.json for CLI and reconcile). */
+	private async syncTenant(id: string): Promise<void> {
+		const s = this.settings.get(id);
+		if (s?.provider !== "m365copilot" || !s.tenantId) return;
+		await this.hub.setM365Tenant(s.tenantId).catch((e: unknown) => streamDeck.logger.warn(`m365 tenant: ${String(e)}`));
 	}
 
 	/** Hands the providers of all keys with showApiCost to the hub (persisted for the weekly reconcile). */
