@@ -155,6 +155,24 @@ Lokale Logs werden inkrementell gelesen (Byte-Offsets und mtimes in `~/.config/a
 Der erste Lauf liest nur Dateien, die in den letzten 7 Tagen geändert wurden; ältere werden nur markiert.
 Tagessummen werden 35 Tage aufbewahrt. Der Keychain-Eintrag `github-copilot-app` wird nie gelesen.
 
+## Fertige Seite importieren
+
+`npm run profile` erzeugt `tools/Nexus365-AI-Usage.streamDeckProfile`: eine Seite für das Stream Deck mit 15 Tasten (5×3).
+
+| | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| Reihe 1 | Claude Abo | Claude Tokens | Claude Kosten | Codex Abo | Codex Tokens |
+| Reihe 2 | Codex Kosten | Copilot Abo | Copilot Tokens | Copilot Kosten | Übersicht |
+| Reihe 3 | Nächste Resets (Blinken 24 h) | Gemini auto | Grok auto | leer | leer |
+
+1. Plugin installieren (siehe unten), sonst bleiben die Tasten leer.
+2. Doppelklick auf die Datei. Stream Deck fragt, auf welches Gerät das Profil soll.
+3. Das Profil heißt danach „Nexus.365 – AI Usage“.
+4. Die Tasten zeigen Werte nach der ersten Aktualisierung. Wer nicht warten will, drückt eine Taste.
+5. Umbenennen: in Stream Deck Einstellungen → Profile, Doppelklick auf den Namen. Oder beim Bauen: `node tools/make-profile.mjs --name "Mein Name"`.
+
+Andere Geräte: `node tools/make-profile.mjs --device-type 2` baut die Variante für das XL (8×4), gleiche Reihenfolge. `--cols`, `--rows` und `--model` überschreiben die Vorgaben. Was am Dateiformat belegt und was angenommen ist, steht in `tools/PROFILE-FORMAT.md`.
+
 ## Bauen, installieren, neu starten
 
 ```bash

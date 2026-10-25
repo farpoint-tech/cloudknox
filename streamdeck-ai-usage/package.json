@@ -4,11 +4,14 @@
   "private": true,
   "description": "Stream Deck plugin showing AI subscription usage, local token counts and API cost per provider",
   "type": "module",
-  "engines": { "node": ">=20.5.1" },
+  "engines": {
+    "node": ">=20.5.1"
+  },
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node build.mjs --tests && node --test \"test-dist/*.test.mjs\""
+    "test": "node build.mjs --tests && node --test \"test-dist/*.test.mjs\"",
+    "profile": "node tools/make-profile.mjs"
   },
   "dependencies": {
     "@elgato/streamdeck": "^3.0.3"
