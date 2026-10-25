@@ -16,16 +16,55 @@ async function api(path,data){
 }
 function showTab(next){tab=next;document.querySelectorAll('.tab').forEach(el=>{el.hidden=el.id!==next;});document.querySelectorAll('nav [data-tab]').forEach(el=>{el.classList.toggle('active',el.dataset.tab===next);el.setAttribute('aria-current',el.dataset.tab===next?'page':'false');});text('#page-title',titles[next]);if(next==='logs') loadLog();}
 document.querySelectorAll('[data-tab]').forEach(el=>el.addEventListener('click',()=>showTab(el.dataset.tab)));
+const columns=[
+  {key:'name',label:'Prozess',cls:'process-name',first:'asc',get:p=>p.name.toLowerCase(),show:p=>p.name},
+  {key:'pid',label:'PID',cls:'process-pid num',first:'asc',get:p=>p.pid,show:p=>`PID ${p.pid}`},
+  {key:'kind',label:'Typ',cls:'process-kind',first:'desc',title:'Ziel vor Eigener vor System',get:p=>p.target?2:p.own?1:0},
+  {key:'rssBytes',label:'Speicher',cls:'process-memory num',first:'desc',get:p=>p.rssBytes,show:p=>bytes(p.rssBytes)},
+  {key:'share',label:'RAM %',cls:'process-share num',first:'desc',title:'Anteil am gesamten Arbeitsspeicher',get:p=>state?.totalBytes?p.rssBytes/state.totalBytes:null,show:p=>state?.totalBytes?`${(p.rssBytes/state.totalBytes*100).toFixed(1)} %`:'—'},
+  {key:'cpuPercent',label:'CPU %',cls:'process-cpu num',first:'desc',title:'Ein Kern entspricht 100 %',get:p=>p.cpuPercent,show:p=>p.cpuPercent===null||p.cpuPercent===undefined?'—':`${p.cpuPercent.toFixed(1)} %`},
+  {key:'nice',label:'Priorität',cls:'process-nice num',first:'asc',title:'Nice-Wert: niedrigere Zahl bedeutet höhere Priorität',get:p=>p.nice,show:p=>p.nice===null||p.nice===undefined?'—':String(p.nice)}
+];
+const sortState={'#top-processes':{key:'rssBytes',dir:'desc'},'#all-processes':{key:'rssBytes',dir:'desc'}};
+function sortList(list,{key,dir}){
+  const col=columns.find(c=>c.key===key);const factor=dir==='asc'?1:-1;
+  return [...list].sort((a,b)=>{const x=col.get(a),y=col.get(b);const xn=x===null||x===undefined,yn=y===null||y===undefined;
+    if(xn||yn)return xn===yn?b.rssBytes-a.rssBytes:xn?1:-1;
+    if(x<y)return -factor;if(x>y)return factor;return b.rssBytes-a.rssBytes;});
+}
+function setSort(container,key){
+  const current=sortState[container];const col=columns.find(c=>c.key===key);
+  sortState[container]=current.key===key?{key,dir:current.dir==='asc'?'desc':'asc'}:{key,dir:col.first};
+  renderLists();
+  $(`${container} [data-sort="${key}"]`)?.focus();
+}
 function renderProcesses(container,list){
-  const root=$(container);root.replaceChildren();
+  const root=$(container);root.replaceChildren();root.setAttribute('role','table');
   if(!list.length){const p=document.createElement('p');p.className='empty';p.textContent=state?.errors.some(e=>e.startsWith('Prozesse'))?'Prozessmessung nicht verfügbar.':'Keine passenden Prozesse.';root.append(p);return;}
-  for(const process of list){
-    const row=document.createElement('div');row.className='process-row';
-    for(const [className,value] of [['process-icon',process.name.slice(0,1).toUpperCase()],['process-name',process.name],['process-pid',`PID ${process.pid}`],[`badge${process.target?' target':''}`,process.target?'Ziel':process.own?'Eigener':'System'],['process-memory',bytes(process.rssBytes)]]){
-      const el=document.createElement('span');el.className=className;el.textContent=value;row.append(el);
+  const sort=sortState[container];
+  const head=document.createElement('div');head.className='process-row process-head';head.setAttribute('role','row');
+  const spacer=document.createElement('span');spacer.className='process-icon-space';spacer.setAttribute('role','columnheader');spacer.setAttribute('aria-label','Symbol');head.append(spacer);
+  for(const col of columns){
+    const cell=document.createElement('span');cell.className=col.cls;cell.setAttribute('role','columnheader');
+    cell.setAttribute('aria-sort',sort.key===col.key?(sort.dir==='asc'?'ascending':'descending'):'none');
+    const button=document.createElement('button');button.type='button';button.className='sort-button';button.dataset.sort=col.key;
+    button.textContent=col.label+(sort.key===col.key?(sort.dir==='asc'?' ▲':' ▼'):'');
+    button.title=`Nach ${col.label} sortieren${col.title?` · ${col.title}`:''}`;
+    button.addEventListener('click',()=>setSort(container,col.key));cell.append(button);head.append(cell);
+  }
+  root.append(head);
+  for(const process of sortList(list,sort)){
+    const row=document.createElement('div');row.className='process-row';row.setAttribute('role','row');
+    const icon=document.createElement('span');icon.className='process-icon';icon.setAttribute('role','cell');icon.textContent=process.name.slice(0,1).toUpperCase();row.append(icon);
+    for(const col of columns){
+      const el=document.createElement('span');el.setAttribute('role','cell');
+      if(col.key==='kind'){el.className=`process-kind`;const badge=document.createElement('span');badge.className=`badge${process.target?' target':''}`;badge.textContent=process.target?'Ziel':process.own?'Eigener':'System';el.append(badge);}
+      else{el.className=col.cls;el.textContent=col.show(process);}
+      row.append(el);
     }root.append(row);
   }
 }
+function renderLists(){if(!state)return;renderProcesses('#top-processes',state.processes.slice(0,5));filterProcesses();}
 function filterProcesses(){if(!state)return;const query=$('#search').value.toLowerCase();renderProcesses('#all-processes',state.processes.filter(p=>p.name.toLowerCase().includes(query)||String(p.pid).includes(query)));}
 $('#search').addEventListener('input',filterProcesses);
 function fillConfig(){
@@ -50,7 +89,7 @@ function render(){
   points.forEach((p,i)=>{if(p.free===null){if(current.length)segments.push(current);current=[];}else current.push(`${points.length===1?0:i/(points.length-1)*640},${145-p.free*1.4}`);});if(current.length)segments.push(current);
   const svg=$('#chart');svg.querySelectorAll('.series').forEach(el=>el.remove());$('#chart-line').setAttribute('points','');
   for(const points of segments){const line=document.createElementNS('http://www.w3.org/2000/svg','polyline');line.classList.add('series');line.setAttribute('points',points.join(' '));line.setAttribute('fill','none');line.setAttribute('stroke',color);line.setAttribute('stroke-width','2.5');svg.append(line);}
-  renderProcesses('#top-processes',state.processes.slice(0,5));filterProcesses();if(!configLoaded||!dirty)fillConfig();
+  renderLists();if(!configLoaded||!dirty)fillConfig();
   text('#updated',`Messung: ${new Date(state.time).toLocaleTimeString('de-DE')}`);
   const errors=[...state.errors,...(state.monitorError?[state.monitorError]:[]),...(state.agent?.error?[state.agent.error]:[])];$('#error').hidden=!errors.length;if(errors.length)error(errors.join(' · '));
 }

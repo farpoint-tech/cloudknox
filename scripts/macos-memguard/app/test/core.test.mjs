@@ -26,3 +26,11 @@ test('process parser handles spaces, RSS and target ownership without returning 
   assert.equal(result.find(p=>p.pid===123).target,true);
   assert.ok(!JSON.stringify(result).includes('TOPSECRET'));
 });
+test('process parser reads CPU and nice when present and stays compatible without them',()=>{
+  const result=parseProcesses('300 501 4096 260.9 0 /Applications/Claude.app/Contents/MacOS/Claude\n301 501 2048 0.0 -1 /usr/sbin/coreaudiod\n302 501 1024 /bin/old-format worker',[],501);
+  const claude=result.find(p=>p.pid===300),audio=result.find(p=>p.pid===301),old=result.find(p=>p.pid===302);
+  assert.equal(claude.name,'Claude');assert.equal(claude.cpuPercent,260.9);assert.equal(claude.nice,0);
+  assert.equal(audio.cpuPercent,0);assert.equal(audio.nice,-1);assert.equal(audio.name,'coreaudiod');
+  assert.equal(old.cpuPercent,null);assert.equal(old.nice,null);assert.equal(old.name,'old-format');
+  assert.deepEqual(result.map(p=>p.pid),[300,301,302]);
+});

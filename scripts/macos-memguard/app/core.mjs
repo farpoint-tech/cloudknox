@@ -28,13 +28,15 @@ export async function command(file, args) {
 }
 export function parseProcesses(raw, targets, uid, home = homedir()) {
   return raw.split('\n').flatMap(line => {
-    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);
+    // Accepts "pid uid rss %cpu nice args" and the older "pid uid rss args".
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(?:(\d+(?:\.\d+)?)\s+(-?\d+)\s+)?(.+)$/);
     if (!match) return [];
-    const [,pid,owner,rss,cmd] = match;
+    const [,pid,owner,rss,cpu,nice,cmd] = match;
     // Only return the executable name; full arguments may contain secrets.
     const app = cmd.match(/\/([^/]+)\.app\//)?.[1];
     const name = app || cmd.split(/\s/)[0].split('/').pop();
     return [{pid:Number(pid), own:Number(owner)===uid, rssBytes:Number(rss)*1024, name,
+      cpuPercent:cpu===undefined ? null : Number(cpu), nice:nice===undefined ? null : Number(nice),
       target:Number(owner)===uid && !cmd.includes('memguard') && targets.some(t => cmd.includes(t.replaceAll('~',home)))}];
   }).sort((a,b)=>b.rssBytes-a.rssBytes);
 }

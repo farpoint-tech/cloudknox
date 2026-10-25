@@ -104,7 +104,15 @@ p{line-height:1.7}
 .control-panel h3{font-size:21px}
 .controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
 .text-button{border:0;background:transparent;color:var(--link);font-size:11px;font-weight:600}
-.process-row{display:grid;grid-template-columns:32px minmax(120px,1fr) 80px 80px 90px;gap:12px;align-items:center;border-bottom:1px solid var(--line);padding:13px 0;font-size:12px}
+.process-row{display:grid;grid-template-columns:32px minmax(120px,1fr) 80px 80px 90px 70px 70px 72px;gap:12px;align-items:center;border-bottom:1px solid var(--line);padding:13px 0;font-size:12px}
+.process-head{padding:6px 0 8px;position:sticky;top:0;background:var(--surface);z-index:1}
+.sort-button{background:none;border:0;padding:2px 0;color:var(--muted);font:inherit;font-size:10px;font-weight:600;letter-spacing:.02em;cursor:pointer;width:100%;text-align:inherit;white-space:nowrap}
+.sort-button:hover,.sort-button:focus-visible{color:var(--link)}
+.sort-button:focus-visible{outline:2px solid var(--link);outline-offset:2px;border-radius:3px}
+.process-head [aria-sort=ascending] .sort-button,.process-head [aria-sort=descending] .sort-button{color:var(--ink)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.process-share,.process-cpu,.process-nice{color:var(--text-secondary)}
+.process-kind{display:flex}
 .process-row:last-child{border-bottom:0}
 .process-icon{width:29px;height:29px;border-radius:8px;background:var(--subtle);display:flex;align-items:center;justify-content:center;color:var(--link);font-size:13px;font-weight:700}
 .process-name{font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -168,7 +176,8 @@ h1{font-size:27px}
 .metric strong{font-size:24px}
 .panel{padding:20px}
 .settings-grid{grid-template-columns:1fr}
-.process-row{grid-template-columns:24px minmax(60px,1fr) 50px 65px;gap:7px}
+.process-row{grid-template-columns:24px minmax(60px,1fr) 50px 65px 50px;gap:7px}
+.process-cpu,.process-nice{display:none}
 .process-pid{display:none}
 .process-icon{width:24px;height:24px}
 .process-name{font-size:11px}
