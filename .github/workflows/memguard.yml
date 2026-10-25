@@ -24,5 +24,11 @@ jobs:
           zsh -n src/memguard MemGuard.command
           node --check app/server.mjs
           node --check app/public/app.js
+          node --check app/open-dashboard.mjs
+          zsh -n build-app.sh install.sh build-release.sh
       - name: Unit, API and disposable-process integration tests
         run: npm --prefix app test
+      - name: Build native notification application
+        run: |
+          zsh build-app.sh
+          codesign --verify --deep --strict dist/MemGuard.app

@@ -6,7 +6,7 @@
 emulate -L zsh
 setopt no_unset pipe_fail
 
-VERSION="1.1.1"
+VERSION="1.2.0"
 SYS_DIR="/Library/Application Support/MemGuard"
 USER_DIR="$HOME/Library/Application Support/MemGuard"
 LOG_DIR="${MEMGUARD_LOG_DIR:-$HOME/Library/Logs/MemGuard}"
@@ -87,13 +87,23 @@ log() {
 t() { # t <en> <de>
   [[ "$LANG_UI" == de ]] && print -r -- "$2" || print -r -- "$1"
 }
+deliver_notification() { /usr/bin/open -n -g -a "$1" "$2"; }
 notify() {
   [[ "$NOTIFY" == true ]] || return 0
-  osascript - "$1" "$2" <<'APPLESCRIPT' >/dev/null 2>&1
-on run argv
-  display notification (item 2 of argv) with title (item 1 of argv) sound name "Basso"
-end run
-APPLESCRIPT
+  local app="${MEMGUARD_NOTIFICATION_APP:-$USER_DIR/MemGuard.app}"
+  if [[ ! -d "$app" ]]; then app="$SYS_DIR/MemGuard.app"; fi
+  if [[ ! -d "$app" ]]; then
+    log 'ERROR notification app missing; install MemGuard.app to enable clickable statistics'; return 1
+  fi
+  local payload_dir="$LOG_DIR/notifications" payload
+  mkdir -p "$payload_dir"; chmod 700 "$payload_dir"
+  payload=$(mktemp "$payload_dir/memguard-notification.XXXXXXXX") || return 1
+  chmod 600 "$payload"
+  if /usr/bin/plutil -create xml1 "$payload" &&
+     /usr/bin/plutil -insert title -string "$1" "$payload" &&
+     /usr/bin/plutil -insert body -string "$2" "$payload" &&
+     deliver_notification "$app" "$payload"; then return 0; fi
+  log "ERROR notification delivery failed; payload=$payload"; return 1
 }
 measure() {
   if [[ -n "${MEMGUARD_FAKE_FREE:-}" ]]; then FREE=$MEMGUARD_FAKE_FREE
@@ -181,7 +191,7 @@ step() {
     if (( now - LAST_CRIT > 120 )); then
       log "CRITICAL free=${FREE}% swapfiles=$SWAPFILES no-target top=[$top]"
       notify "MemGuard: $(t 'memory critical' 'Speicher kritisch')" \
-        "$(t "Only ${FREE}% free. Largest: $top. Close apps now." "Nur ${FREE}% frei. Größte: $top. Apps jetzt schließen.")"
+        "$(t "Memory indicator ${FREE}%. Largest: $top. Close apps now." "Speicherindikator ${FREE}%. Größte: $top. Apps jetzt schließen.")"
       LAST_CRIT=$now
     fi
     return 0
@@ -189,7 +199,7 @@ step() {
   if (( now - LAST_WARN > WARN_REPEAT )); then
     log "WARN free=${FREE}% swapfiles=$SWAPFILES paused=$([[ -e $PAUSE_FILE ]] && echo yes || echo no) top=[$top]"
     notify "MemGuard: $(t 'memory low' 'Speicher knapp')" \
-      "$(t "${FREE}% free, $SWAPFILES swap files. Largest: $top" "${FREE}% frei, $SWAPFILES Swap-Dateien. Größte: $top")"
+      "$(t "Memory indicator ${FREE}%, $SWAPFILES swap files. Largest: $top" "Speicherindikator ${FREE}%, $SWAPFILES Swap-Dateien. Größte: $top")"
     LAST_WARN=$now
   fi
 }

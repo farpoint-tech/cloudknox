@@ -52,3 +52,21 @@ Erneut bestanden: 19 automatisierte Tests und der erweiterte Browserdurchlauf mi
 - [ ] P1 · Betreiber: Repräsentativen Pilotbetrieb mit überprüften Zielmustern durchführen; bei Messfehlern oder unerwarteten Treffern pausieren.
 - [ ] P2 · Maintainer: Draft-PR und GitHub-Prüfungen vor Merge prüfen.
 - [ ] P2 · Release-Verantwortlicher: Falls benötigt, signierte/notarierte native Distribution ergänzen.
+
+## Nachprüfung 1.2.0 – 25. Oktober 2026
+
+Bestandsprüfung: Im Repository standen README und Prüfbericht, aber kein vollständiges Konzept, keine Entwicklungsübergabe und kein priorisierter Arbeitsvorrat. Ergänzt: CONCEPT.md, DEVELOPMENT.md und BACKLOG.md mit Architektur, Dateizuständigkeiten, Sicherheitsinvarianten, ausführbaren Prüfungen, Definition of Done, Installationsgrenzen und Abnahmekriterien pro Aufgabe. Im Repository-README verlinkt.
+
+Die bestehende Benutzerinstallation meldet weiterhin 1.0.0 und erzeugt Mitteilungen via osascript. Der gemeldete Dateiauswahldialog selbst wurde nicht reproduziert. Die neue Fassung führt einen eigenen nativen App-Absender und einen Dashboard-Starter mit Produkt-/Versionsprüfung ein. App-Aktivierung öffnet die Statistik im Standardbrowser, startet bei Bedarf den lokalen Server und aktiviert dabei keinen zusätzlichen Monitor.
+
+Lokal nachgewiesen: 24/24 automatisierte Tests bestanden, keine übersprungenen Tests; erweiterter Browserdurchlauf für Schwarz/Hell, Formulare und Fehlerzustände bestanden. App-Build und ad-hoc-Signaturprüfung; tatsächlicher App-Direktstart startet den Server mit erwarteter Produktkennung/Version; in Edge sichtbare Übersicht mit RAM, Swap, Prozessen und bestehendem externen LaunchAgent. Neue Startertests prüfen Wiederverwendung, Start/Bereitschaft und fremden belegten Port. Der simulierte Signaltest berührt weiterhin ausschließlich eigene Wegwerfprozesse.
+
+Beim ersten App-Build störten FinderInfo/File-Provider-Attribute die Signierung. Build in eigenes /tmp-Staging verlegt, ausschließlich am erzeugten Bundle Attribute bereinigt und Signaturprüfung erfolgreich durchgeführt. Beim Test der Mitteilungsnutzlast war ein nicht vorhandener unlink-Pfad fehlerhaft; auf die begrenzte eigene Nutzlastbereinigung umgestellt. Die BSD-mktemp-Vorlage wurde so korrigiert, dass die Zufallszeichen am Ende stehen. Ein Regressionstest prüft jetzt getrennte Namen, private Berechtigungen und uninterpretierte Inhalte.
+
+Native Mitteilungen: Nutzlastverarbeitung und App-Aktivierung sind implementiert; ein sichtbar zugestellter und tatsächlich angeklickter Banner konnte über die verfügbare UI nicht abschließend verifiziert werden. Dies bleibt MG-02. Die produktive Benutzerinstallation wurde nicht aktualisiert. Ein erfolgreicher App-/open-Aufruf ist kein Zustellnachweis. Die neue native App braucht den freigegebenen Installationsschritt, bevor neue echte Monitorwarnungen diese Kette verwenden.
+
+## Offene Punkte 1.2.0
+
+- [ ] P1 · QA/Betreiber: MG-02 mit sichtbarem Testbanner und tatsächlichem Klick am endgültigen Installationspfad abnehmen.
+- [ ] P1 · Betreiber: MG-03 – Benutzerinstallation gesondert freigeben und vollständig zurückprüfen.
+- [ ] P2 · Entwicklung: Weitere Aufgaben gemäß BACKLOG.md; keine Vollständigkeit des Pilot-/Rolloutnachweises behaupten.

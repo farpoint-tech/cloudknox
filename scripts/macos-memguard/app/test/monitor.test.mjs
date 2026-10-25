@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
-import {mkdtemp,writeFile,readFile,rm,mkdir} from 'node:fs/promises';
+import {mkdtemp,writeFile,readFile,rm,mkdir,readdir,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -108,4 +108,22 @@ test('monitor rejects its own process and ancestors even for matching targets',a
   const harness=join(root,'ancestor.zsh');
   await writeFile(harness,source+'\nTARGETS=(zsh node)\nif safe_target "$$"; then exit 21; fi\nif safe_target "$PPID"; then exit 22; fi\nprint protected\n');
   const {stdout}=await exec('/bin/zsh',[harness],{env,timeout:10000});assert.match(stdout,/protected/);
+});
+
+test('notification payloads are unique private data, not interpolated AppleScript',async t=>{
+  const {root,env}=await setup(t);
+  const app=join(root,'MemGuard.app');await mkdir(app);
+  const capture=join(root,'captured.plist');
+  const source=(await readFile(script,'utf8')).split('\ncase "${1:-status}"')[0];
+  const harness=join(root,'notification.zsh');
+  await writeFile(harness,source+'\nNOTIFY=true\ndeliver_notification() { cp "$2" "$MEMGUARD_CAPTURE"; }\nnotify "$MEMGUARD_TEST_TITLE" "$MEMGUARD_TEST_BODY"\nnotify "$MEMGUARD_TEST_TITLE" "$MEMGUARD_TEST_BODY"\n');
+  const title='MemGuard "quoted"';
+  const body='Quotes " and \\ backslash; $(touch SHOULD_NOT_EXIST)\nUnicode: Größe.';
+  await exec('/bin/zsh',[harness],{env:{...env,MEMGUARD_NOTIFICATION_APP:app,MEMGUARD_CAPTURE:capture,MEMGUARD_TEST_TITLE:title,MEMGUARD_TEST_BODY:body},timeout:10000});
+  assert.equal((await exec('/usr/bin/plutil',['-extract','title','raw','-o','-',capture])).stdout.trimEnd(),title);
+  assert.equal((await exec('/usr/bin/plutil',['-extract','body','raw','-o','-',capture])).stdout.trimEnd(),body);
+  const notificationDir=join(root,'logs/notifications');const payloads=await readdir(notificationDir);
+  assert.equal(payloads.length,2);assert.notEqual(payloads[0],payloads[1]);
+  assert.equal((await stat(notificationDir)).mode&0o777,0o700);
+  for(const payload of payloads) assert.equal((await stat(join(notificationDir,payload))).mode&0o777,0o600);
 });

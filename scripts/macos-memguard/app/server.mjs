@@ -7,10 +7,11 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { defaults, validateConfig, classify, command, parseProcesses } from './core.mjs';
+import { dashboardIdentity, dashboardVersion } from './open-dashboard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const hash = text => createHash('sha256').update(text).digest('hex');
-const version = '1.1.1';
+const version = dashboardVersion;
 const errorText = error => error.message.split('\n')[0];
 export async function createApp({home=homedir(), port=0, sampleCommand=command, testMode=false}={}) {
   const userConfig = join(home,'Library/Application Support/MemGuard/config.json');
@@ -46,7 +47,7 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
       sampleCommand('/usr/sbin/sysctl',['-n','kern.memorystatus_level']),
       sampleCommand('/usr/sbin/sysctl',['-n','hw.memsize']),
       sampleCommand('/usr/sbin/sysctl',['vm.swapusage']),
-      sampleCommand('/bin/ps',['-Axo','pid=,uid=,rss=,args=']),
+      sampleCommand('/bin/ps',['-Axo','pid=,uid=,rss=,%cpu=,nice=,args=']),
       testMode ? Promise.resolve([]) : readdir('/System/Volumes/VM'),
       agentStatus()
     ]);
@@ -95,6 +96,7 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
       const path=new URL(req.url,origin).pathname;
       if(req.method==='GET') {
         if(path==='/favicon.ico') { res.writeHead(204); return res.end(); }
+        if(path==='/api/health') return send(res,200,{app:dashboardIdentity,version});
         const fonts=['raleway-latin-700-normal.woff2','raleway-latin-800-normal.woff2','ibm-plex-sans-latin-400-normal.woff2','ibm-plex-sans-latin-500-normal.woff2','ibm-plex-sans-latin-600-normal.woff2'];
         if(fonts.some(name=>path===`/fonts/${name}`)) return send(res,200,await readFile(join(here,'public',path.slice(1))),'font/woff2');
         const files={'/':'index.html','/app.js':'app.js','/theme.js':'theme.js','/style.css':'style.css'};
@@ -148,6 +150,8 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
             const env={...process.env};
             for(const key of Object.keys(env)) if(key.startsWith('MEMGUARD_')) delete env[key];
             env.MEMGUARD_CONFIG=existsSync(config.path)?config.path:resolve(here,'../src/config.default.json');
+            const nativeApp=resolve(here,'../../../..');
+            if(nativeApp.endsWith('.app') && existsSync(nativeApp)) env.MEMGUARD_NOTIFICATION_APP=nativeApp;
             monitor=spawn('/bin/zsh',[resolve(here,'../src/memguard'),'run'],{env,stdio:['ignore','ignore','pipe']});
             monitorError=null;
             monitor.stderr.on('data',chunk=>{monitorError=String(chunk).slice(0,1000);});

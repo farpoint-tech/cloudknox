@@ -24,6 +24,7 @@ async function setup(t,sampleCommand=fixture){
 }
 test('live API returns metrics without raw command lines; export redacts identities',async t=>{
   const {get}=await setup(t);const {data}=await get('/api/status');
+  assert.deepEqual((await get('/api/health')).data,{app:'tech.farpoint.memguard.dashboard',version:'1.2.0'});
   assert.equal(data.state,'normal');assert.equal(data.free,50);assert.equal(data.swapUsedBytes,123*1024**2);assert.equal(data.agent.state,'stopped');
   assert.ok(!JSON.stringify(data).includes('SECRET'));
   const exported=(await get('/api/export')).data;

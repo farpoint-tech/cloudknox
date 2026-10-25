@@ -1,12 +1,22 @@
-# MemGuard 1.1.1
+# MemGuard 1.2.0
 
 Lokale Speicherüberwachung für macOS mit Weboberfläche. MemGuard kann Speicherengpässe abmildern, garantiert aber keinen Schutz vor Kernel-Panics.
 
+## Konzept und Weiterentwicklung
+
+[CONCEPT.md](CONCEPT.md) beschreibt Produkt, Architektur und Sicherheitsregeln. [DEVELOPMENT.md](DEVELOPMENT.md) enthält Einstieg, Dateizuständigkeiten, Tests, Build und native Abnahme. [BACKLOG.md](BACKLOG.md) enthält priorisierte Aufgaben MG-01 bis MG-11 mit Verantwortlichkeiten und Abnahmekriterien. Eine neue Entwicklung kann diese Dokumente ohne Chatverlauf übernehmen.
+
+## Mitteilung anklicken → Statistik
+
+Ab 1.2.0 ist **MemGuard.app** der eigene Mitteilungsabsender. Ein Klick auf die Mitteilung bzw. „Show/Anzeigen“ aktiviert die App und öffnet die lokale Statistikseite. Eine Datei muss dafür weder ausgewählt noch manuell geöffnet werden. Der Starter verwendet einen passenden laufenden Server erneut oder startet ihn und wartet auf dessen Bereitschaft. Die interne Mitteilungsdatei ist ausschließlich Datentransport zwischen Monitor und App.
+
+Die installierte Version muss dafür aktualisiert sein. Alte Meldungen von osascript/Script Editor behalten ihren alten Absender; sie sind kein Test der neuen Version. Sichtbare Zustellung und Klickverhalten hängen zusätzlich von den macOS-Mitteilungs-/Fokuseinstellungen ab und müssen nach Installation geprüft werden.
+
 ## Starten
 
-Voraussetzungen: macOS und Node.js 22 oder neuer. Es gibt keine npm-Laufzeitabhängigkeiten; kein npm install nötig. Den Ordner bzw. das ZIP entpacken und **MemGuard.command** doppelklicken. Alternativ: `zsh MemGuard.command`. Der Browser öffnet die im Terminal angezeigte Adresse.
+Voraussetzungen: macOS und Node.js 22 oder neuer. Es gibt keine npm-Laufzeitabhängigkeiten; kein npm install nötig. Das ZIP entpacken und **dist/MemGuard.app** öffnen. Alternativ aus dem Quellordner `zsh MemGuard.command` starten. Beides öffnet die lokale Statistikseite.
 
-Der Server bindet nur an `127.0.0.1` und wählt einen freien Port. Optional: `MEMGUARD_PORT=8765 zsh MemGuard.command`. Keine Cloud, keine Telemetrie, keine externen Schriftarten. Mit Ctrl+C im zugehörigen Terminal beenden. Das Schließen des Browser-Tabs stoppt den Server nicht.
+Der Starter verwendet standardmäßig `http://127.0.0.1:8765`; der Server bindet nur an `127.0.0.1`. Optional: `MEMGUARD_PORT=8765 zsh MemGuard.command`. Keine Cloud, keine Telemetrie, keine externen Schriftarten. Der App-Starter lässt den Statistikserver im Hintergrund laufen; dessen Ausgabe steht unter ~/Library/Logs/MemGuard/dashboard.log. Das Schließen des Browser-Tabs stoppt ihn nicht. Für Entwicklung kann node app/server.mjs direkt im Terminal gestartet und mit Ctrl+C beendet werden.
 
 Der Start der Oberfläche aktiviert keine Prozessbeendigung und ersetzt keine Installation. Ein bestehender LaunchAgent wird als extern verwaltet angezeigt. Nur wenn kein Dienst vorhanden ist, lässt sich der gebündelte Monitor nach Bestätigung starten. Bei unbekanntem Dienststatus bleibt der Start gesperrt. Ein aus der App gestarteter Monitor endet mit dem Server; ein externer Dienst läuft unabhängig weiter.
 
@@ -65,11 +75,11 @@ Zwischen Identitätsprüfung und Signal bleibt ein nicht atomar ausschließbares
 
 ## Bestehende Installation aktualisieren
 
-`install.sh` installiert nur den Hintergrundmonitor als Benutzer-LaunchAgent. Das Öffnen der Oberfläche führt diesen Schritt nicht aus. Vor dem Update Binärdatei, Konfiguration und LaunchAgent sichern. Ohne --config bleibt die Konfiguration erhalten. Nach ausdrücklicher Freigabe `./install.sh` ausführen und anschließend mit der installierten Binärdatei `version` und `status` prüfen.
+`install.sh` installiert den Hintergrundmonitor als Benutzer-LaunchAgent und die zugehörige MemGuard.app. Zuerst die aktuelle App mit zsh build-app.sh bauen bzw. das vollständige ZIP verwenden. Der Installer sichert vorhandene Dateien in einem update-backup-Ordner. Das Öffnen der Oberfläche führt diesen Schritt nicht aus. Vor dem Update Binärdatei, Konfiguration und LaunchAgent sichern. Ohne --config bleibt die Konfiguration erhalten. Nach ausdrücklicher Freigabe `./install.sh` ausführen und anschließend mit der installierten Binärdatei `version` und `status` prüfen.
 
 Zuerst ohne Zielmuster bzw. pausiert pilotieren. Abbruchkriterien: unbekannte Messwerte, unerwartete Treffer, wiederholte Monitorabbrüche. Für einen Rollback Dienst beenden, gesicherte Binärdatei/LaunchAgent wiederherstellen und Dienst erneut prüfen. Bereits verlorene Prozessarbeit lässt sich dadurch nicht wiederherstellen.
 
-Die vorhandenen build-pkg.sh und uninstall.sh bleiben verfügbar. Das PKG enthält nur den Monitor; die ZIP-Auslieferung enthält zusätzlich die Oberfläche. Es handelt sich nicht um eine signierte oder notarierte native .app.
+Die vorhandenen build-pkg.sh und uninstall.sh bleiben verfügbar. ZIP und PKG enthalten seit 1.2.0 auch MemGuard.app. Das App-Bundle ist lokal ad hoc signiert; es ist weder Developer-ID-signiert noch notarisiert. Das PKG muss zusätzlich für seine Zielumgebung abgenommen werden.
 
 ## Tests und Paket
 
@@ -81,6 +91,7 @@ node --check app/server.mjs
 node --check app/public/app.js
 zsh -n src/memguard
 zsh src/memguard selftest
+zsh build-app.sh
 zsh build-release.sh
 ```
 
