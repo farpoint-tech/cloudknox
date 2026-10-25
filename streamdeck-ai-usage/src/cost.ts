@@ -1,8 +1,8 @@
 import { fmtCountdown } from "./format.js";
 import type { CostItem, ProviderId } from "./providers/types.js";
 
-/** Providers whose subscription endpoint reports costs/budgets. Gemini and Grok: "n/v" until data exists. */
-export const COST_SOURCE: Record<ProviderId, boolean> = { claude: true, codex: true, copilot: true, m365copilot: true, gemini: false, grok: false };
+/** Providers whose subscription endpoint reports costs/budgets. Gemini: "n/v" until data exists. Grok: on-demand/prepaid from /v1/billing. */
+export const COST_SOURCE: Record<ProviderId, boolean> = { claude: true, codex: true, copilot: true, m365copilot: true, gemini: false, grok: true };
 
 const SYMBOL: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
 

@@ -3,6 +3,7 @@ import { fmtAge, fmtCountdown, fmtPct, fmtTokens, fmtUsd, fmtWait } from "./form
 import type { View } from "./hub.js";
 import { META, PROVIDER_IDS, type ProviderId, type ResetEvent, type Status, type SubPart, type Window } from "./providers/types.js";
 import { normalizeTenant, shortSku } from "./providers/m365copilot.js";
+import { normalizeAuth, normalizeClientId, normalizeUpn, type M365Auth } from "./providers/m365app.js";
 import { fmtResetCountdown, fmtResetLocal, PROVIDER_DISPLAY } from "./resets.js";
 
 /** "kosten" = subscription costs/budgets (default); "api" = API-key costs, only with showApiCost (Enterprise/Teams). */
@@ -19,8 +20,14 @@ export type ProviderSettings = {
 	metric?: Metric;
 	/** API-key costs (admin keys, only Enterprise/Teams). Off by default: no keychain access for API keys. */
 	showApiCost?: boolean;
-	/** M365 Copilot only: Entra tenant (GUID or domain) for `az account get-access-token --tenant`. "" = not set. */
+	/** M365 Copilot only: Entra tenant (GUID or domain). "" = not set. */
 	tenantId?: string;
+	/** M365 Copilot only: "az" (az CLI token, default) or "app" (Entra app, client credentials). */
+	m365Auth?: M365Auth;
+	/** M365 Copilot app mode: application (client) ID (GUID). "" = not set. */
+	clientId?: string;
+	/** M365 Copilot app mode: user whose license and usage are shown (app tokens have no /me). "" = not set. */
+	upn?: string;
 };
 
 /** Settings from the property inspector; "api" without showApiCost (and the old default "api") becomes "kosten". */
@@ -33,6 +40,9 @@ export function normalizeProviderSettings(s: ProviderSettings): Required<Provide
 		metric,
 		showApiCost,
 		tenantId: normalizeTenant(s.tenantId) ?? (typeof s.tenantId === "string" ? s.tenantId.trim() : ""),
+		m365Auth: normalizeAuth(s.m365Auth),
+		clientId: normalizeClientId(s.clientId) ?? (typeof s.clientId === "string" ? s.clientId.trim() : ""),
+		upn: normalizeUpn(s.upn) ?? (typeof s.upn === "string" ? s.upn.trim() : ""),
 	};
 }
 
@@ -52,8 +62,9 @@ export function windowValue(w: Window): string {
 	return w.text ?? fmtPct(w.pct);
 }
 
-/** Short hint for a provider without value (M365: "az login", "Tenant-ID"). */
+/** Short hint for a provider without value (M365: "az login", "Tenant-ID"; Grok: "grok login"). */
 function hintFor(id: ProviderId, s: SubPart): string {
+	if (s.hint) return s.hint;
 	if (id !== "m365copilot") return "";
 	if (s.status === "login") return "az login";
 	if (s.status === "config") return "Tenant-ID";

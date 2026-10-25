@@ -47,9 +47,38 @@
   `GET /v1.0/copilot/reports/getMicrosoft365CopilotUsageUserDetail(period='D7')`, Antwort CSV. Rechte: Reports.Read.All
   + Rolle (z. B. Reports Reader, AI Administrator). Nur Nutzer mit Copilot-Lizenz; Namen ggf. gehasht (Admin-Einstellung).
 - Plugin ruft `/v1.0/reports/…(period='D30')?$format=application/json` (wie beauftragt) und fällt bei 400/404 auf `/beta/reports/…` zurück.
+- Weg B (Enterprise-App, Client Credentials): `POST https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token` mit
+  `client_id`, `client_secret`, `scope=https://graph.microsoft.com/.default`, `grant_type=client_credentials`
+  (learn.microsoft.com/entra/identity-platform/v2-oauth2-client-creds-grant-flow). App-Tokens haben kein `/me`; stattdessen
+  `/v1.0/users/{upn}/licenseDetails` und `/v1.0/users/{upn}` (Application `User.Read.All`), `/v1.0/directory/subscriptions`
+  (Application `Organization.Read.All`), Bericht (Application `Reports.Read.All`, keine Rolle nötig). Rechte stehen nach
+  Admin-Consent im `roles`-Claim des Tokens; fehlt Consent, wird trotzdem ein Token ausgestellt, Graph antwortet 403.
+  AADSTS-Codes: 7000215 Secret falsch, 7000222 Secret abgelaufen, 700016 App nicht im Tenant, 65001/500011 Consent bzw.
+  Ressource fehlt. Nicht live getestet.
 
-## Grok-Abo (grok.com): nichts Belastbares
-- Keine offizielle API; Community-Wege via grok CLI auth.json + cli-chat-proxy.grok.com/v1/billing (siehe SPEC) — fragil, Cloudflare, AGB-Risiko. v1: nur wenn ~/.grok/auth.json existiert, sonst "grok login".
+## Grok-Abo (grok CLI 1.0.70, live 2026-10-25, ohne Abo)
+- Keine offizielle API; die Endpunkte nutzt die grok CLI selbst. Inoffiziell, Cloudflare davor, AGB-Risiko.
+- **`~/.grok/auth.json`** (nach `grok login`): Objekt, Schlüssel `"<issuer>::<client-id>"` (z. B. `"https://auth.x.ai::<uuid>"`).
+  Je Eintrag: `auth_mode` (`"oidc"`), `key` (Access-Token, JWT ~900 Zeichen), `expires_at` (ISO mit Mikrosekunden, z. B.
+  `…T04:24:58.479276Z`), `refresh_token`, `oidc_issuer` (`https://auth.x.ai`), `oidc_client_id`, `principal_type` (`User`),
+  `principal_id`, `user_id`, `team_id` (null), `email`, `first_name`, `last_name`, `profile_image_asset_id`, `create_time`,
+  `coding_data_retention_opt_out`. **Kein** Feld `access_token`. Plugin liest `key`, akzeptiert `access_token`/`accessToken`
+  (ältere Versionen, auch flach auf oberster Ebene) und nimmt bei mehreren Einträgen den mit dem spätesten `expires_at`
+  (ISO, Unix-Sekunden oder -Millisekunden).
+- **Refresh** (nicht live getestet, Token war gültig): `POST ${oidc_issuer}/oauth2/token`, form-encoded
+  `grant_type=refresh_token`, `client_id=<oidc_client_id>`, `refresh_token=<refresh_token>`; erwartet `access_token`,
+  `expires_in`, ggf. neues `refresh_token`. Zurückschreiben nur bei Erfolg, nur `key`/`expires_at`/`refresh_token` im selben
+  Eintrag; unbekannte Felder bleiben, da die CLI dieselbe Datei pflegt.
+- **`GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`** (Bearer `key`) → 200:
+  `{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"…T00:00:00+00:00","end":"…T00:00:00+00:00"},
+  "onDemandCap":{"val":0},"onDemandUsed":{"val":0},"isUnifiedBillingUser":true,"prepaidBalance":{"val":0},
+  "topUpMethod":"TOP_UP_METHOD_SAVED_PAYMENT_METHOD","billingPeriodStart":"…","billingPeriodEnd":"…"}}`.
+  Fenster Mo 00:00 UTC bis Mo 00:00 UTC. **Kein `creditUsagePercent`** ohne Abo (Feldname aus Community-Quellen, UNVERIFIED).
+  Einheit der `{val}`-Beträge UNVERIFIED (alle 0); angenommen Cent wie bei der Management-API.
+- **`GET https://cli-chat-proxy.grok.com/v1/user?include=subscription`** → 200: `userId, email, firstName, lastName,
+  principalType, teamId (null), organizationId (null), hasGrokCodeAccess (true), subscriptionTier (null)`.
+- **`GET https://grok.com/rest/subscriptions`** (gleicher Bearer) → 200 `{"subscriptions":[]}`. Form eines Eintrags mit Abo
+  UNVERIFIED; Plugin sucht `name`, `tier`, `plan`, `productName`, `subscriptionTier`.
 
 ## Elgato SDK
 - npm registry heute: @elgato/streamdeck 3.0.3 (engines node >=20.5.1), @elgato/cli 1.10.3. Manifest: SDKVersion 3, Nodejs.Version "20"|"24", Software.MinimumVersion "7.1", CodePath bin/plugin.js,

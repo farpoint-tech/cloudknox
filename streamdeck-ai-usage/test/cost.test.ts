@@ -134,7 +134,7 @@ test("Kosten tile: reached item first, amount big, label small, bar from utiliza
 	const stale = tileFor("copilot", { sub: sub({ status: "stale", cost: copilotCost(COPILOT), fetchedAt: "2026-10-25T18:30:00Z" }) }, "kosten", NOW);
 	assert.deepEqual([stale.big, stale.small, stale.bottom, stale.dim], ["0", "Overage aus", "~ vor 3h", true]);
 	assert.equal(tileFor("gemini", { sub: { status: "na", fetchedAt: "" } }, "kosten", NOW).big, "n/v");
-	assert.equal(tileFor("grok", { sub: { status: "login", fetchedAt: "" } }, "kosten", NOW).big, "n/v");
+	assert.equal(tileFor("grok", { sub: { status: "login", fetchedAt: "" } }, "kosten", NOW).big, "login", "Grok reports costs since /v1/billing mapping");
 	assert.equal(tileFor("claude", { sub: { status: "login", fetchedAt: "" } }, "kosten", NOW).big, "login");
 	assert.equal(tileFor("claude", { sub: sub({}) }, "kosten", NOW).big, "n/v", "old state.json value without cost");
 	// auto falls back to Kosten (not API) when there is neither a quota nor tokens.
@@ -160,7 +160,7 @@ test("overview: cost row only when something is non-zero or a limit is reached",
 test("settings: metric cycle without api by default; old 'api' becomes 'kosten'", () => {
 	assert.deepEqual(metricsFor(false), ["auto", "sub", "tokens", "kosten"]);
 	assert.deepEqual(metricsFor(true), ["auto", "sub", "tokens", "kosten", "api"]);
-	assert.deepEqual(normalizeProviderSettings({}), { provider: "claude", metric: "auto", showApiCost: false, tenantId: "" });
+	assert.deepEqual(normalizeProviderSettings({}), { provider: "claude", metric: "auto", showApiCost: false, tenantId: "", m365Auth: "az", clientId: "", upn: "" });
 	assert.equal(normalizeProviderSettings({ provider: "m365copilot", tenantId: " Contoso.onmicrosoft.com " }).tenantId, "contoso.onmicrosoft.com");
 	assert.equal(normalizeProviderSettings({ metric: "api" }).metric, "kosten");
 	assert.equal(normalizeProviderSettings({ metric: "api", showApiCost: true }).metric, "api");

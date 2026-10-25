@@ -3,11 +3,31 @@ import { getJson, num, pick, type HttpResult } from "../http.js";
 import { isoOrUndefined } from "../resets.js";
 import { loadState } from "../store.js";
 import { httpStatus } from "./common.js";
+import {
+	APP_PERMISSIONS,
+	keychainHint,
+	M365_APP_KEYCHAIN,
+	M365_AUTH_ENV,
+	M365_CLIENT_ID_ENV,
+	M365_UPN_ENV,
+	normalizeAuth,
+	normalizeClientId,
+	normalizeUpn,
+	postForm,
+	readAppSecret,
+	requestAppToken,
+	clearAppTokenCache,
+	type M365Auth,
+	type Post,
+	type SecretReader,
+} from "./m365app.js";
 import { apiOnly, guard, monthLabel, nowIso, subOnly, tokensOnly, type CostItem, type M365Activity, type Provider, type ResetEvent, type SubPart } from "./types.js";
 
 /**
- * Microsoft 365 Copilot license via Microsoft Graph, token from the az CLI (no own app registration, no secret stored).
- * Calls (all GET, each degrades on its own; only the license call decides the status):
+ * Microsoft 365 Copilot license via Microsoft Graph. Two auth modes (key setting m365Auth):
+ *  "az"  (default) token from the az CLI, calls on /me (no own app registration, no secret stored)
+ *  "app" Entra app with client credentials (m365app.ts), calls on /users/{upn}; see appSubscription()
+ * Calls in mode "az" (all GET, each degrades on its own; only the license call decides the status):
  *  1. /v1.0/me/licenseDetails            → license yes/no + SKU
  *  2. /v1.0/directory/subscriptions      → renewal (ResetEvent "Verlängerung") + license count; 403 is quiet
  *  3. /v1.0/me                           → UPN for the report row
@@ -50,6 +70,44 @@ export async function resolveTenant(): Promise<{ tenant?: string; raw?: string }
 	if (!raw) return {};
 	const tenant = normalizeTenant(raw);
 	return tenant ? { tenant } : { raw };
+}
+
+export interface M365Config {
+	auth: M365Auth;
+	tenant?: string;
+	/** Raw tenant when a value exists but is invalid. */
+	tenantRaw?: string;
+	/** App mode only. */
+	clientId?: string;
+	clientIdRaw?: string;
+	upn?: string;
+	upnRaw?: string;
+}
+
+/** Auth mode, tenant, client ID and UPN: key settings (state.json) win over the env fallbacks. Pure validation, no secrets. */
+export async function resolveM365Config(): Promise<M365Config> {
+	const s = await loadState().catch(() => undefined);
+	const t = await resolveTenant();
+	const auth = normalizeAuth(s?.m365Auth || process.env[M365_AUTH_ENV]);
+	const cfg: M365Config = { auth, ...(t.tenant ? { tenant: t.tenant } : {}), ...(t.raw ? { tenantRaw: t.raw } : {}) };
+	if (auth !== "app") return cfg;
+	const cid = (s?.m365ClientId || process.env[M365_CLIENT_ID_ENV] || "").trim();
+	const upn = (s?.m365Upn || process.env[M365_UPN_ENV] || "").trim();
+	const c = normalizeClientId(cid);
+	if (c) cfg.clientId = c;
+	else if (cid) cfg.clientIdRaw = cid;
+	const u = normalizeUpn(upn);
+	if (u) cfg.upn = u;
+	else if (upn) cfg.upnRaw = upn;
+	return cfg;
+}
+
+/** First missing/invalid setting of an app-mode config as status "config" text, or undefined when complete. */
+export function appConfigProblem(c: M365Config): { detail: string; hint: string } | undefined {
+	if (!c.tenant) return { detail: c.tenantRaw ? "tenantId ungültig (GUID oder Domain)" : `tenantId fehlt (Taste-Einstellung oder ${M365_TENANT_ENV})`, hint: "Tenant-ID" };
+	if (!c.clientId) return { detail: c.clientIdRaw ? "clientId ungültig (GUID erwartet)" : `clientId fehlt (Taste-Einstellung oder ${M365_CLIENT_ID_ENV})`, hint: "Client-ID" };
+	if (!c.upn) return { detail: c.upnRaw ? "UPN ungültig (name@domain erwartet)" : `UPN fehlt (Taste-Einstellung oder ${M365_UPN_ENV})`, hint: "UPN" };
+	return undefined;
 }
 
 export type AzToken = { status: "found"; token: string } | { status: "login" | "missing" | "error"; detail: string };
@@ -232,17 +290,24 @@ export function buildM365Sub(
 	tenant: string,
 	fetchedAt = nowIso(),
 	now = Date.now(),
+	auth: M365Auth = "az",
 ): SubPart {
 	if (parts.license.kind !== "ok") {
 		const h = httpStatus(parts.license);
-		return { ...h, detail: h.status === "login" ? azLoginHint(tenant) : h.detail, fetchedAt };
+		if (auth === "app" && parts.license.kind === "http") {
+			const st = parts.license.status;
+			if (st === 403) return { ...h, detail: `Graph 403: ${APP_CALLS.license.permission} fehlt (Admin-Consent)`, hint: "Recht fehlt", fetchedAt };
+			if (st === 401) return { ...h, detail: "Graph 401: App-Token abgelehnt", hint: "Token abgelehnt", fetchedAt };
+			if (st === 404) return { ...h, status: "config", detail: "UPN nicht gefunden (Graph 404)", hint: "UPN prüfen", fetchedAt };
+		}
+		return { ...h, detail: h.status === "login" && auth === "az" ? azLoginHint(tenant) : h.detail, fetchedAt };
 	}
 	const skus = copilotSkus(parts.license.json);
 	const notes: string[] = [];
 	let renewal: Renewal | undefined;
 	const sr = parts.subscriptions;
 	if (sr?.kind === "ok") renewal = copilotRenewal(sr.json, skus, now);
-	else if (sr?.kind === "http" && (sr.status === 403 || sr.status === 401)) notes.push("Verlängerung: keine Berechtigung");
+	else if (sr?.kind === "http" && (sr.status === 403 || sr.status === 401)) notes.push(auth === "app" ? `Verlängerung: ${APP_CALLS.subscriptions.permission} fehlt` : "Verlängerung: keine Berechtigung");
 	else if (sr) notes.push(`Verlängerung: ${sr.kind === "offline" ? "offline" : `HTTP ${sr.status}`}`);
 	if (parts.activity?.detail) notes.push(parts.activity.detail);
 	const sub: SubPart = {
@@ -261,9 +326,106 @@ export function buildM365Sub(
 
 const slowCache = new Map<string, { at: number; subscriptions: HttpResult; activity: M365Activity }>();
 
-/** Test hook. */
+/** Test hook; also drops cached app tokens. */
 export function clearM365Cache(): void {
 	slowCache.clear();
+	clearAppTokenCache();
+	m365CallLog.clear();
+}
+
+/** Graph calls of the app mode with the application permission each needs (doctor names the missing one on 403). */
+export const APP_CALLS = {
+	license: { source: "GET graph /users/{upn}/licenseDetails", permission: "User.Read.All" },
+	user: { source: "GET graph /users/{upn}", permission: "User.Read.All" },
+	subscriptions: { source: "GET graph /directory/subscriptions", permission: "Organization.Read.All" },
+	report: { source: "GET graph Copilot-Nutzungsbericht D30", permission: "Reports.Read.All" },
+} as const;
+export type AppCall = keyof typeof APP_CALLS;
+
+/** Result of each app-mode Graph call of the last subscription() run in this process: "ok", HTTP status or "offline". */
+export const m365CallLog = new Map<AppCall, "ok" | "offline" | number>();
+
+/** Which app call a Graph URL belongs to (report nextLinks included). */
+export function appCallOf(url: string): AppCall | undefined {
+	if (/\/licenseDetails\b/.test(url)) return "license";
+	if (url.includes("/directory/subscriptions")) return "subscriptions";
+	if (/\/reports\//.test(url) || /getMicrosoft365CopilotUsage/i.test(url)) return "report";
+	if (/\/v1\.0\/users\//.test(url)) return "user";
+	return undefined;
+}
+
+/** /users/{upn}…: the UPN is validated (normalizeUpn) and URL-encoded. */
+export function userUrl(upn: string, suffix = ""): string {
+	return `${GRAPH}/v1.0/users/${encodeURIComponent(upn)}${suffix}`;
+}
+
+export interface AppDeps {
+	readSecret?: SecretReader;
+	post?: Post;
+	get?: (url: string, headers: Record<string, string>) => Promise<HttpResult>;
+	now?: number;
+}
+
+/**
+ * Subscription in app mode: keychain secret → client-credentials token → /users/{upn}/licenseDetails, then
+ * (cached 30 min) /directory/subscriptions, /users/{upn} for the row match and the usage report. Same parsing as "az".
+ */
+export async function appSubscription(cfg: M365Config, deps: AppDeps = {}): Promise<SubPart> {
+	const fetchedAt = nowIso();
+	const problem = appConfigProblem(cfg);
+	if (problem) return { status: "config", ...problem, fetchedAt };
+	const tenant = cfg.tenant!;
+	const clientId = cfg.clientId!;
+	const upn = cfg.upn!;
+	const sec = await (deps.readSecret ?? readAppSecret)();
+	if (sec.status === "missing") return { status: "key_missing", detail: `Keychain "${M365_APP_KEYCHAIN}" fehlt: ${keychainHint()}`, hint: "Secret fehlt", fetchedAt };
+	if (sec.status === "error") return { status: "error", detail: `Keychain "${M365_APP_KEYCHAIN}": ${sec.detail}`, hint: "Keychain", fetchedAt };
+	const tok = await requestAppToken(tenant, clientId, sec.value, deps.post ?? postForm, deps.now);
+	if (tok.status !== "found") {
+		const out: SubPart = { status: tok.status, detail: tok.detail, hint: tok.hint, fetchedAt };
+		if (tok.status === "error" && tok.httpCode) {
+			const h = httpStatus({ kind: "http", status: tok.httpCode, body: "", ...(tok.retryAfter ? { retryAfter: tok.retryAfter } : {}) });
+			if (h.httpCode) out.httpCode = h.httpCode;
+			if (h.retryAfterMs !== undefined) out.retryAfterMs = h.retryAfterMs;
+		}
+		return out;
+	}
+	m365CallLog.clear();
+	const h = { Authorization: `Bearer ${tok.token}` };
+	const rawGet = deps.get ?? ((url: string, headers: Record<string, string>) => getJson(url, headers, { timeoutMs: 20_000 }));
+	const get: Get = async (url) => {
+		const r = await rawGet(url, h);
+		const call = appCallOf(url);
+		if (call) m365CallLog.set(call, r.kind === "ok" ? "ok" : r.kind === "offline" ? "offline" : r.status);
+		return r;
+	};
+	const license = await get(userUrl(upn, "/licenseDetails?$select=skuPartNumber,skuId"));
+	if (license.kind !== "ok") return buildM365Sub({ license }, tenant, fetchedAt, Date.now(), "app");
+	const key = `app|${tenant}|${clientId}|${upn}`;
+	let slow = slowCache.get(key);
+	if (!slow || Date.now() - slow.at > SLOW_TTL_MS) {
+		const [subscriptions, user] = await Promise.all([
+			get(`${GRAPH}/v1.0/directory/subscriptions?$select=skuPartNumber,nextLifecycleDateTime,totalLicenses,status`),
+			get(userUrl(upn, "?$select=userPrincipalName,displayName")),
+		]);
+		const rowUpn = user.kind === "ok" ? pick(user.json, "userPrincipalName") : undefined;
+		let activity: M365Activity;
+		if (typeof rowUpn === "string" && rowUpn) {
+			activity = await reportActivity(get, rowUpn);
+			if (activity.status === "forbidden") activity = { ...activity, detail: `Nutzung: ${APP_CALLS.report.permission} fehlt` };
+		} else {
+			const why = user.kind === "ok" ? "UPN fehlt" : user.kind === "offline" ? "offline" : user.status === 403 ? `${APP_CALLS.user.permission} fehlt` : `/users HTTP ${user.status}`;
+			activity = { status: "error", apps: [], detail: `Nutzung: ${why}` };
+		}
+		slow = { at: Date.now(), subscriptions, activity };
+		if (subscriptions.kind !== "offline" && activity.status !== "error") slowCache.set(key, slow);
+	}
+	return buildM365Sub({ license, subscriptions: slow.subscriptions, activity: slow.activity }, tenant, fetchedAt, Date.now(), "app");
+}
+
+/** Required application permissions missing from a token's roles claim. */
+export function missingPermissions(roles: string[]): string[] {
+	return APP_PERMISSIONS.filter((p) => !roles.includes(p));
 }
 
 export const m365copilot: Provider = {
@@ -272,12 +434,13 @@ export const m365copilot: Provider = {
 	subscription: () =>
 		guard(async () => {
 			const fetchedAt = nowIso();
-			const t = await resolveTenant();
-			if (!t.tenant) {
-				const detail = t.raw ? "tenantId ungültig (GUID oder Domain)" : `tenantId fehlt (Taste-Einstellung oder ${M365_TENANT_ENV})`;
+			const cfg = await resolveM365Config();
+			if (cfg.auth === "app") return subOnly("m365copilot", await appSubscription(cfg));
+			if (!cfg.tenant) {
+				const detail = cfg.tenantRaw ? "tenantId ungültig (GUID oder Domain)" : `tenantId fehlt (Taste-Einstellung oder ${M365_TENANT_ENV})`;
 				return subOnly("m365copilot", { status: "config", detail, fetchedAt });
 			}
-			const tenant = t.tenant;
+			const tenant = cfg.tenant;
 			const tok = await readAzGraphToken(tenant);
 			if (tok.status !== "found") return subOnly("m365copilot", { status: tok.status === "login" ? "login" : "error", detail: tok.detail, fetchedAt });
 			const h = { Authorization: `Bearer ${tok.token}` };

@@ -73,7 +73,7 @@ function fmtWait(ms) {
 }
 
 // src/cost.ts
-var COST_SOURCE = { claude: true, codex: true, copilot: true, m365copilot: true, gemini: false, grok: false };
+var COST_SOURCE = { claude: true, codex: true, copilot: true, m365copilot: true, gemini: false, grok: true };
 var SYMBOL = { EUR: "\u20AC", USD: "$", GBP: "\xA3" };
 function fmtNum(n) {
   const whole = Math.abs(n) >= 100 || Math.abs(n - Math.round(n)) < 5e-3;
@@ -1101,6 +1101,111 @@ var copilot = {
 
 // src/providers/m365copilot.ts
 import { execFile as execFile4 } from "node:child_process";
+
+// src/providers/m365app.ts
+var M365_APP_KEYCHAIN = "m365-copilot-app";
+var M365_SECRET_ENV = "AI_USAGE_DECK_M365_CLIENT_SECRET";
+var M365_AUTH_ENV = "AI_USAGE_DECK_M365_AUTH";
+var M365_CLIENT_ID_ENV = "AI_USAGE_DECK_M365_CLIENT_ID";
+var M365_UPN_ENV = "AI_USAGE_DECK_M365_UPN";
+var LOGIN_HOST = "https://login.microsoftonline.com";
+var GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default";
+var TOKEN_MARGIN_MS = 5 * 6e4;
+var APP_PERMISSIONS = ["Reports.Read.All", "Organization.Read.All", "User.Read.All"];
+var GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var DOMAIN = /^(?=.{3,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+var UPN_LOCAL = /^[a-z0-9_][a-z0-9._+-]{0,63}$/i;
+function normalizeAuth(v) {
+  return typeof v === "string" && v.trim().toLowerCase() === "app" ? "app" : "az";
+}
+function normalizeClientId(v) {
+  if (typeof v !== "string") return void 0;
+  const t = v.trim();
+  return GUID.test(t) ? t.toLowerCase() : void 0;
+}
+function normalizeUpn(v) {
+  if (typeof v !== "string") return void 0;
+  const t = v.trim();
+  const at = t.lastIndexOf("@");
+  if (at <= 0 || t.indexOf("@") !== at) return void 0;
+  const local = t.slice(0, at);
+  const domain = t.slice(at + 1);
+  return UPN_LOCAL.test(local) && DOMAIN.test(domain) ? t.toLowerCase() : void 0;
+}
+function tokenRequest(tenant, clientId, secret) {
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: secret,
+    scope: GRAPH_DEFAULT_SCOPE,
+    grant_type: "client_credentials"
+  }).toString();
+  return {
+    url: `${LOGIN_HOST}/${encodeURIComponent(tenant)}/oauth2/v2.0/token`,
+    body,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" }
+  };
+}
+var AADSTS_HINTS = {
+  AADSTS7000215: "Secret falsch",
+  AADSTS7000222: "Secret abgelaufen",
+  AADSTS700016: "App fehlt",
+  AADSTS65001: "Consent fehlt",
+  AADSTS500011: "Consent fehlt"
+};
+function aadstsCode(text) {
+  return text?.match(/AADSTS\d+/)?.[0];
+}
+function mapAadsts(code) {
+  const hint = code && AADSTS_HINTS[code] || "Anmeldung";
+  return { hint, detail: code ? `${hint} (${code})` : hint };
+}
+var postForm = (url, body, headers) => getJson(url, headers, { method: "POST", body, timeoutMs: 2e4 });
+var tokenCache = /* @__PURE__ */ new Map();
+function clearAppTokenCache() {
+  tokenCache.clear();
+}
+async function requestAppToken(tenant, clientId, secret, post = postForm, now = Date.now()) {
+  const key = `${tenant}|${clientId}`;
+  const hit = tokenCache.get(key);
+  if (hit && hit.expiresAt - TOKEN_MARGIN_MS > now) return { status: "found", token: hit.token, expiresAt: hit.expiresAt, cached: true };
+  const req = tokenRequest(tenant, clientId, secret);
+  const r = await post(req.url, req.body, req.headers);
+  if (r.kind === "offline") return { status: "offline", detail: "Token-Endpunkt: offline", hint: "offline" };
+  if (r.kind === "http") {
+    const code = aadstsCode(r.body);
+    const m = mapAadsts(code);
+    if (code || r.status === 400 || r.status === 401) return { status: "login", detail: m.detail, hint: m.hint, ...code ? { code } : {}, httpCode: r.status };
+    return { status: "error", detail: `Token-Endpunkt: HTTP ${r.status}`, hint: `HTTP ${r.status}`, httpCode: r.status, ...r.retryAfter ? { retryAfter: r.retryAfter } : {} };
+  }
+  const token = pick(r.json, "access_token");
+  const expiresIn = num(pick(r.json, "expires_in"));
+  if (typeof token !== "string" || !/^ey[\w-]+\.[\w-]+\.[\w-]*$/.test(token)) return { status: "error", detail: "Token-Endpunkt: unerwartete Antwort", hint: "Fehler" };
+  const expiresAt = now + (expiresIn ?? 3600) * 1e3;
+  if (expiresAt - TOKEN_MARGIN_MS > now) tokenCache.set(key, { token, expiresAt });
+  return { status: "found", token, expiresAt, cached: false };
+}
+function tokenRoles(token) {
+  const payload = token.split(".")[1];
+  if (!payload) return [];
+  try {
+    const roles = pick(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")), "roles");
+    return Array.isArray(roles) ? roles.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+var readAppSecret = async () => {
+  const k = await readSecret(M365_APP_KEYCHAIN);
+  if (k.status === "found") return { ...k, source: "keychain" };
+  const env = process.env[M365_SECRET_ENV];
+  if (env) return { status: "found", value: env, source: "env" };
+  return k;
+};
+function keychainHint() {
+  return `security add-generic-password -s ${M365_APP_KEYCHAIN} -a "$USER" -U -w (fragt verdeckt) oder tools/m365-register-app.sh`;
+}
+
+// src/providers/m365copilot.ts
 var M365_TENANT_ENV = "AI_USAGE_DECK_M365_TENANT";
 var GRAPH = "https://graph.microsoft.com";
 var AZ_TIMEOUT_MS = 2e4;
@@ -1114,12 +1219,12 @@ var SLOW_TTL_MS = 30 * 6e4;
 function azLoginHint(tenant) {
   return `az login --tenant ${tenant} --scope https://graph.microsoft.com//.default`;
 }
-var GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-var DOMAIN = /^(?=.{3,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+var GUID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var DOMAIN2 = /^(?=.{3,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 function normalizeTenant(v) {
   if (typeof v !== "string") return void 0;
   const t = v.trim();
-  return GUID.test(t) || DOMAIN.test(t) ? t.toLowerCase() : void 0;
+  return GUID2.test(t) || DOMAIN2.test(t) ? t.toLowerCase() : void 0;
 }
 async function resolveTenant() {
   const s = await loadState().catch(() => void 0);
@@ -1127,6 +1232,28 @@ async function resolveTenant() {
   if (!raw) return {};
   const tenant = normalizeTenant(raw);
   return tenant ? { tenant } : { raw };
+}
+async function resolveM365Config() {
+  const s = await loadState().catch(() => void 0);
+  const t = await resolveTenant();
+  const auth = normalizeAuth(s?.m365Auth || process.env[M365_AUTH_ENV]);
+  const cfg = { auth, ...t.tenant ? { tenant: t.tenant } : {}, ...t.raw ? { tenantRaw: t.raw } : {} };
+  if (auth !== "app") return cfg;
+  const cid = (s?.m365ClientId || process.env[M365_CLIENT_ID_ENV] || "").trim();
+  const upn = (s?.m365Upn || process.env[M365_UPN_ENV] || "").trim();
+  const c = normalizeClientId(cid);
+  if (c) cfg.clientId = c;
+  else if (cid) cfg.clientIdRaw = cid;
+  const u = normalizeUpn(upn);
+  if (u) cfg.upn = u;
+  else if (upn) cfg.upnRaw = upn;
+  return cfg;
+}
+function appConfigProblem(c) {
+  if (!c.tenant) return { detail: c.tenantRaw ? "tenantId ung\xFCltig (GUID oder Domain)" : `tenantId fehlt (Taste-Einstellung oder ${M365_TENANT_ENV})`, hint: "Tenant-ID" };
+  if (!c.clientId) return { detail: c.clientIdRaw ? "clientId ung\xFCltig (GUID erwartet)" : `clientId fehlt (Taste-Einstellung oder ${M365_CLIENT_ID_ENV})`, hint: "Client-ID" };
+  if (!c.upn) return { detail: c.upnRaw ? "UPN ung\xFCltig (name@domain erwartet)" : `UPN fehlt (Taste-Einstellung oder ${M365_UPN_ENV})`, hint: "UPN" };
+  return void 0;
 }
 var runAz = (file, args2, timeoutMs) => new Promise((resolve) => {
   const env = { ...process.env, PATH: [process.env.PATH ?? "", ...AZ_EXTRA_PATH].filter(Boolean).join(":") };
@@ -1244,17 +1371,23 @@ function licenseCost(r) {
 function renewalResets(r) {
   return r?.resetsAt ? [{ provider: "m365copilot", window: "Verl\xE4ngerung", resetsAt: r.resetsAt }] : [];
 }
-function buildM365Sub(parts, tenant, fetchedAt = nowIso(), now = Date.now()) {
+function buildM365Sub(parts, tenant, fetchedAt = nowIso(), now = Date.now(), auth = "az") {
   if (parts.license.kind !== "ok") {
     const h = httpStatus(parts.license);
-    return { ...h, detail: h.status === "login" ? azLoginHint(tenant) : h.detail, fetchedAt };
+    if (auth === "app" && parts.license.kind === "http") {
+      const st = parts.license.status;
+      if (st === 403) return { ...h, detail: `Graph 403: ${APP_CALLS.license.permission} fehlt (Admin-Consent)`, hint: "Recht fehlt", fetchedAt };
+      if (st === 401) return { ...h, detail: "Graph 401: App-Token abgelehnt", hint: "Token abgelehnt", fetchedAt };
+      if (st === 404) return { ...h, status: "config", detail: "UPN nicht gefunden (Graph 404)", hint: "UPN pr\xFCfen", fetchedAt };
+    }
+    return { ...h, detail: h.status === "login" && auth === "az" ? azLoginHint(tenant) : h.detail, fetchedAt };
   }
   const skus = copilotSkus(parts.license.json);
   const notes2 = [];
   let renewal;
   const sr = parts.subscriptions;
   if (sr?.kind === "ok") renewal = copilotRenewal(sr.json, skus, now);
-  else if (sr?.kind === "http" && (sr.status === 403 || sr.status === 401)) notes2.push("Verl\xE4ngerung: keine Berechtigung");
+  else if (sr?.kind === "http" && (sr.status === 403 || sr.status === 401)) notes2.push(auth === "app" ? `Verl\xE4ngerung: ${APP_CALLS.subscriptions.permission} fehlt` : "Verl\xE4ngerung: keine Berechtigung");
   else if (sr) notes2.push(`Verl\xE4ngerung: ${sr.kind === "offline" ? "offline" : `HTTP ${sr.status}`}`);
   if (parts.activity?.detail) notes2.push(parts.activity.detail);
   const sub = {
@@ -1271,16 +1404,94 @@ function buildM365Sub(parts, tenant, fetchedAt = nowIso(), now = Date.now()) {
   return sub;
 }
 var slowCache = /* @__PURE__ */ new Map();
+function clearM365Cache() {
+  slowCache.clear();
+  clearAppTokenCache();
+  m365CallLog.clear();
+}
+var APP_CALLS = {
+  license: { source: "GET graph /users/{upn}/licenseDetails", permission: "User.Read.All" },
+  user: { source: "GET graph /users/{upn}", permission: "User.Read.All" },
+  subscriptions: { source: "GET graph /directory/subscriptions", permission: "Organization.Read.All" },
+  report: { source: "GET graph Copilot-Nutzungsbericht D30", permission: "Reports.Read.All" }
+};
+var m365CallLog = /* @__PURE__ */ new Map();
+function appCallOf(url) {
+  if (/\/licenseDetails\b/.test(url)) return "license";
+  if (url.includes("/directory/subscriptions")) return "subscriptions";
+  if (/\/reports\//.test(url) || /getMicrosoft365CopilotUsage/i.test(url)) return "report";
+  if (/\/v1\.0\/users\//.test(url)) return "user";
+  return void 0;
+}
+function userUrl(upn, suffix = "") {
+  return `${GRAPH}/v1.0/users/${encodeURIComponent(upn)}${suffix}`;
+}
+async function appSubscription(cfg, deps = {}) {
+  const fetchedAt = nowIso();
+  const problem = appConfigProblem(cfg);
+  if (problem) return { status: "config", ...problem, fetchedAt };
+  const tenant = cfg.tenant;
+  const clientId = cfg.clientId;
+  const upn = cfg.upn;
+  const sec = await (deps.readSecret ?? readAppSecret)();
+  if (sec.status === "missing") return { status: "key_missing", detail: `Keychain "${M365_APP_KEYCHAIN}" fehlt: ${keychainHint()}`, hint: "Secret fehlt", fetchedAt };
+  if (sec.status === "error") return { status: "error", detail: `Keychain "${M365_APP_KEYCHAIN}": ${sec.detail}`, hint: "Keychain", fetchedAt };
+  const tok = await requestAppToken(tenant, clientId, sec.value, deps.post ?? postForm, deps.now);
+  if (tok.status !== "found") {
+    const out = { status: tok.status, detail: tok.detail, hint: tok.hint, fetchedAt };
+    if (tok.status === "error" && tok.httpCode) {
+      const h2 = httpStatus({ kind: "http", status: tok.httpCode, body: "", ...tok.retryAfter ? { retryAfter: tok.retryAfter } : {} });
+      if (h2.httpCode) out.httpCode = h2.httpCode;
+      if (h2.retryAfterMs !== void 0) out.retryAfterMs = h2.retryAfterMs;
+    }
+    return out;
+  }
+  m365CallLog.clear();
+  const h = { Authorization: `Bearer ${tok.token}` };
+  const rawGet = deps.get ?? ((url, headers) => getJson(url, headers, { timeoutMs: 2e4 }));
+  const get = async (url) => {
+    const r = await rawGet(url, h);
+    const call = appCallOf(url);
+    if (call) m365CallLog.set(call, r.kind === "ok" ? "ok" : r.kind === "offline" ? "offline" : r.status);
+    return r;
+  };
+  const license = await get(userUrl(upn, "/licenseDetails?$select=skuPartNumber,skuId"));
+  if (license.kind !== "ok") return buildM365Sub({ license }, tenant, fetchedAt, Date.now(), "app");
+  const key = `app|${tenant}|${clientId}|${upn}`;
+  let slow = slowCache.get(key);
+  if (!slow || Date.now() - slow.at > SLOW_TTL_MS) {
+    const [subscriptions, user] = await Promise.all([
+      get(`${GRAPH}/v1.0/directory/subscriptions?$select=skuPartNumber,nextLifecycleDateTime,totalLicenses,status`),
+      get(userUrl(upn, "?$select=userPrincipalName,displayName"))
+    ]);
+    const rowUpn = user.kind === "ok" ? pick(user.json, "userPrincipalName") : void 0;
+    let activity;
+    if (typeof rowUpn === "string" && rowUpn) {
+      activity = await reportActivity(get, rowUpn);
+      if (activity.status === "forbidden") activity = { ...activity, detail: `Nutzung: ${APP_CALLS.report.permission} fehlt` };
+    } else {
+      const why = user.kind === "ok" ? "UPN fehlt" : user.kind === "offline" ? "offline" : user.status === 403 ? `${APP_CALLS.user.permission} fehlt` : `/users HTTP ${user.status}`;
+      activity = { status: "error", apps: [], detail: `Nutzung: ${why}` };
+    }
+    slow = { at: Date.now(), subscriptions, activity };
+    if (subscriptions.kind !== "offline" && activity.status !== "error") slowCache.set(key, slow);
+  }
+  return buildM365Sub({ license, subscriptions: slow.subscriptions, activity: slow.activity }, tenant, fetchedAt, Date.now(), "app");
+}
+function missingPermissions(roles) {
+  return APP_PERMISSIONS.filter((p) => !roles.includes(p));
+}
 var m365copilot = {
   id: "m365copilot",
   subscription: () => guard(async () => {
     const fetchedAt = nowIso();
-    const t = await resolveTenant();
-    if (!t.tenant) {
-      const detail = t.raw ? "tenantId ung\xFCltig (GUID oder Domain)" : `tenantId fehlt (Taste-Einstellung oder ${M365_TENANT_ENV})`;
+    const cfg = await resolveM365Config();
+    if (cfg.auth === "app") return subOnly("m365copilot", await appSubscription(cfg));
+    if (!cfg.tenant) {
+      const detail = cfg.tenantRaw ? "tenantId ung\xFCltig (GUID oder Domain)" : `tenantId fehlt (Taste-Einstellung oder ${M365_TENANT_ENV})`;
       return subOnly("m365copilot", { status: "config", detail, fetchedAt });
     }
-    const tenant = t.tenant;
+    const tenant = cfg.tenant;
     const tok = await readAzGraphToken(tenant);
     if (tok.status !== "found") return subOnly("m365copilot", { status: tok.status === "login" ? "login" : "error", detail: tok.detail, fetchedAt });
     const h = { Authorization: `Bearer ${tok.token}` };
@@ -1306,45 +1517,204 @@ var m365copilot = {
 
 // src/providers/grok.ts
 import fs8 from "node:fs/promises";
+import path3 from "node:path";
 var XAI_MANAGEMENT = "xai-management";
 var XAI_TEAM_ID = "xai-team-id";
-async function readGrokCred() {
-  let raw;
-  try {
-    raw = await fs8.readFile(GROK_AUTH, "utf8");
-  } catch {
-    return { status: "missing", detail: "~/.grok/auth.json fehlt (grok login)" };
+var GROK_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
+var GROK_USER_URL = "https://cli-chat-proxy.grok.com/v1/user?include=subscription";
+var GROK_SUBS_URL = "https://grok.com/rest/subscriptions";
+var GROK_BILLING_CENTS = 100;
+var TOKEN_FIELDS = ["key", "access_token", "accessToken"];
+function parseExpiry(v) {
+  const n = num(v);
+  if (n !== void 0) return n < 1e12 ? n * 1e3 : n;
+  if (typeof v === "string" && v) {
+    const t = Date.parse(v);
+    if (Number.isFinite(t)) return t;
   }
+  return void 0;
+}
+function tokenFieldOf(e) {
+  if (!e || typeof e !== "object") return void 0;
+  return TOKEN_FIELDS.find((f) => {
+    const v = e[f];
+    return typeof v === "string" && v.length > 0;
+  });
+}
+var str = (v) => typeof v === "string" && v ? v : void 0;
+function parseGrokAuth(raw) {
+  let o;
   try {
-    const o = JSON.parse(raw);
-    const token = o?.access_token ?? o?.accessToken ?? o?.tokens?.access_token ?? o?.id_token;
-    if (typeof token !== "string" || !token) return { status: "invalid", detail: "kein access_token" };
-    const exp = num(o?.expires_at ?? o?.expiresAt ?? o?.expiry);
-    return { status: "found", token, expiresAt: exp === void 0 ? void 0 : exp < 1e12 ? exp * 1e3 : exp };
+    o = JSON.parse(raw);
   } catch {
     return { status: "invalid", detail: "kein JSON" };
   }
+  if (!o || typeof o !== "object" || Array.isArray(o)) return { status: "invalid", detail: "kein Objekt" };
+  const candidates = [];
+  const flat = tokenFieldOf(o);
+  if (flat) candidates.push({ e: o, field: flat });
+  else {
+    for (const [id, e] of Object.entries(o)) {
+      const field = tokenFieldOf(e);
+      if (field) candidates.push({ id, e, field });
+    }
+  }
+  if (!candidates.length) return { status: "invalid", detail: "kein Token (key/access_token)" };
+  const exp = (c) => parseExpiry(c.e.expires_at ?? c.e.expiresAt ?? c.e.expiry);
+  candidates.sort((a, b) => (exp(b) ?? -Infinity) - (exp(a) ?? -Infinity));
+  const best = candidates[0];
+  return {
+    status: "found",
+    token: best.e[best.field],
+    expiresAt: exp(best),
+    entryId: best.id,
+    tokenField: best.field,
+    authMode: str(best.e.auth_mode),
+    refreshToken: str(best.e.refresh_token ?? best.e.refreshToken),
+    issuer: str(best.e.oidc_issuer),
+    clientId: str(best.e.oidc_client_id)
+  };
+}
+async function readGrokCred(file = GROK_AUTH) {
+  let raw;
+  try {
+    raw = await fs8.readFile(file, "utf8");
+  } catch {
+    return { status: "missing", detail: "~/.grok/auth.json fehlt (grok login)" };
+  }
+  return parseGrokAuth(raw);
+}
+var REFRESH_SKEW_MS = 6e4;
+var defaultPost = (url, form) => getJson(url, { "Content-Type": "application/x-www-form-urlencoded" }, { method: "POST", body: new URLSearchParams(form).toString() });
+async function writeBackGrokToken(file, cred, upd) {
+  const o = JSON.parse(await fs8.readFile(file, "utf8"));
+  const entry = cred.entryId === void 0 ? o : o[cred.entryId];
+  if (!entry || typeof entry !== "object") throw new Error("Eintrag in auth.json verschwunden");
+  entry[cred.tokenField] = upd.token;
+  if (upd.expiresAt !== void 0) {
+    const key = "expires_at" in entry ? "expires_at" : "expiresAt" in entry ? "expiresAt" : "expires_at";
+    const old = entry[key];
+    entry[key] = typeof old === "number" ? old < 1e12 ? Math.floor(upd.expiresAt / 1e3) : upd.expiresAt : new Date(upd.expiresAt).toISOString();
+  }
+  if (upd.refreshToken) entry["refreshToken" in entry && !("refresh_token" in entry) ? "refreshToken" : "refresh_token"] = upd.refreshToken;
+  const tmp = path3.join(path3.dirname(file), `.auth.json.${process.pid}.${Date.now()}.tmp`);
+  try {
+    await fs8.writeFile(tmp, JSON.stringify(o, null, 2) + "\n", { mode: 384 });
+    await fs8.chmod(tmp, 384);
+    await fs8.rename(tmp, file);
+  } catch (e) {
+    await fs8.rm(tmp, { force: true });
+    throw e;
+  }
+}
+async function refreshGrokToken(cred, opts = {}) {
+  if (!cred.refreshToken || !cred.issuer || !cred.clientId) return { status: "failed", detail: "kein refresh_token/oidc_issuer/oidc_client_id" };
+  const now = opts.now ?? Date.now();
+  const r = await (opts.post ?? defaultPost)(`${cred.issuer.replace(/\/+$/, "")}/oauth2/token`, {
+    grant_type: "refresh_token",
+    client_id: cred.clientId,
+    refresh_token: cred.refreshToken
+  });
+  if (r.kind !== "ok") return { status: "failed", detail: r.kind === "offline" ? `offline: ${r.detail}` : `Refresh HTTP ${r.status}` };
+  const token = str(pick(r.json, "access_token"));
+  if (!token) return { status: "failed", detail: "Refresh ohne access_token" };
+  const expIn = num(pick(r.json, "expires_in"));
+  const expiresAt = expIn !== void 0 ? now + expIn * 1e3 : parseExpiry(pick(r.json, "expires_at"));
+  const refreshToken = str(pick(r.json, "refresh_token"));
+  await writeBackGrokToken(opts.file ?? GROK_AUTH, cred, { token, expiresAt, refreshToken });
+  return { status: "ok", cred: { ...cred, token, expiresAt, refreshToken: refreshToken ?? cred.refreshToken } };
+}
+async function usableGrokCred(opts = {}) {
+  const cred = await readGrokCred(opts.file);
+  if (cred.status !== "found") return { status: "login", detail: cred.detail };
+  const now = opts.now ?? Date.now();
+  if (cred.expiresAt === void 0 || cred.expiresAt - REFRESH_SKEW_MS > now) return cred;
+  const r = await refreshGrokToken(cred, opts).catch((e) => ({ status: "failed", detail: e instanceof Error ? e.message : String(e) }));
+  if (r.status === "ok") return r.cred;
+  return { status: "login", detail: `Token abgelaufen, ${r.detail} (grok login)` };
 }
 function centsOf(v) {
   return num(v) ?? num(pick(v, "val"));
 }
+var dollars = (v) => {
+  const c = centsOf(v);
+  return c === void 0 ? void 0 : c / GROK_BILLING_CENTS;
+};
+function grokPeriodName(period) {
+  const type = String(pick(period, "type") ?? "");
+  if (/WEEK/.test(type)) return "Woche";
+  if (/MONTH/.test(type)) return "Monat";
+  if (/DAY|DAILY/.test(type)) return "24h";
+  const s = Date.parse(String(pick(period, "start") ?? pick(period, "startTime") ?? ""));
+  const e = Date.parse(String(pick(period, "end") ?? pick(period, "endTime") ?? ""));
+  return Number.isFinite(s) && Number.isFinite(e) && e > s ? resetWindowName((e - s) / 1e3) : "Monat";
+}
+var SHORT = { Woche: "Wo", Monat: "Mo" };
+function mapGrokBilling(json) {
+  const c = pick(json, "config") ?? json;
+  const period = pick(c, "currentPeriod");
+  const end = isoOrUndefined(pick(period, "end") ?? pick(period, "endTime") ?? pick(c, "billingPeriodEnd"));
+  const window = grokPeriodName(period);
+  const label = SHORT[window] ?? window;
+  const cap = dollars(pick(c, "onDemandCap"));
+  const used = dollars(pick(c, "onDemandUsed"));
+  const prepaid = dollars(pick(c, "prepaidBalance"));
+  const credit = num(pick(c, "creditUsagePercent")) ?? num(pick(json, "creditUsagePercent"));
+  if (!period && credit === void 0 && cap === void 0) return void 0;
+  let pct = credit;
+  if (pct === void 0 && cap !== void 0 && cap > 0) pct = (used ?? 0) / cap * 100;
+  const cost = [];
+  if (cap !== void 0 && cap > 0) {
+    cost.push({ label: "On-Demand", used: used ?? 0, limit: cap, currency: "USD", pct: (used ?? 0) / cap * 100, reached: (used ?? 0) >= cap, resetAt: end });
+  }
+  if (prepaid !== void 0 && prepaid > 0) cost.push({ label: "Guthaben", used: prepaid, currency: "USD" });
+  if (!cost.length) cost.push({ label: "On-Demand", used: used ?? 0, currency: "USD", note: cap === 0 ? "Cap 0" : void 0 });
+  const primary = pct === void 0 ? { label, pct: 0, text: "o. Limit", resetAt: end } : { label, pct, resetAt: end };
+  return {
+    primary,
+    resets: end ? [{ provider: "grok", window, resetsAt: end, ...pct === void 0 ? {} : { pct } }] : [],
+    cost,
+    detail: pct === void 0 ? `${window} \xB7 kein Limit sichtbar` : void 0
+  };
+}
+function grokTier(user, subs) {
+  const t = pick(user, "subscriptionTier") ?? pick(user, "subscription", "tier");
+  if (typeof t === "string" && t) return t;
+  const first = pick(subs, "subscriptions", 0);
+  if (typeof first === "string" && first) return first;
+  for (const k of ["name", "tier", "plan", "productName", "subscriptionTier"]) {
+    const v = pick(first, k);
+    if (typeof v === "string" && v) return v;
+  }
+  return void 0;
+}
+var grokCallLog = /* @__PURE__ */ new Map();
+var logCall = (call, r) => grokCallLog.set(call, r.kind === "ok" ? "ok" : r.kind === "offline" ? "offline" : r.status);
 var grok = {
   id: "grok",
   subscription: () => guard(async () => {
     const fetchedAt = nowIso();
-    const cred = await readGrokCred();
-    if (cred.status !== "found") return subOnly("grok", { status: "login", detail: cred.detail, fetchedAt });
-    if (cred.expiresAt && cred.expiresAt < Date.now()) return subOnly("grok", { status: "login", detail: "Token abgelaufen (grok login)", fetchedAt });
-    const r = await getJson("https://cli-chat-proxy.grok.com/v1/billing?format=credits", { Authorization: `Bearer ${cred.token}` });
+    grokCallLog.clear();
+    const cred = await usableGrokCred();
+    if (cred.status !== "found") return subOnly("grok", { status: "login", detail: cred.detail, hint: "grok login", fetchedAt });
+    const auth = { Authorization: `Bearer ${cred.token}` };
+    const r = await getJson(GROK_BILLING_URL, auth);
+    logCall("billing", r);
     if (r.kind !== "ok") return subOnly("grok", { ...httpStatus(r), fetchedAt });
-    const pct = num(pick(r.json, "creditUsagePercent"));
-    const end = pick(r.json, "currentPeriod", "end") ?? pick(r.json, "currentPeriod", "endTime");
-    if (pct === void 0) return subOnly("grok", { status: "error", detail: "creditUsagePercent fehlt", fetchedAt });
-    const resetAt = isoOrUndefined(end);
+    const m = mapGrokBilling(r.json);
+    if (!m) return subOnly("grok", { status: "error", detail: "currentPeriod fehlt", fetchedAt });
+    const [u, s] = await Promise.all([getJson(GROK_USER_URL, auth), getJson(GROK_SUBS_URL, auth)]);
+    logCall("user", u);
+    logCall("subscriptions", s);
+    const tier = grokTier(u.kind === "ok" ? u.json : void 0, s.kind === "ok" ? s.json : void 0);
+    const tierKnown = u.kind === "ok" || s.kind === "ok";
     return subOnly("grok", {
       status: "ok",
-      primary: { label: "Mo", pct, resetAt },
-      resets: resetAt ? [{ provider: "grok", window: "Monat", resetsAt: resetAt, pct }] : [],
+      primary: m.primary,
+      plan: tier ?? (tierKnown ? "kein Abo" : void 0),
+      resets: m.resets,
+      cost: m.cost,
+      detail: [m.detail, tier ? void 0 : tierKnown ? "kein Abo" : "Abo unbekannt"].filter(Boolean).join(" \xB7 ") || void 0,
       fetchedAt
     });
   }, (detail) => subOnly("grok", { status: "error", detail, fetchedAt: nowIso() })),
@@ -1533,8 +1903,11 @@ async function doctor(opts = {}) {
   out.push({ provider: "copilot", source: "~/.copilot/data.db", result: await exists(COPILOT_DB) ? "found" : "missing" });
   out.push({ provider: "copilot", source: SQLITE_BIN, result: await exists(SQLITE_BIN) ? "found" : "missing" });
   out.push(await keyCheck("copilot", GITHUB_BILLING_PAT, api));
+  const mcfg = await resolveM365Config();
+  if (mcfg.auth === "app") out.push(...await m365AppChecks(mcfg));
   const mt = await resolveTenant();
-  if (!mt.tenant) {
+  if (mcfg.auth === "app") {
+  } else if (!mt.tenant) {
     out.push({ provider: "m365copilot", source: `tenantId (Taste / ${M365_TENANT_ENV})`, result: mt.raw ? "invalid" : "missing", note: mt.raw ? "GUID oder Domain erwartet" : `Taste-Einstellung oder ${M365_TENANT_ENV}=<tenant>` });
   } else {
     out.push({ provider: "m365copilot", source: "tenantId", result: "found", note: mt.tenant });
@@ -1564,9 +1937,7 @@ async function doctor(opts = {}) {
     if (text.split("\n").some((l) => parseGeminiLine(l))) withUsage++;
   }
   out.push({ provider: "gemini", source: "~/.gemini/tmp/*/chats/session-*.jsonl", result: "info", note: `${chats.length} Dateien, ${withUsage} mit tokens-Feldern (letzte 20 gepr\xFCft)` });
-  const gk = await readGrokCred();
-  out.push({ provider: "grok", source: "~/.grok/auth.json", result: gk.status, note: gk.status === "found" ? void 0 : gk.detail });
-  if (gk.status === "found") out.push(subCheck("grok", "GET cli-chat-proxy.grok.com/v1/billing", await probe("grok")));
+  out.push(...await grokChecks());
   out.push(await keyCheck("grok", XAI_MANAGEMENT, api));
   out.push(await keyCheck("grok", XAI_TEAM_ID, api));
   let writable = true;
@@ -1577,6 +1948,87 @@ async function doctor(opts = {}) {
     writable = false;
   }
   out.push({ provider: "-", source: CONFIG_DIR, result: writable ? "ok" : "invalid", note: writable ? "beschreibbar" : "nicht beschreibbar" });
+  return out;
+}
+async function m365AppChecks(cfg, deps = {}) {
+  const P = "m365copilot";
+  const out = [{ provider: P, source: "m365Auth", result: "info", note: "app (Entra-App, Client Credentials)" }];
+  const problem = appConfigProblem(cfg);
+  out.push({ provider: P, source: "tenantId / clientId / upn", result: problem ? /ungültig/.test(problem.detail) ? "invalid" : "missing" : "found", note: problem ? problem.detail : `${cfg.tenant} \xB7 ${cfg.clientId} \xB7 ${cfg.upn}` });
+  if (problem) return out;
+  const sec = await (deps.readSecret ?? readAppSecret)();
+  const ksrc = `Keychain "${M365_APP_KEYCHAIN}"`;
+  if (sec.status !== "found") {
+    out.push({ provider: P, source: ksrc, result: sec.status === "missing" ? "missing" : "invalid", note: sec.status === "missing" ? 'bash tools/m365-register-app.sh oder security add-generic-password -s m365-copilot-app -a "$USER" -U -w' : sec.detail });
+    return out;
+  }
+  out.push({ provider: P, source: ksrc, result: "found", note: sec.source === "env" ? "aus Umgebungsvariable (nur Tests)" : void 0 });
+  const tok = await requestAppToken(cfg.tenant, cfg.clientId, sec.value, deps.post);
+  const tsrc = "POST login.microsoftonline.com/\u2026/oauth2/v2.0/token";
+  if (tok.status !== "found") {
+    out.push({ provider: P, source: tsrc, result: tok.status === "offline" ? "warn" : "invalid", note: tok.detail });
+    return out;
+  }
+  const missing = missingPermissions(tokenRoles(tok.token));
+  out.push({ provider: P, source: tsrc, result: missing.length ? "warn" : "ok", note: missing.length ? `Token ok, im Token fehlt: ${missing.join(", ")} (Admin-Consent)` : "Token ok, Rechte vollst\xE4ndig" });
+  const sub = await (deps.fetchSub ?? (() => probe("m365copilot")))();
+  if (sub.source === "cache" || sub.cooldownUntil) {
+    out.push({ provider: P, source: "Graph", result: "info", note: sub.cooldownUntil ? `Cooldown bis ${sub.cooldownUntil}` : "aus Cache (< 55 s), Graph nicht abgerufen" });
+    return out;
+  }
+  for (const call of Object.keys(APP_CALLS)) {
+    const { source, permission } = APP_CALLS[call];
+    const r = m365CallLog.get(call);
+    if (r === void 0) out.push({ provider: P, source, result: "info", note: "nicht abgerufen" });
+    else if (r === "ok") out.push({ provider: P, source, result: "ok" });
+    else if (r === 403 || r === 401) out.push({ provider: P, source, result: "invalid", note: `HTTP ${r}: ${permission} fehlt (Application, Admin-Consent)` });
+    else if (r === 404 && call !== "report") out.push({ provider: P, source, result: "invalid", note: "HTTP 404: UPN nicht gefunden" });
+    else out.push({ provider: P, source, result: "warn", note: r === "offline" ? "offline" : `HTTP ${r}` });
+  }
+  if (sub.status === "ok" && sub.activity?.status === "ok") out.push({ provider: P, source: "Nutzung", result: "info", note: `aktiv in: ${sub.activity.apps.join(", ") || "\u2013"}` });
+  else if (sub.activity?.detail) out.push({ provider: P, source: "Nutzung", result: "info", note: sub.activity.detail });
+  return out;
+}
+var GROK_CALLS = {
+  billing: "GET cli-chat-proxy.grok.com/v1/billing",
+  user: "GET cli-chat-proxy.grok.com/v1/user",
+  subscriptions: "GET grok.com/rest/subscriptions"
+};
+function grokAuthCheck(c, now = Date.now()) {
+  const source = "~/.grok/auth.json";
+  if (c.status !== "found") return { provider: "grok", source, result: c.status, note: c.detail };
+  const mode = c.authMode ?? (c.entryId === void 0 ? "flach" : "?");
+  const field = c.tokenField === "key" ? "" : `, Feld ${c.tokenField}`;
+  if (c.expiresAt === void 0) return { provider: "grok", source, result: "found", note: `Modus ${mode}${field}, ohne Ablauf` };
+  const left = Math.round((c.expiresAt - now) / 6e4);
+  const when = new Date(c.expiresAt).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const exp = left < 0 ? `abgelaufen seit ${when}${c.refreshToken ? ", Refresh beim n\xE4chsten Abruf" : " \u2013 grok login"}` : `g\xFCltig bis ${when} (noch ${left} min)`;
+  return { provider: "grok", source, result: left < 0 && !c.refreshToken ? "invalid" : "found", note: `Modus ${mode}${field}, ${exp}` };
+}
+async function grokChecks(deps = {}) {
+  const c = await readGrokCred(deps.file ?? GROK_AUTH);
+  const out = [grokAuthCheck(c)];
+  if (c.status !== "found") return out;
+  const sub = await (deps.fetchSub ?? (() => probe("grok")))();
+  if (sub.source === "cache" || sub.cooldownUntil) {
+    out.push(subCheck("grok", GROK_CALLS.billing, sub));
+    out.push({ provider: "grok", source: "user / subscriptions", result: "info", note: sub.cooldownUntil ? `Cooldown bis ${sub.cooldownUntil}` : "aus Cache (< 55 s), nicht abgerufen" });
+    return out;
+  }
+  if (sub.status === "login" && !grokCallLog.size) {
+    out.push({ provider: "grok", source: GROK_CALLS.billing, result: "invalid", note: sub.detail });
+    return out;
+  }
+  for (const call of Object.keys(GROK_CALLS)) {
+    const r = grokCallLog.get(call);
+    const source = GROK_CALLS[call];
+    if (r === void 0) out.push({ provider: "grok", source, result: "info", note: "nicht abgerufen" });
+    else if (r === "ok" && call === "billing" && sub.status !== "ok") out.push({ provider: "grok", source, result: "invalid", note: `HTTP 200, ${sub.status}: ${sub.detail ?? ""}`.trim() });
+    else if (r === "ok") out.push({ provider: "grok", source, result: "ok", note: call === "billing" ? [sub.primary && `${sub.primary.label} ${sub.primary.text ?? Math.round(sub.primary.pct) + "%"}`, sub.detail].filter(Boolean).join(" \xB7 ") || void 0 : call === "subscriptions" ? `Tarif: ${sub.plan ?? "?"}` : void 0 });
+    else if (r === "offline") out.push({ provider: "grok", source, result: "warn", note: "offline" });
+    else if (r === 429) out.push({ provider: "grok", source, result: "warn", note: `HTTP 429, ${RATE_LIMIT_NOTE}` });
+    else out.push({ provider: "grok", source, result: call === "billing" ? "invalid" : "warn", note: `HTTP ${r}${call === "billing" ? "" : " (optional, nur Tarif)"}` });
+  }
   return out;
 }
 
@@ -1620,16 +2072,44 @@ var Hub = class {
    * Invalid values are ignored here; the provider reports them as status "config".
    */
   async setM365Tenant(raw, opts = {}) {
-    const tenant = normalizeTenant(raw);
-    if (!tenant) return;
+    await this.setM365Config({ tenantId: raw }, opts);
+  }
+  /**
+   * Stores the M365 key settings in state.json: tenant (only when valid), auth mode, and in app mode client ID and UPN
+   * (as entered; the provider validates them and reports status "config"). Any change drops the old value, cooldown,
+   * resets and cached tokens, then fetches anew. The client secret never passes through here (keychain only).
+   */
+  async setM365Config(c, opts = {}) {
+    const tenant = normalizeTenant(c.tenantId);
     const changed = await withState((s) => {
-      if (s.m365TenantId === tenant) return false;
-      s.m365TenantId = tenant;
+      let ch = false;
+      if (tenant && s.m365TenantId !== tenant) {
+        s.m365TenantId = tenant;
+        ch = true;
+      }
+      if (c.auth !== void 0) {
+        const auth = normalizeAuth(c.auth);
+        if ((s.m365Auth ?? "az") !== auth) {
+          s.m365Auth = auth;
+          ch = true;
+        }
+        if (auth === "app") {
+          const cid = (c.clientId ?? "").trim();
+          const upn = (c.upn ?? "").trim();
+          if ((s.m365ClientId ?? "") !== cid || (s.m365Upn ?? "") !== upn) {
+            s.m365ClientId = cid;
+            s.m365Upn = upn;
+            ch = true;
+          }
+        }
+      }
+      if (!ch) return false;
       delete s.lastSub.m365copilot;
       delete s.subGate.m365copilot;
       return true;
     });
     if (!changed) return;
+    clearM365Cache();
     this.resetsBy.delete("m365copilot");
     delete this.views.get("m365copilot").sub;
     this.emit();

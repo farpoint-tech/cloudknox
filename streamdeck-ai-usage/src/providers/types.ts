@@ -10,7 +10,7 @@ export const PROVIDER_IDS: ProviderId[] = ["claude", "codex", "copilot", "m365co
  * na          source does not exist for this provider ("n/v")
  * error       unexpected response
  * stale       last good value shown because the current fetch failed or the endpoint is in cooldown
- * config      a required setting is missing or invalid (M365 Copilot: tenantId)
+ * config      a required setting is missing or invalid (M365 Copilot: tenantId; app mode also clientId, upn)
  */
 export type Status = "ok" | "login" | "key_missing" | "offline" | "na" | "error" | "stale" | "config";
 
@@ -96,6 +96,8 @@ export interface SubPart {
 	/** M365 Copilot only: app activity from the usage report (persisted with lastSub). */
 	activity?: M365Activity;
 	detail?: string;
+	/** Short key text for a status without value (M365 app mode: "Secret falsch", "App fehlt", "Recht fehlt"). */
+	hint?: string;
 	fetchedAt: string;
 	/** Where the value came from in this refresh: network, shared 55 s cache, or last-good fallback. */
 	source?: "net" | "cache" | "stale";

@@ -11,7 +11,9 @@ Stream Deck ab 7.1, nur macOS, Node 24 (vom Stream-Deck-Programm mitgeliefert).
 ### „Anbieter“
 Einstellungen im Property Inspector: **Anbieter**, **Anzeige** (`auto`, `Abo-Limit %`, `Tokens heute`, `Kosten`,
 `API-Kosten Monat`), das Häkchen **API-Kosten anzeigen** (Setting `showApiCost`, Standard aus) und, nur für
-M365 Copilot, **M365 Tenant** (Setting `tenantId`: Tenant-GUID oder `contoso.onmicrosoft.com`).
+M365 Copilot, **M365 Anmeldung** (Setting `m365Auth`: `az` = Weg A, `app` = Weg B), **M365 Tenant** (Setting `tenantId`:
+Tenant-GUID oder `contoso.onmicrosoft.com`) und nur für Weg B **Client-ID** (`clientId`) und **Benutzer (UPN)** (`upn`);
+nicht benötigte Felder blendet der Property Inspector aus. Siehe „M365 Copilot: Anmeldung“.
 
 | Zeile | Inhalt |
 |---|---|
@@ -98,7 +100,8 @@ werden mit dem letzten guten Wert in `state.json` → `lastSub` gespeichert und 
 | Codex | `Reset-Credits` | `rate_limit_reset_credits.available_count` | nur wenn > 0 |
 | GH Copilot | `Overage` | `quota_snapshots.premium_interactions.{overage_count, overage_permitted}` | `0` + `Overage aus` (nicht erlaubt) bzw. `Overage` |
 | M365 Copilot | `Lizenz` | `/directory/subscriptions` → `totalLicenses` der Copilot-SKUs (Summe) | Anzahl, z. B. `15` + `Lizenz`, unten Verlängerung; ohne Berechtigung `n/v`. Nur Information, kein Verbrauch |
-| Gemini, Grok | – | keine Daten | `n/v` |
+| Grok | `On-Demand` / `Guthaben` | `/v1/billing` → `config.{onDemandCap, onDemandUsed, prepaidBalance}.val` (Einheit als Cent angenommen, ungeprüft: live alles 0) | Cap > 0: `12,50 / 50 $` + `On-Demand 25%`, Balken; Guthaben > 0: `Guthaben 20 $`; sonst `0 $` (CLI `On-Demand 0 $ (Cap 0)`) |
+| Gemini | – | keine Daten | `n/v` |
 
 - **Claude Extra in Minor-Units:** `monthly_limit` und `used_credits` werden durch `10^decimal_places` geteilt. Live-Antwort
   vom 2026-10-25: `monthly_limit 2500`, `decimal_places 2`, dazu `spend.limit.amount_minor 2500, exponent 2` → **25,00 €**,
@@ -150,7 +153,7 @@ Welche Reset-Fenster jeder Anbieter hat und aus welchem Feld der Zeitpunkt kommt
 | GH Copilot | `Monat` | monatlich | `quota_reset_date` (Datum, als 00:00 UTC gelesen) |
 | M365 Copilot | `Verlängerung` | Laufzeit der Subscription (meist jährlich) | frühestes künftiges `nextLifecycleDateTime` der aktiven Copilot-Subscriptions aus `/directory/subscriptions` (bevorzugt die SKU des Nutzers); bei 403 kein Reset, Hinweis `Verlängerung: keine Berechtigung` |
 | Gemini | – | unbekannt | kein Quota-Endpunkt (siehe Grenzen) |
-| Grok | `Monat` | unbekannt, vermutlich monatlich | `currentPeriod.end` von `/v1/billing` – nur mit `~/.grok/auth.json`, ungetestet |
+| Grok | `Woche` | 7 Tage (live 2026-10-25: `USAGE_PERIOD_TYPE_WEEKLY`, Mo 00:00 UTC bis Mo 00:00 UTC) | `config.currentPeriod.end` von `/v1/billing`; Name aus `currentPeriod.type` (`WEEKLY` → `Woche`, `MONTHLY` → `Monat`), sonst aus `start`/`end` |
 
 Der Fenstername von Codex wird aus `limit_window_seconds` abgeleitet (≤ 24 h → `<n>h`, ≤ 8 Tage → `Woche`, sonst `Monat`).
 Ältere `state.json`-Werte ohne Reset-Liste werden aus den Fenstern `primary`/`secondary` übernommen.
@@ -162,9 +165,9 @@ Der Fenstername von Codex wird aus `limit_window_seconds` abgeleitet (≤ 24 h �
 | Claude | `api.anthropic.com/api/oauth/usage`, Token aus Keychain `Claude Code-credentials` (Fallback `~/.claude/.credentials.json`) | `~/.claude/projects/**/*.jsonl`, Dedupe über `message.id`+`requestId` | Admin-API `cost_report`, Keychain `anthropic-admin` |
 | Codex | `chatgpt.com/backend-api/wham/usage`, Token aus `~/.codex/auth.json` | `~/.codex/sessions/**/*.jsonl`, `token_count`-Ereignisse als Differenzen | `api.openai.com/v1/organization/costs`, Keychain `openai-admin` |
 | GH Copilot | `api.github.com/copilot_internal/user` mit `gh auth token` | `~/.copilot/data.db`, Tabelle `sessions` (per `/usr/bin/sqlite3`) | Premium-Request-Billing, Keychain `github-billing-pat` |
-| M365 Copilot | Microsoft Graph mit Token aus `az account get-access-token --tenant <tenantId> --resource-type ms-graph` (20 s Timeout, `az` aus PATH + `/opt/homebrew/bin`): `/v1.0/me/licenseDetails` (Lizenz), `/v1.0/directory/subscriptions` (Verlängerung, Anzahl), `/v1.0/me` (UPN) | n/v – stattdessen Copilot-Nutzungsbericht D30 (`/v1.0/reports/getMicrosoft365CopilotUsageUserDetail(period='D30')?$format=application/json`, bei 400/404 die dokumentierte Beta-Variante): Apps mit Aktivität, letzte Aktivität | keine |
+| M365 Copilot | Microsoft Graph. Weg A: Token aus `az account get-access-token --tenant <tenantId> --resource-type ms-graph` (20 s Timeout, `az` aus PATH + `/opt/homebrew/bin`): `/v1.0/me/licenseDetails` (Lizenz), `/v1.0/directory/subscriptions` (Verlängerung, Anzahl), `/v1.0/me` (UPN). Weg B: Client-Credentials-Token der Enterprise-App (Secret aus Schlüsselbund `m365-copilot-app`), dieselben Abfragen auf `/v1.0/users/{upn}` | n/v – stattdessen Copilot-Nutzungsbericht D30 (`/v1.0/reports/getMicrosoft365CopilotUsageUserDetail(period='D30')?$format=application/json`, bei 400/404 die dokumentierte Beta-Variante): Apps mit Aktivität, letzte Aktivität | keine |
 | Gemini | n/v (siehe Grenzen) | `~/.gemini/tmp/*/chats/session-*.jsonl` (Feld `tokens`), sonst n/v | n/v |
-| Grok | `cli-chat-proxy.grok.com/v1/billing`, nur wenn `~/.grok/auth.json` existiert; Kosten n/v | n/v | xAI Management-API, Keychain `xai-management` + `xai-team-id` |
+| Grok | `cli-chat-proxy.grok.com/v1/billing?format=credits` (Fenster, Prozent, On-Demand/Guthaben), Tarif aus `/v1/user?include=subscription` und `grok.com/rest/subscriptions`; Token aus `~/.grok/auth.json` (nach `grok login`), abgelaufen → Refresh über `auth.x.ai/oauth2/token` | n/v | xAI Management-API, Keychain `xai-management` + `xai-team-id` |
 
 Lokale Logs werden inkrementell gelesen (Byte-Offsets und mtimes in `~/.config/ai-usage-deck/state.json`).
 Der erste Lauf liest nur Dateien, die in den letzten 7 Tagen geändert wurden; ältere werden nur markiert.
@@ -225,17 +228,61 @@ node bin/cli.js resets --window 48  # wie resets, Blink-Fenster 48 h statt 24 h
 
 Plugin und CLI nutzen denselben Code (`src/providers`, `src/collectors`). Umgebungsvariablen:
 `AI_USAGE_DECK_HOME` (anderer Ordner für state/history), `NODE_USE_ENV_PROXY=1` (Node-`fetch` über `HTTPS_PROXY`),
-`AI_USAGE_DECK_M365_TENANT` (Tenant für M365 Copilot, wenn keine Taste eine `tenantId` gesetzt hat).
+`AI_USAGE_DECK_M365_TENANT` (Tenant für M365 Copilot, wenn keine Taste eine `tenantId` gesetzt hat),
+`AI_USAGE_DECK_M365_AUTH` (`az` oder `app`), `AI_USAGE_DECK_M365_CLIENT_ID`, `AI_USAGE_DECK_M365_UPN` (Weg B ohne Taste).
+`AI_USAGE_DECK_M365_CLIENT_SECRET` ist nur für Tests gedacht; echte Secrets gehören in den Schlüsselbund.
 
-M365 Copilot live prüfen (außerhalb der Sandbox, im eigenen Terminal):
+### M365 Copilot: Anmeldung
+
+Zwei Wege, je Taste wählbar (Setting `m365Auth`). Setzt eine Taste die Werte, landen sie in `state.json`
+(`m365TenantId`, `m365Auth`, `m365ClientId`, `m365Upn`) und haben Vorrang vor den Umgebungsvariablen. Alle M365-Tasten
+teilen die zuletzt gesetzten Werte. Ein Wechsel verwirft letzten Wert, Cooldown und zwischengespeicherte Tokens.
+
+**Weg A: az CLI** (Standard, `m365Auth = az`). Token aus `az account get-access-token`, Abfragen auf `/me`. Keine eigene
+App, kein Secret, aber `az` muss installiert und angemeldet sein (Anmeldung läuft ab, dann zeigt die Taste `az login`).
 
 ```bash
-az login --tenant <tenantId> --scope https://graph.microsoft.com//.default   # einmalig
+az login --tenant <tenantId> --scope https://graph.microsoft.com//.default   # einmalig, im eigenen Terminal
 AI_USAGE_DECK_M365_TENANT=<tenantId> node bin/cli.js doctor                 # tenantId, az-Token, Lizenz, Verlängerung, Nutzungsbericht
 AI_USAGE_DECK_M365_TENANT=<tenantId> node bin/cli.js status --fresh
 ```
 
-Setzt eine Taste eine `tenantId`, wird sie in `state.json` (`m365TenantId`) gespeichert und hat Vorrang vor der Variable.
+**Weg B: Enterprise-App** (`m365Auth = app`). Eigene App-Registrierung mit Client Credentials; läuft ohne az CLI und
+ohne interaktive Anmeldung. Token per `POST https://login.microsoftonline.com/<tenantId>/oauth2/v2.0/token`
+(`grant_type=client_credentials`, `scope=https://graph.microsoft.com/.default`), im Speicher bis 5 min vor Ablauf.
+App-Tokens kennen kein `/me`, deshalb braucht die Taste den **UPN** des Nutzers, dessen Lizenz und Nutzung sie zeigt;
+abgefragt werden `/v1.0/users/{upn}/licenseDetails`, `/v1.0/users/{upn}` (UPN für die Berichtszeile),
+`/v1.0/directory/subscriptions` und der Nutzungsbericht wie bei Weg A.
+
+Graph-**Anwendungsberechtigungen** mit Admin-Consent: `User.Read.All`, `Organization.Read.All`, `Reports.Read.All`.
+Das Client-Secret liegt nur im macOS-Schlüsselbund: Dienst **`m365-copilot-app`**, Konto = macOS-Benutzer (`$USER`).
+
+Einrichtung per Skript (im eigenen Terminal nach `az login`; az wird nur dafür gebraucht, nicht im Betrieb):
+
+```bash
+bash tools/m365-register-app.sh --tenant <tenant-guid> --dry-run   # zeigt jeden Schritt, schreibt nichts
+bash tools/m365-register-app.sh --tenant <tenant-guid> [--upn name@contoso.com]
+```
+
+Das Skript prüft zuerst, dass `az account show` im angegebenen Tenant steht (sonst Abbruch), bricht ab, wenn es schon eine
+App „Nexus.365 AI Usage Deck“ gibt, und fragt vor jeder Schreiboperation einzeln (y/N): App anlegen, Service Principal,
+Berechtigungen (IDs zur Laufzeit über `az ad sp show --id 00000003-0000-0000-c000-000000000000` nachgeschlagen),
+Admin-Consent, Secret (12 Monate) direkt in den Schlüsselbund, ohne es anzuzeigen. Am Ende stehen `tenantId`, `clientId`
+und die Werte für die Taste. Von Hand im Entra-Portal, mit Erneuern und Zurückziehen: `tools/m365-app-setup.md`.
+
+Secret ohne Skript ablegen (fragt verdeckt, nichts in der Befehlszeile):
+
+```bash
+security add-generic-password -s m365-copilot-app -a "$USER" -U -w
+AI_USAGE_DECK_M365_AUTH=app AI_USAGE_DECK_M365_TENANT=<tenantId> AI_USAGE_DECK_M365_CLIENT_ID=<clientId> \
+  AI_USAGE_DECK_M365_UPN=<upn> node bin/cli.js doctor
+```
+
+`doctor` zeigt für Weg B: Einstellungen, Schlüsselbund-Eintrag (`found`/`missing`), Token-Endpunkt (`ok` oder
+AADSTS-Code; fehlende Rechte laut `roles` im Token), danach jede Graph-Abfrage einzeln (`ok` oder `HTTP 403: <Recht> fehlt`).
+Kurztexte auf der Taste: `Secret fehlt`, `Secret falsch` (AADSTS7000215), `Secret abgelaufen` (AADSTS7000222),
+`App fehlt` (AADSTS700016), `Consent fehlt` (AADSTS65001, AADSTS500011), `Recht fehlt` (Graph 403), `UPN prüfen` (Graph 404),
+`Client-ID` / `UPN` (Einstellung fehlt oder ungültig). Zertifikat statt Secret ist vorgesehen, aber noch nicht gebaut.
 
 ## Zeitplan
 
@@ -283,8 +330,9 @@ So geht dieses Plugin mit 429 um (gilt für alle Abo-Endpunkte: Claude, Codex, G
 
 ## Bekannte Grenzen
 
-- **M365 Copilot:** braucht `az login` für den gewählten Tenant (Scope `https://graph.microsoft.com//.default`); das Plugin
-  meldet sich nie selbst an und gibt das Token nie aus. Der Tenant wird je Taste gewählt; alle M365-Tasten teilen den zuletzt
+- **M365 Copilot:** Weg A braucht `az login` für den gewählten Tenant (Scope `https://graph.microsoft.com//.default`); das Plugin
+  meldet sich nie selbst an und gibt das Token nie aus. Weg B (Enterprise-App) ist gegen die dokumentierten Formen gebaut
+  und mit Fixtures getestet, **nicht live**; das Secret läuft nach 12 Monaten ab (Taste `Secret abgelaufen`). Der Tenant wird je Taste gewählt; alle M365-Tasten teilen den zuletzt
   gesetzten (eine `tenantId` gleichzeitig). Nutzung braucht `Reports.Read.All` und eine Rolle wie Reports Reader – optional,
   ohne sie bleibt der Lizenzstatus sichtbar (`Nutzung: keine Berechtigung`). Ist im Admin Center „Benutzernamen
   anonymisieren“ an, passt keine Zeile zum UPN (`Nutzung: anonymisiert`). `/directory/subscriptions` braucht Leserechte
@@ -293,9 +341,15 @@ So geht dieses Plugin mit 429 um (gilt für alle Abo-Endpunkte: Claude, Codex, G
   Das Plugin ruft die angefragte v1.0-URL und fällt bei 400/404 auf die Beta-URL zurück. Bericht und Verlängerung werden
   je Prozess 30 min zwischengespeichert (Bericht aktualisiert täglich). Alles ist gegen die dokumentierten Formen gebaut,
   **nicht live getestet** (az läuft in der Entwicklungs-Sandbox nicht).
-- **Grok:** kein Abo-Wert ohne `~/.grok/auth.json` (Taste `login`). Format dieser Datei und der Billing-Endpunkt
-  sind Community-Wissen, ungetestet; kein Token-Refresh. Keine lokalen Token-Logs. xAI-API-Kosten:
-  Einheit von `amountBeforeVat` als Cent angenommen (laut Doku, nicht mit echtem Konto geprüft).
+- **Grok:** Anmeldung einmalig mit `grok login` (grok CLI, getestet mit 1.0.70); ohne `~/.grok/auth.json` zeigt die Taste
+  `login`, unten `grok login`. Ist das Token abgelaufen, erneuert das Plugin es selbst (OIDC-Refresh) und schreibt das neue
+  Token in denselben Eintrag von `auth.json` zurück (alle anderen Felder bleiben, Datei 0600, atomar). Scheitert der Refresh,
+  bleibt die Datei unverändert und die Taste zeigt `login`. Die grok CLI erneuert dieselbe Datei ebenfalls; wer zuletzt
+  schreibt, gewinnt – beide lesen vorher neu ein. **Ohne Grok-Abo** (Stand 2026-10-25) liefert `/v1/billing` nur das
+  Wochenfenster ohne Prozentwert: Taste `Wo o. Limit`, darunter `kein Abo`, unten Countdown bis Montag 00:00 UTC;
+  Kosten `0 $`. Mit Abo kommt der Prozentwert aus `creditUsagePercent` (Feldname aus Community-Quellen, live noch nicht
+  gesehen), sonst aus On-Demand-Verbrauch/-Cap. Endpunkte sind inoffiziell (kein Vertrag, Cloudflare). Keine lokalen
+  Token-Logs. xAI-API-Kosten: Einheit von `amountBeforeVat` als Cent angenommen (laut Doku, nicht mit echtem Konto geprüft).
 - **Gemini:** Abo-Quota n/v (Code-Assist-Endpunkt antwortet 403, Antigravity-Login ist Phase 2).
   API-Kosten n/v (nur über BigQuery-Billing-Export). Lokale Tokens: Feldnamen aus dem gemini-cli-Quellcode;
   die vorhandene Chat-Datei enthält noch keine Antwort mit `tokens`, daher aktuell `n/v`.
@@ -333,11 +387,15 @@ So geht dieses Plugin mit 429 um (gilt für alle Abo-Endpunkte: Claude, Codex, G
 - [ ] In claude.ai → Einstellungen → Nutzung prüfen, ob das Extra-Limit 25 € beträgt (Plugin teilt durch `10^decimal_places`) – Philipp – mittel
 - [ ] Klären, was das Claude-Budget 250 $ (heute `iguana_necktie`, 251 $ verbraucht, Reset 05.11.) ist, und ggf. den Namen „Budget“ anpassen – Philipp – niedrig
 - [ ] Nach erster Gemini-CLI-Antwort prüfen, ob `tokens`-Felder in `session-*.jsonl` stehen – Entwicklung – niedrig
-- [ ] Grok: `grok login` ausführen und Format von `~/.grok/auth.json` + Billing-Antwort verifizieren – Philipp – niedrig
+- [ ] Grok: nach Ablauf des Tokens (heute bis 26.10. 04:24 UTC) `node bin/cli.js status --fresh` ohne Sandbox laufen lassen und prüfen, ob der Refresh `auth.json` korrekt fortschreibt und die grok CLI danach weiter funktioniert – Philipp – mittel
+- [ ] Grok mit Abo: Feldname des Prozentwerts (`creditUsagePercent`) und Einheit von `onDemandCap`/`prepaidBalance` (Cent?) verifizieren – Entwicklung – niedrig
 - [ ] Gemini-Abo-Quota über Antigravity-Login (Phase 2) – Entwicklung – niedrig
 - [ ] Taste „Nächste Resets“ am Gerät prüfen: Lesbarkeit, gelbes Blinken, `+N`-Badge, Lang-Drücken stumm – Philipp – mittel
 - [ ] Wenn Extra Usage aktiv ist: prüfen, ob `extra_usage` ein Reset-Feld liefert, und Feldnamen in `claudeResets` festziehen – Entwicklung – niedrig
 - [ ] M365 Copilot live: `az login --tenant <id> --scope https://graph.microsoft.com//.default`, dann `AI_USAGE_DECK_M365_TENANT=<id> node bin/cli.js doctor` – Philipp – hoch
 - [ ] M365 Copilot: Tenant-ID in der Taste (3,2) setzen und Lizenz-, Nutzungs- und Kosten-Anzeige am Gerät prüfen – Philipp – mittel
+- [ ] M365 Copilot Weg B live: `bash tools/m365-register-app.sh --tenant <id> --dry-run`, dann ohne `--dry-run`; Taste auf Enterprise-App stellen, `doctor` prüfen – Philipp – hoch
+- [ ] M365 Copilot Weg B: Ablauf des Secrets (12 Monate) im Kalender vormerken – Philipp – mittel
+- [ ] M365 Copilot Weg B: Zertifikat statt Secret (client_assertion) – Entwicklung – niedrig
 - [ ] M365 Copilot: prüfen, ob die v1.0-Berichts-URL JSON liefert oder der Beta-Fallback greift; ggf. auf `/v1.0/copilot/reports/…` (CSV) umstellen – Entwicklung – mittel
 - [ ] Nach dem ersten Sonntag 20:00 `history.jsonl` und `launchd.log` prüfen (genau eine Zeile je Anbieter) – Philipp – mittel

@@ -1,12 +1,24 @@
 import fs from "node:fs/promises";
 import { listFiles } from "./lines.js";
 import { readSecret } from "./keychain.js";
-import { CONFIG_DIR, COPILOT_DB, GEMINI_OAUTH, GEMINI_TMP, SQLITE_BIN } from "./paths.js";
+import { CONFIG_DIR, COPILOT_DB, GEMINI_OAUTH, GEMINI_TMP, GROK_AUTH, SQLITE_BIN } from "./paths.js";
 import { ANTHROPIC_ADMIN, CLAUDE_KEYCHAIN, readClaudeCred } from "./providers/claude.js";
 import { OPENAI_ADMIN, readCodexCred } from "./providers/codex.js";
 import { GITHUB_BILLING_PAT, readGhToken } from "./providers/copilot.js";
-import { M365_TENANT_ENV, readAzGraphToken, resolveTenant } from "./providers/m365copilot.js";
-import { readGrokCred, XAI_MANAGEMENT, XAI_TEAM_ID } from "./providers/grok.js";
+import {
+	APP_CALLS,
+	appConfigProblem,
+	m365CallLog,
+	M365_TENANT_ENV,
+	missingPermissions,
+	readAzGraphToken,
+	resolveM365Config,
+	resolveTenant,
+	type AppCall,
+	type M365Config,
+} from "./providers/m365copilot.js";
+import { M365_APP_KEYCHAIN, readAppSecret, requestAppToken, tokenRoles, type Post, type SecretReader } from "./providers/m365app.js";
+import { grokCallLog, readGrokCred, XAI_MANAGEMENT, XAI_TEAM_ID, type GrokCall, type GrokCred } from "./providers/grok.js";
 import { parseGeminiLine } from "./collectors/gemini-jsonl.js";
 import type { ProviderId, SubPart } from "./providers/types.js";
 import { gatedSub } from "./subgate.js";
@@ -97,9 +109,14 @@ export async function doctor(opts: { api?: boolean } = {}): Promise<Check[]> {
 	out.push({ provider: "copilot", source: SQLITE_BIN, result: (await exists(SQLITE_BIN)) ? "found" : "missing" });
 	out.push(await keyCheck("copilot", GITHUB_BILLING_PAT, api));
 
+	// M365 Copilot, mode "app": Entra app with client credentials. Secret and token are never printed.
+	const mcfg = await resolveM365Config();
+	if (mcfg.auth === "app") out.push(...(await m365AppChecks(mcfg)));
 	// M365 Copilot (Graph via az CLI). Token is checked for presence only, never printed.
 	const mt = await resolveTenant();
-	if (!mt.tenant) {
+	if (mcfg.auth === "app") {
+		/* app-mode rows already added; the az checks below do not apply */
+	} else if (!mt.tenant) {
 		out.push({ provider: "m365copilot", source: `tenantId (Taste / ${M365_TENANT_ENV})`, result: mt.raw ? "invalid" : "missing", note: mt.raw ? "GUID oder Domain erwartet" : `Taste-Einstellung oder ${M365_TENANT_ENV}=<tenant>` });
 	} else {
 		out.push({ provider: "m365copilot", source: "tenantId", result: "found", note: mt.tenant });
@@ -133,9 +150,7 @@ export async function doctor(opts: { api?: boolean } = {}): Promise<Check[]> {
 	out.push({ provider: "gemini", source: "~/.gemini/tmp/*/chats/session-*.jsonl", result: "info", note: `${chats.length} Dateien, ${withUsage} mit tokens-Feldern (letzte 20 geprüft)` });
 
 	// Grok
-	const gk = await readGrokCred();
-	out.push({ provider: "grok", source: "~/.grok/auth.json", result: gk.status, note: gk.status === "found" ? undefined : gk.detail });
-	if (gk.status === "found") out.push(subCheck("grok", "GET cli-chat-proxy.grok.com/v1/billing", await probe("grok")));
+	out.push(...(await grokChecks()));
 	out.push(await keyCheck("grok", XAI_MANAGEMENT, api));
 	out.push(await keyCheck("grok", XAI_TEAM_ID, api));
 
@@ -148,5 +163,100 @@ export async function doctor(opts: { api?: boolean } = {}): Promise<Check[]> {
 		writable = false;
 	}
 	out.push({ provider: "-", source: CONFIG_DIR, result: writable ? "ok" : "invalid", note: writable ? "beschreibbar" : "nicht beschreibbar" });
+	return out;
+}
+
+/**
+ * Doctor rows for M365 app mode: settings, keychain entry (found/missing), token endpoint (ok / AADSTS code, granted
+ * application permissions from the token's roles claim), then each Graph call of one gated fetch (ok / 403 with the
+ * missing permission). `deps` replace keychain, token POST and the gated fetch in tests.
+ */
+export async function m365AppChecks(
+	cfg: M365Config,
+	deps: { readSecret?: SecretReader; post?: Post; fetchSub?: () => Promise<SubPart> } = {},
+): Promise<Check[]> {
+	const P = "m365copilot";
+	const out: Check[] = [{ provider: P, source: "m365Auth", result: "info", note: "app (Entra-App, Client Credentials)" }];
+	const problem = appConfigProblem(cfg);
+	out.push({ provider: P, source: "tenantId / clientId / upn", result: problem ? (/ungültig/.test(problem.detail) ? "invalid" : "missing") : "found", note: problem ? problem.detail : `${cfg.tenant} · ${cfg.clientId} · ${cfg.upn}` });
+	if (problem) return out;
+	const sec = await (deps.readSecret ?? readAppSecret)();
+	const ksrc = `Keychain "${M365_APP_KEYCHAIN}"`;
+	if (sec.status !== "found") {
+		out.push({ provider: P, source: ksrc, result: sec.status === "missing" ? "missing" : "invalid", note: sec.status === "missing" ? "bash tools/m365-register-app.sh oder security add-generic-password -s m365-copilot-app -a \"$USER\" -U -w" : sec.detail });
+		return out;
+	}
+	out.push({ provider: P, source: ksrc, result: "found", note: sec.source === "env" ? "aus Umgebungsvariable (nur Tests)" : undefined });
+	const tok = await requestAppToken(cfg.tenant!, cfg.clientId!, sec.value, deps.post);
+	const tsrc = "POST login.microsoftonline.com/…/oauth2/v2.0/token";
+	if (tok.status !== "found") {
+		out.push({ provider: P, source: tsrc, result: tok.status === "offline" ? "warn" : "invalid", note: tok.detail });
+		return out;
+	}
+	const missing = missingPermissions(tokenRoles(tok.token));
+	out.push({ provider: P, source: tsrc, result: missing.length ? "warn" : "ok", note: missing.length ? `Token ok, im Token fehlt: ${missing.join(", ")} (Admin-Consent)` : "Token ok, Rechte vollständig" });
+	const sub = await (deps.fetchSub ?? (() => probe("m365copilot")))();
+	if (sub.source === "cache" || sub.cooldownUntil) {
+		out.push({ provider: P, source: "Graph", result: "info", note: sub.cooldownUntil ? `Cooldown bis ${sub.cooldownUntil}` : "aus Cache (< 55 s), Graph nicht abgerufen" });
+		return out;
+	}
+	for (const call of Object.keys(APP_CALLS) as AppCall[]) {
+		const { source, permission } = APP_CALLS[call];
+		const r = m365CallLog.get(call);
+		if (r === undefined) out.push({ provider: P, source, result: "info", note: "nicht abgerufen" });
+		else if (r === "ok") out.push({ provider: P, source, result: "ok" });
+		else if (r === 403 || r === 401) out.push({ provider: P, source, result: "invalid", note: `HTTP ${r}: ${permission} fehlt (Application, Admin-Consent)` });
+		else if (r === 404 && call !== "report") out.push({ provider: P, source, result: "invalid", note: "HTTP 404: UPN nicht gefunden" });
+		else out.push({ provider: P, source, result: "warn", note: r === "offline" ? "offline" : `HTTP ${r}` });
+	}
+	if (sub.status === "ok" && sub.activity?.status === "ok") out.push({ provider: P, source: "Nutzung", result: "info", note: `aktiv in: ${sub.activity.apps.join(", ") || "–"}` });
+	else if (sub.activity?.detail) out.push({ provider: P, source: "Nutzung", result: "info", note: sub.activity.detail });
+	return out;
+}
+
+const GROK_CALLS: Record<GrokCall, string> = {
+	billing: "GET cli-chat-proxy.grok.com/v1/billing",
+	user: "GET cli-chat-proxy.grok.com/v1/user",
+	subscriptions: "GET grok.com/rest/subscriptions",
+};
+
+/** auth.json row: mode and expiry only (no e-mail, no token). */
+export function grokAuthCheck(c: GrokCred, now = Date.now()): Check {
+	const source = "~/.grok/auth.json";
+	if (c.status !== "found") return { provider: "grok", source, result: c.status, note: c.detail };
+	const mode = c.authMode ?? (c.entryId === undefined ? "flach" : "?");
+	const field = c.tokenField === "key" ? "" : `, Feld ${c.tokenField}`;
+	if (c.expiresAt === undefined) return { provider: "grok", source, result: "found", note: `Modus ${mode}${field}, ohne Ablauf` };
+	const left = Math.round((c.expiresAt - now) / 60_000);
+	const when = new Date(c.expiresAt).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+	const exp = left < 0 ? `abgelaufen seit ${when}${c.refreshToken ? ", Refresh beim nächsten Abruf" : " – grok login"}` : `gültig bis ${when} (noch ${left} min)`;
+	return { provider: "grok", source, result: left < 0 && !c.refreshToken ? "invalid" : "found", note: `Modus ${mode}${field}, ${exp}` };
+}
+
+/** Doctor rows for Grok: auth.json, then each endpoint of one gated fetch (ok / HTTP code). */
+export async function grokChecks(deps: { file?: string; fetchSub?: () => Promise<SubPart> } = {}): Promise<Check[]> {
+	const c = await readGrokCred(deps.file ?? GROK_AUTH);
+	const out: Check[] = [grokAuthCheck(c)];
+	if (c.status !== "found") return out;
+	const sub = await (deps.fetchSub ?? (() => probe("grok")))();
+	if (sub.source === "cache" || sub.cooldownUntil) {
+		out.push(subCheck("grok", GROK_CALLS.billing, sub));
+		out.push({ provider: "grok", source: "user / subscriptions", result: "info", note: sub.cooldownUntil ? `Cooldown bis ${sub.cooldownUntil}` : "aus Cache (< 55 s), nicht abgerufen" });
+		return out;
+	}
+	if (sub.status === "login" && !grokCallLog.size) {
+		out.push({ provider: "grok", source: GROK_CALLS.billing, result: "invalid", note: sub.detail });
+		return out;
+	}
+	for (const call of Object.keys(GROK_CALLS) as GrokCall[]) {
+		const r = grokCallLog.get(call);
+		const source = GROK_CALLS[call];
+		if (r === undefined) out.push({ provider: "grok", source, result: "info", note: "nicht abgerufen" });
+		else if (r === "ok" && call === "billing" && sub.status !== "ok") out.push({ provider: "grok", source, result: "invalid", note: `HTTP 200, ${sub.status}: ${sub.detail ?? ""}`.trim() });
+		else if (r === "ok") out.push({ provider: "grok", source, result: "ok", note: call === "billing" ? [sub.primary && `${sub.primary.label} ${sub.primary.text ?? Math.round(sub.primary.pct) + "%"}`, sub.detail].filter(Boolean).join(" · ") || undefined : call === "subscriptions" ? `Tarif: ${sub.plan ?? "?"}` : undefined });
+		else if (r === "offline") out.push({ provider: "grok", source, result: "warn", note: "offline" });
+		else if (r === 429) out.push({ provider: "grok", source, result: "warn", note: `HTTP 429, ${RATE_LIMIT_NOTE}` });
+		else out.push({ provider: "grok", source, result: call === "billing" ? "invalid" : "warn", note: `HTTP ${r}${call === "billing" ? "" : " (optional, nur Tarif)"}` });
+	}
 	return out;
 }

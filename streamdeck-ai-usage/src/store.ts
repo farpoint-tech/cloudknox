@@ -58,6 +58,11 @@ export interface State {
 	 * read by CLI and reconcile; AI_USAGE_DECK_M365_TENANT is the fallback when absent.
 	 */
 	m365TenantId?: string;
+	/** M365 Copilot auth mode from the key setting m365Auth: "az" (default) or "app" (client credentials). */
+	m365Auth?: "az" | "app";
+	/** App mode: application (client) ID and the UPN whose license/usage is shown, as entered (validated when read). */
+	m365ClientId?: string;
+	m365Upn?: string;
 	lastTokensRun?: string;
 	lastApiRun?: string;
 	lastReconcile?: string;

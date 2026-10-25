@@ -3,7 +3,8 @@ import { PROVIDERS, PROVIDER_IDS, type ApiPart, type ProviderId, type ResetEvent
 import { resetsOf, upcomingResets } from "./resets.js";
 import { loadState, withState } from "./store.js";
 import { gatedSub } from "./subgate.js";
-import { normalizeTenant } from "./providers/m365copilot.js";
+import { clearM365Cache, normalizeTenant } from "./providers/m365copilot.js";
+import { normalizeAuth, type M365Auth } from "./providers/m365app.js";
 
 export interface View {
 	sub?: SubPart;
@@ -57,16 +58,45 @@ export class Hub {
 	 * Invalid values are ignored here; the provider reports them as status "config".
 	 */
 	async setM365Tenant(raw: string, opts: { refresh?: boolean } = {}): Promise<void> {
-		const tenant = normalizeTenant(raw);
-		if (!tenant) return;
+		await this.setM365Config({ tenantId: raw }, opts);
+	}
+
+	/**
+	 * Stores the M365 key settings in state.json: tenant (only when valid), auth mode, and in app mode client ID and UPN
+	 * (as entered; the provider validates them and reports status "config"). Any change drops the old value, cooldown,
+	 * resets and cached tokens, then fetches anew. The client secret never passes through here (keychain only).
+	 */
+	async setM365Config(c: { tenantId?: string; auth?: M365Auth; clientId?: string; upn?: string }, opts: { refresh?: boolean } = {}): Promise<void> {
+		const tenant = normalizeTenant(c.tenantId);
 		const changed = await withState((s) => {
-			if (s.m365TenantId === tenant) return false;
-			s.m365TenantId = tenant;
+			let ch = false;
+			if (tenant && s.m365TenantId !== tenant) {
+				s.m365TenantId = tenant;
+				ch = true;
+			}
+			if (c.auth !== undefined) {
+				const auth = normalizeAuth(c.auth);
+				if ((s.m365Auth ?? "az") !== auth) {
+					s.m365Auth = auth;
+					ch = true;
+				}
+				if (auth === "app") {
+					const cid = (c.clientId ?? "").trim();
+					const upn = (c.upn ?? "").trim();
+					if ((s.m365ClientId ?? "") !== cid || (s.m365Upn ?? "") !== upn) {
+						s.m365ClientId = cid;
+						s.m365Upn = upn;
+						ch = true;
+					}
+				}
+			}
+			if (!ch) return false;
 			delete s.lastSub.m365copilot;
 			delete s.subGate.m365copilot;
 			return true;
 		});
 		if (!changed) return;
+		clearM365Cache();
 		this.resetsBy.delete("m365copilot");
 		delete this.views.get("m365copilot")!.sub;
 		this.emit();
