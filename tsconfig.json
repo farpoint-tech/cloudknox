@@ -41,6 +41,7 @@
     "m365-assessment",
     "node_modules",
     "scripts",
-    "skills"
+    "skills",
+    "streamdeck-ai-usage"
   ]
 }
