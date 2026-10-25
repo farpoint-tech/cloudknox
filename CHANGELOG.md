@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- **streamdeck-ai-usage/**: Elgato-Stream-Deck-Plugin `tech.farpoint.ai-usage` (TypeScript, SDK 3). Zeigt je KI-Anbieter Abo-Verbrauch (Claude Code, Codex, GitHub Copilot live; Gemini, Grok vorbereitet), lokale Token-Zähler aus den CLI-Logs und Kosten aus den Abo-Daten (Claude Extra-Usage und Budgets, Codex-Credits, Copilot-Overage); API-Kosten per Admin-Key nur optional für Enterprise/Teams. Taste „Nächste Resets" mit den zwei nächsten Reset-Zeitpunkten und Blinken bei mehr als zwei im Fenster. Rate-Limit-Gate gegen HTTP 429, wöchentlicher Abgleich Sonntag 20:00 per launchd. Doku: `SPEC.md`, `RESEARCH.md`, `README.md`, `CONTRIBUTING.md`.
+
 ## [2.4.3] - 2026-04-09 CET
 
 ### Security

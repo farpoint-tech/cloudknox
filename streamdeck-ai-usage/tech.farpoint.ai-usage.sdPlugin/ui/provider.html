@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="de">
+	<head>
+		<meta charset="utf-8" />
+		<title>AI Usage – Anbieter</title>
+		<script src="sdpi-components.js"></script>
+	</head>
+	<body>
+		<sdpi-item label="Anbieter">
+			<sdpi-select setting="provider" default="claude">
+				<option value="claude">Claude</option>
+				<option value="codex">ChatGPT / Codex</option>
+				<option value="copilot">GH Copilot (GitHub)</option>
+				<option value="m365copilot">M365 Copilot (Microsoft 365)</option>
+				<option value="gemini">Gemini</option>
+				<option value="grok">Grok</option>
+			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item label="Anzeige">
+			<sdpi-select setting="metric" default="auto">
+				<option value="auto">auto</option>
+				<option value="sub">Abo-Limit %</option>
+				<option value="tokens">Tokens heute</option>
+				<option value="kosten">Kosten (Abo: Extra, Budget, Credits)</option>
+				<option value="api">API-Kosten Monat (nur mit Häkchen unten)</option>
+			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item label="M365 Anmeldung" id="m365-auth" class="m365">
+			<sdpi-select setting="m365Auth" default="az">
+				<option value="az">az CLI (Weg A)</option>
+				<option value="app">Enterprise-App (Weg B)</option>
+			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item label="M365 Tenant" class="m365">
+			<sdpi-textfield setting="tenantId" placeholder="Tenant-ID oder contoso.onmicrosoft.com"></sdpi-textfield>
+		</sdpi-item>
+		<sdpi-item label="Client-ID" class="m365 m365-app">
+			<sdpi-textfield setting="clientId" placeholder="Anwendungs-ID (GUID)" pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"></sdpi-textfield>
+		</sdpi-item>
+		<sdpi-item label="Benutzer (UPN)" class="m365 m365-app">
+			<sdpi-textfield setting="upn" placeholder="name@contoso.com"></sdpi-textfield>
+		</sdpi-item>
+		<sdpi-item label="" class="m365 m365-az">
+			<p style="margin: 0; font-size: 9pt; color: #9a9a9a">
+				Anmeldung einmal im Terminal: az login --tenant &lt;id&gt; --scope https://graph.microsoft.com//.default.
+				Nutzungsbericht braucht Reports.Read.All bzw. Rolle Reports Reader (optional).
+			</p>
+		</sdpi-item>
+		<sdpi-item label="" class="m365 m365-app">
+			<p style="margin: 0; font-size: 9pt; color: #9a9a9a">
+				Secret liegt im Schlüsselbund (Dienst m365-copilot-app), nie hier. Einrichtung: tools/m365-register-app.sh
+				oder tools/m365-app-setup.md. Rechte (Application): User.Read.All, Organization.Read.All, Reports.Read.All.
+			</p>
+		</sdpi-item>
+		<sdpi-item label="API-Kosten">
+			<sdpi-checkbox setting="showApiCost" label="anzeigen (nur Enterprise/Teams, Admin-Key nötig)"></sdpi-checkbox>
+		</sdpi-item>
+		<sdpi-item label="Bedienung">
+			<p style="margin: 0; font-size: 9pt; color: #9a9a9a">
+				Kurz drücken: aktualisieren. Lang drücken (≥ 0,6 s): Anzeige wechseln (auto → Abo → Tokens → Kosten, mit API-Kosten zusätzlich → API).
+			</p>
+		</sdpi-item>
+		<script>
+			// Shows the M365 fields only for M365 Copilot, client ID and UPN only for the Enterprise-App mode.
+			(function () {
+				const provider = document.querySelector('sdpi-select[setting="provider"]');
+				const auth = document.querySelector('sdpi-select[setting="m365Auth"]');
+				function apply() {
+					const m365 = provider && provider.value === "m365copilot";
+					const app = auth && auth.value === "app";
+					document.querySelectorAll(".m365").forEach((el) => {
+						const show = m365 && (el.classList.contains("m365-app") ? app : el.classList.contains("m365-az") ? !app : true);
+						el.hidden = !show;
+						el.style.display = show ? "" : "none";
+					});
+				}
+				[provider, auth].forEach((el) => el && el.addEventListener("valuechange", apply));
+				apply();
+			})();
+		</script>
+	</body>
+</html>

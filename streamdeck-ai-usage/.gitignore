@@ -1,0 +1,8 @@
+node_modules/
+.npm-cache/
+test-dist/
+.claude/
+tech.farpoint.ai-usage.sdPlugin/logs/
+# Build output — erzeugt durch `npm run build`
+tech.farpoint.ai-usage.sdPlugin/bin/plugin.js
+tech.farpoint.ai-usage.sdPlugin/bin/cli.js

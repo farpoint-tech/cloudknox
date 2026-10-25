@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="de">
+	<head>
+		<meta charset="utf-8" />
+		<title>AI Usage – Nächste Resets</title>
+		<script src="sdpi-components.js"></script>
+	</head>
+	<body>
+		<sdpi-item label="Blink-Fenster (h)">
+			<sdpi-textfield setting="blinkWindowHours" default="24" pattern="[0-9]+([.,][0-9]+)?" required></sdpi-textfield>
+		</sdpi-item>
+		<sdpi-item label="Regel">
+			<p style="margin: 0; font-size: 9pt; color: #9a9a9a">
+				Fallen mehr als 2 Resets in die nächsten so vielen Stunden, blinkt die Taste (normal ↔ gelb, jede Sekunde).
+				Standard 24 h.
+			</p>
+		</sdpi-item>
+		<sdpi-item label="Bedienung">
+			<p style="margin: 0; font-size: 9pt; color: #9a9a9a">
+				Kurz drücken: aktualisieren. Lang drücken (≥ 0,6 s): Blinken 1 h stumm bzw. wieder an.
+			</p>
+		</sdpi-item>
+	</body>
+</html>
