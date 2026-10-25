@@ -1038,3 +1038,8 @@ Für kritische Probleme in Produktionsumgebungen:
 ## MemGuard für macOS
 
 Lokale Speicherüberwachung mit grafischer Oberfläche und eigenem Mitteilungs-App-Einstieg. Einstieg: [Bedienung](scripts/macos-memguard/README.md), [Konzept](scripts/macos-memguard/CONCEPT.md), [Entwicklungsübergabe](scripts/macos-memguard/DEVELOPMENT.md), [Aufgaben mit Abnahmekriterien](scripts/macos-memguard/BACKLOG.md).
+
+### Offene Punkte MemGuard
+
+- [ ] P1 · Betreiber/QA: Native Mitteilungsaktivierung und freigegebenes Upgrade gemäß MemGuard-BACKLOG abnehmen.
+- [ ] P2 · Maintainer: Folgeentwicklung anhand der dokumentierten Arbeitspakete priorisieren.
