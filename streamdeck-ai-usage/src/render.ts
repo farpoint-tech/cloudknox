@@ -1,10 +1,36 @@
+import { COST_SOURCE, costAmount, costLabel, costNotable, primaryCost } from "./cost.js";
 import { fmtAge, fmtCountdown, fmtPct, fmtTokens, fmtUsd, fmtWait } from "./format.js";
 import type { View } from "./hub.js";
 import { META, PROVIDER_IDS, type ProviderId, type ResetEvent, type Status } from "./providers/types.js";
 import { fmtResetCountdown, fmtResetLocal, PROVIDER_DISPLAY } from "./resets.js";
 
-export type Metric = "auto" | "sub" | "tokens" | "api";
-export const METRICS: Metric[] = ["auto", "sub", "tokens", "api"];
+/** "kosten" = subscription costs/budgets (default); "api" = API-key costs, only with showApiCost (Enterprise/Teams). */
+export type Metric = "auto" | "sub" | "tokens" | "kosten" | "api";
+export const METRICS: Metric[] = ["auto", "sub", "tokens", "kosten"];
+
+/** Metric cycle of a key: "api" only when the key has showApiCost switched on. */
+export function metricsFor(showApiCost: boolean): Metric[] {
+	return showApiCost ? [...METRICS, "api"] : METRICS;
+}
+
+export type ProviderSettings = {
+	provider?: ProviderId;
+	metric?: Metric;
+	/** API-key costs (admin keys, only Enterprise/Teams). Off by default: no keychain access for API keys. */
+	showApiCost?: boolean;
+};
+
+/** Settings from the property inspector; "api" without showApiCost (and the old default "api") becomes "kosten". */
+export function normalizeProviderSettings(s: ProviderSettings): Required<ProviderSettings> {
+	const showApiCost = s.showApiCost === true || (s.showApiCost as unknown) === "true";
+	const metrics = metricsFor(showApiCost);
+	const metric: Metric = metrics.includes(s.metric as Metric) ? (s.metric as Metric) : s.metric === "api" ? "kosten" : "auto";
+	return {
+		provider: PROVIDER_IDS.includes(s.provider as ProviderId) ? (s.provider as ProviderId) : "claude",
+		metric,
+		showApiCost,
+	};
+}
 
 export const STATUS_TEXT: Record<Status, string> = {
 	ok: "ok",
@@ -45,7 +71,7 @@ export function resolveMetric(view: View, metric: Metric): Exclude<Metric, "auto
 	if (metric !== "auto") return metric;
 	if (view.sub?.primary) return "sub";
 	if (view.today?.status === "ok") return "tokens";
-	if (view.api?.status === "ok") return "api";
+	if (view.sub?.cost?.length) return "kosten";
 	return "sub";
 }
 
@@ -87,14 +113,38 @@ export function tileFor(id: ProviderId, view: View, metric: Metric, now = Date.n
 			dim: false,
 		};
 	}
+	if (which === "kosten") return costTile(id, view, base, now);
 	const a = view.api;
 	if (!a) return { ...base, big: "…", small: "API", bottom: "", dim: true };
 	if (a.usd === undefined) return { ...base, big: STATUS_TEXT[a.status], small: "API", bottom: "", dim: true };
 	return { ...base, big: fmtUsd(a.usd), small: `API ${a.month}`, bottom: fmtAge(a.fetchedAt, now), dim: a.status !== "ok" };
 }
 
+/** "Kosten" tile: amount line (big), label/limit line, bar from utilization, reset or age at the bottom. */
+function costTile(id: ProviderId, view: View, base: { title: string; color: string; dim: boolean }, now: number): Tile {
+	const s = view.sub;
+	if (!COST_SOURCE[id]) return { ...base, big: STATUS_TEXT.na, small: "Kosten", bottom: "", dim: true };
+	if (!s) return { ...base, big: "…", small: "Kosten", bottom: "", dim: true };
+	const items = s.cost ?? [];
+	const c = primaryCost(items);
+	if (!c) return { ...base, big: s.primary ? STATUS_TEXT.na : STATUS_TEXT[s.status], small: "Kosten", bottom: "", dim: true };
+	const fresh = s.status === "ok";
+	const more = items.length > 1 ? ` · +${items.length - 1}` : "";
+	const when = fresh ? (c.resetAt ? fmtCountdown(c.resetAt, now) : "") : `~ ${fmtAge(s.fetchedAt, now)}`;
+	const label = costLabel(c);
+	return {
+		...base,
+		big: costAmount(c),
+		small: label.length > 16 && c.state ? c.state : label,
+		barPct: c.pct,
+		bottom: (when + more).replace(/^ · /, ""),
+		dim: !fresh,
+		cooldown: inCooldown(s, now),
+	};
+}
+
 export function svgTile(t: Tile): string {
-	const bigSize = t.big.length <= 6 ? 34 : t.big.length <= 8 ? 28 : 22;
+	const bigSize = t.big.length <= 6 ? 34 : t.big.length <= 8 ? 28 : t.big.length <= 11 ? 22 : 18;
 	const bar =
 		t.barPct === undefined
 			? ""
@@ -128,21 +178,44 @@ export function overviewValue(view: View): { text: string; pct?: number; dim: bo
 	return { text: s ? STATUS_TEXT[s.status] : "…", dim: true };
 }
 
+/**
+ * Cost row of the overview key, only when some provider used something or reached a limit:
+ * "CL 251 / 250 $" (reached first, then non-zero), "+N" when more providers qualify.
+ */
+export function overviewCost(views: Map<ProviderId, View>): { text: string; alert: boolean } | undefined {
+	const hits = PROVIDER_IDS.flatMap((id) => (views.get(id)?.sub?.cost ?? []).filter(costNotable).map((c) => ({ id, c })));
+	if (hits.length === 0) return undefined;
+	const first = hits.find((h) => h.c.reached) ?? hits[0];
+	const more = hits.length > 1 ? ` +${hits.length - 1}` : "";
+	return { text: `${META[first.id].abbr} ${costAmount(first.c)}${more}`, alert: hits.some((h) => h.c.reached) };
+}
+
 export function svgOverview(views: Map<ProviderId, View>): string {
 	let rows = "";
+	const cost = overviewCost(views);
+	// Six rows when a cost row is shown, otherwise the original five.
+	const step = cost ? 22 : 27;
+	const size = cost ? 16 : 18;
+	const top = cost ? 20 : 26;
 	PROVIDER_IDS.forEach((id, i) => {
-		const y = 26 + i * 27;
+		const y = top + i * step;
 		const v = overviewValue(views.get(id) ?? {});
 		const m = META[id];
 		rows +=
-			`<text x="10" y="${y}" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="${m.color}">${m.abbr}</text>` +
-			`<text x="134" y="${y}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="${v.dim ? "#8A8A8A" : "#FFFFFF"}">${esc(v.text)}</text>`;
+			`<text x="10" y="${y}" font-family="Helvetica, Arial, sans-serif" font-size="${size}" font-weight="700" fill="${m.color}">${m.abbr}</text>` +
+			`<text x="134" y="${y}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="${size}" font-weight="700" fill="${v.dim ? "#8A8A8A" : "#FFFFFF"}">${esc(v.text)}</text>`;
 		if (v.pct !== undefined) {
 			rows +=
-				`<rect x="10" y="${y + 4}" width="124" height="3" fill="#2A2A2A"/>` +
-				`<rect x="10" y="${y + 4}" width="${Math.round(Math.min(100, Math.max(0, v.pct)) * 1.24)}" height="3" fill="${barColor(v.pct)}"/>`;
+				`<rect x="10" y="${y + 3}" width="124" height="3" fill="#2A2A2A"/>` +
+				`<rect x="10" y="${y + 3}" width="${Math.round(Math.min(100, Math.max(0, v.pct)) * 1.24)}" height="3" fill="${barColor(v.pct)}"/>`;
 		}
 	});
+	if (cost) {
+		const y = top + PROVIDER_IDS.length * step;
+		rows +=
+			`<rect x="10" y="${y - 14}" width="124" height="1" fill="#2A2A2A"/>` +
+			`<text x="72" y="${y}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="${cost.alert ? "#F5A524" : "#FFFFFF"}">${esc(cost.text)}</text>`;
+	}
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" fill="#111111"/>${rows}</svg>`;
 }
 

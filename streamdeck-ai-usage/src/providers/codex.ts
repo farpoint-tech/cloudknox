@@ -4,7 +4,7 @@ import { readSecret } from "../keychain.js";
 import { CODEX_AUTH } from "../paths.js";
 import { resetWindowName } from "../resets.js";
 import { httpStatus, localTokensFor, windowLabel } from "./common.js";
-import { apiOnly, guard, monthLabel, nowIso, subOnly, type Provider, type ResetEvent, type Window } from "./types.js";
+import { apiOnly, guard, monthLabel, nowIso, subOnly, type CostItem, type Provider, type ResetEvent, type Window } from "./types.js";
 
 export const OPENAI_ADMIN = "openai-admin";
 
@@ -57,6 +57,27 @@ export function codexResets(json: unknown): ResetEvent[] {
 	return out;
 }
 
+/**
+ * Subscription costs of wham/usage: credits.{has_credits,balance,unlimited,overage_limit_reached},
+ * spend_control.{reached,individual_limit}, rate_limit_reset_credits.available_count.
+ * Live 2026-10-25 (plan pro): balance "0", has_credits false, unlimited false, spend_control.reached false,
+ * individual_limit null, available_count 0. Credits are a count, not money.
+ */
+export function codexCost(json: unknown): CostItem[] {
+	const credits = pick(json, "credits");
+	const spend = pick(json, "spend_control");
+	if (!credits && !spend) return [];
+	const unlimited = pick(credits, "unlimited") === true;
+	const reached = pick(spend, "reached") === true || pick(credits, "overage_limit_reached") === true;
+	const item: CostItem = { label: "Credits", used: num(pick(credits, "balance")), limit: num(pick(spend, "individual_limit")), unlimited, reached };
+	if (reached) item.state = "Limit erreicht";
+	else if (unlimited) item.state = "unbegrenzt";
+	const out = [item];
+	const resetCredits = num(pick(json, "rate_limit_reset_credits", "available_count"));
+	if (resetCredits !== undefined && resetCredits > 0) out.push({ label: "Reset-Credits", used: resetCredits });
+	return out;
+}
+
 /** Sums an OpenAI organization/costs page; amount.value is in dollars. */
 export function sumOpenAICost(json: unknown): number {
 	let usd = 0;
@@ -86,7 +107,7 @@ export const codex: Provider = {
 			if (!m.primary) return subOnly("codex", { status: "error", detail: "rate_limit fehlt", plan: m.plan, fetchedAt });
 			// Show the tighter window as primary when both exist.
 			if (m.secondary && m.secondary.pct > m.primary.pct) [m.primary, m.secondary] = [m.secondary, m.primary];
-			return subOnly("codex", { status: "ok", ...m, resets: codexResets(r.json), fetchedAt });
+			return subOnly("codex", { status: "ok", ...m, resets: codexResets(r.json), cost: codexCost(r.json), fetchedAt });
 		}, (detail) => subOnly("codex", { status: "error", detail, fetchedAt: nowIso() })),
 
 	localTokens: (sinceIso) => localTokensFor("codex", sinceIso),

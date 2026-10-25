@@ -10,27 +10,24 @@ import streamDeck, {
 	type WillDisappearEvent,
 } from "@elgato/streamdeck";
 import type { Hub } from "../hub.js";
-import { PROVIDER_IDS, type ProviderId } from "../providers/types.js";
-import { dataUrl, METRICS, svgTile, tileFor, type Metric } from "../render.js";
+import type { ProviderId } from "../providers/types.js";
+import { dataUrl, metricsFor, normalizeProviderSettings, svgTile, tileFor, type ProviderSettings } from "../render.js";
 import type { Scheduler } from "../scheduler.js";
 
-export type ProviderSettings = {
-	provider?: ProviderId;
-	metric?: Metric;
-};
+export type { ProviderSettings };
 
 const LONG_PRESS_MS = 600;
 
-function normalize(s: ProviderSettings): Required<ProviderSettings> {
-	return {
-		provider: PROVIDER_IDS.includes(s.provider as ProviderId) ? (s.provider as ProviderId) : "claude",
-		metric: METRICS.includes(s.metric as Metric) ? (s.metric as Metric) : "auto",
-	};
-}
+const normalize = normalizeProviderSettings;
 
 @action({ UUID: "tech.farpoint.ai-usage.provider" })
 export class ProviderKey extends SingletonAction<ProviderSettings> {
 	private settings = new Map<string, Required<ProviderSettings>>();
+	/**
+	 * showApiCost per key seen in this plugin session. Not cleared on disappear (page switch), so the weekly
+	 * reconcile keeps the API cost of keys on other pages; only a settings change switches a key off.
+	 */
+	private apiByAction = new Map<string, ProviderId | undefined>();
 	private downAt = new Map<string, number>();
 
 	constructor(
@@ -45,6 +42,7 @@ export class ProviderKey extends SingletonAction<ProviderSettings> {
 		this.settings.set(ev.action.id, normalize(ev.payload.settings));
 		this.sched.keyAppeared();
 		await this.render(ev.action.id);
+		await this.syncApi(ev.action.id);
 	}
 
 	override onWillDisappear(ev: WillDisappearEvent<ProviderSettings>): void {
@@ -55,6 +53,16 @@ export class ProviderKey extends SingletonAction<ProviderSettings> {
 	override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<ProviderSettings>): Promise<void> {
 		this.settings.set(ev.action.id, normalize(ev.payload.settings));
 		await this.render(ev.action.id);
+		await this.syncApi(ev.action.id);
+	}
+
+	/** Hands the providers of all keys with showApiCost to the hub (persisted for the weekly reconcile). */
+	private async syncApi(id: string): Promise<void> {
+		const s = this.settings.get(id);
+		if (!s) return;
+		this.apiByAction.set(id, s.showApiCost ? s.provider : undefined);
+		const ids = [...this.apiByAction.values()].filter((p): p is ProviderId => !!p);
+		await this.hub.setApiProviders(ids, { persist: true }).catch((e: unknown) => streamDeck.logger.warn(`api: ${String(e)}`));
 	}
 
 	override onKeyDown(ev: KeyDownEvent<ProviderSettings>): void {
@@ -78,8 +86,9 @@ export class ProviderKey extends SingletonAction<ProviderSettings> {
 
 	private async cycle(id: string, dir: 1 | -1): Promise<void> {
 		const cur = this.settings.get(id) ?? normalize({});
-		const i = METRICS.indexOf(cur.metric);
-		const next = { ...cur, metric: METRICS[(i + dir + METRICS.length) % METRICS.length] };
+		const metrics = metricsFor(cur.showApiCost);
+		const i = metrics.indexOf(cur.metric);
+		const next = { ...cur, metric: metrics[(i + dir + metrics.length) % metrics.length] };
 		this.settings.set(id, next);
 		const a = this.actions.find((x) => x.id === id);
 		await a?.setSettings(next);

@@ -1,8 +1,9 @@
-import { doctor } from "./doctor.js";
+import { COST_SOURCE, costCli } from "./cost.js";
+import { doctor, OPTIONAL_NOTE } from "./doctor.js";
 import { fmtCountdown, fmtTokens, fmtUsd } from "./format.js";
 import { Hub, type View } from "./hub.js";
 import { STATE_FILE, HISTORY_FILE } from "./paths.js";
-import { META, PROVIDER_IDS } from "./providers/types.js";
+import { META, PROVIDER_IDS, type ProviderId } from "./providers/types.js";
 import { reconcile } from "./reconcile.js";
 import { FRESH_MS } from "./subgate.js";
 import { STATUS_TEXT } from "./render.js";
@@ -44,6 +45,16 @@ function tokCell(t: View["today"]): string {
 	return `${fmtTokens(t.in + t.out)} +${fmtTokens(t.cached)} cache`;
 }
 
+/** "Kosten" column: subscription costs/budgets from the last subscription value (stale ones marked "~"). */
+function costCell(id: ProviderId, v: View, now: number): string {
+	if (!COST_SOURCE[id]) return "n/v";
+	const s = v.sub;
+	if (!s) return "…";
+	if (!s.cost) return s.primary ? "n/v" : STATUS_TEXT[s.status];
+	if (s.cost.length === 0) return "keine";
+	return (s.status === "ok" ? "" : "~ ") + s.cost.map((c) => costCli(c, now)).join(" · ");
+}
+
 function notes(v: View): string {
 	const n: string[] = [];
 	if (v.sub && v.sub.status !== "ok" && v.sub.detail) n.push(`Abo: ${v.sub.detail}`);
@@ -52,23 +63,28 @@ function notes(v: View): string {
 	return n.join("; ");
 }
 
-async function status(fresh: boolean): Promise<void> {
+async function status(fresh: boolean, api: boolean): Promise<void> {
 	const hub = new Hub();
+	// API-key costs (admin keys, Enterprise/Teams) only with --api; without it no API-key keychain entry is read.
+	if (api) hub.apiProviders = new Set(PROVIDER_IDS);
 	const t0 = Date.now();
 	await hub.refreshAll(undefined, { force: fresh });
-	const rows = [["Anbieter", "Abo", "Abo-Quelle", "Reset", "Tokens heute", "Tokens Woche", "API Monat", "Hinweise"]];
+	const head = ["Anbieter", "Abo", "Abo-Quelle", "Reset", "Tokens heute", "Tokens Woche", "Kosten"];
+	const rows = [api ? [...head, "API Monat", "Hinweise"] : [...head, "Hinweise"]];
 	for (const id of PROVIDER_IDS) {
 		const v = hub.views.get(id)!;
-		rows.push([
+		const row = [
 			META[id].name,
 			subCell(v),
 			sourceCell(v, Date.now()),
 			v.sub?.status === "ok" && v.sub.primary?.resetAt ? fmtCountdown(v.sub.primary.resetAt) : "",
 			tokCell(v.today),
 			tokCell(v.week),
-			v.api ? (v.api.usd !== undefined ? fmtUsd(v.api.usd) : STATUS_TEXT[v.api.status]) : "…",
-			notes(v),
-		]);
+			costCell(id, v, Date.now()),
+		];
+		if (api) row.push(v.api ? (v.api.usd !== undefined ? fmtUsd(v.api.usd) : STATUS_TEXT[v.api.status]) : "…");
+		row.push(notes(v));
+		rows.push(row);
 	}
 	console.log(table(rows));
 	const reused = PROVIDER_IDS.filter((id) => hub.views.get(id)!.sub?.source === "cache");
@@ -115,8 +131,8 @@ async function resets(windowArg: string | undefined): Promise<void> {
 	if (without.length) console.log(`Ohne Reset-Daten: ${without.join(", ")}.`);
 }
 
-async function sync(scheduled: boolean): Promise<void> {
-	const r = await reconcile({ scheduled });
+async function sync(scheduled: boolean, api: boolean): Promise<void> {
+	const r = await reconcile({ scheduled, api: api ? PROVIDER_IDS : undefined });
 	if (!r.ran) {
 		console.log(`sync übersprungen: ${r.reason}`);
 		return;
@@ -125,16 +141,20 @@ async function sync(scheduled: boolean): Promise<void> {
 	console.log(`\n${r.lines.length} Zeilen an ${HISTORY_FILE} angehängt.`);
 }
 
-async function runDoctor(): Promise<void> {
-	const checks = await doctor();
-	console.log(table([["Anbieter", "Quelle", "Ergebnis", "Hinweis"], ...checks.map((c) => [c.provider, c.source, c.result, c.note ?? ""])]));
+async function runDoctor(api: boolean): Promise<void> {
+	const checks = await doctor({ api });
+	const head = ["Anbieter", "Quelle", "Ergebnis", "Hinweis"];
+	const rowOf = (c: (typeof checks)[number]) => [c.provider, c.source, c.result, c.note ?? ""];
+	console.log(table([head, ...checks.filter((c) => !c.group).map(rowOf)]));
+	console.log(`\nAPI-Kosten-Schlüssel – ${OPTIONAL_NOTE}, für persönliche Abos nicht nötig (Taste: Einstellung showApiCost):`);
+	console.log(table([head, ...checks.filter((c) => c.group === "optional").map(rowOf)]));
 }
 
 const [cmd, ...args] = process.argv.slice(2);
 const commands: Record<string, () => Promise<void>> = {
-	status: () => status(args.includes("--fresh")),
-	sync: () => sync(args.includes("--scheduled")),
-	doctor: runDoctor,
+	status: () => status(args.includes("--fresh"), args.includes("--api")),
+	sync: () => sync(args.includes("--scheduled"), args.includes("--api")),
+	doctor: () => runDoctor(args.includes("--api")),
 	resets: () => {
 		const i = args.indexOf("--window");
 		return resets(i >= 0 ? args[i + 1] : undefined);
@@ -142,7 +162,7 @@ const commands: Record<string, () => Promise<void>> = {
 };
 const fn = commands[cmd ?? ""];
 if (!fn) {
-	console.log("Usage: node bin/cli.js <status [--fresh]|sync [--scheduled]|doctor|resets [--window <h>]>");
+	console.log("Usage: node bin/cli.js <status [--fresh] [--api]|sync [--scheduled] [--api]|doctor [--api]|resets [--window <h>]>");
 	process.exitCode = cmd ? 2 : 0;
 } else {
 	fn().catch((e: unknown) => {

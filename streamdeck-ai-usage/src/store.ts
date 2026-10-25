@@ -48,6 +48,11 @@ export interface State {
 	/** Last successful subscription value per provider (with fetchedAt); written on every good fetch. */
 	lastSub: Partial<Record<ProviderId, SubPart>>;
 	subGate: Partial<Record<ProviderId, GateEntry>>;
+	/**
+	 * Providers whose API-key costs (Enterprise/Teams admin keys) are switched on via the provider-key setting
+	 * showApiCost. Written by the plugin, read by the weekly reconcile (launchd). Absent = none.
+	 */
+	apiProviders?: ProviderId[];
 	lastTokensRun?: string;
 	lastApiRun?: string;
 	lastReconcile?: string;

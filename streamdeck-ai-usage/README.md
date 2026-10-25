@@ -1,32 +1,35 @@
 # AI Usage Deck – Stream-Deck-Plugin
 
 Zeigt pro Anbieter (Claude, ChatGPT/Codex, GitHub Copilot, Gemini, Grok) den Abo-Verbrauch, die lokal
-gezählten Tokens und die API-Kosten des laufenden Monats. Plugin-UUID `tech.farpoint.ai-usage`,
+gezählten Tokens und die Abo-Kosten (Extra Usage, Budgets, Credits, Overage). API-Kosten über Admin-Schlüssel
+sind optional und nur für Enterprise/Teams-Konten gedacht (siehe unten). Plugin-UUID `tech.farpoint.ai-usage`,
 Stream Deck ab 7.1, nur macOS, Node 24 (vom Stream-Deck-Programm mitgeliefert).
 
 ## Tasten
 
 ### „Anbieter“
-Einstellungen im Property Inspector: **Anbieter** und **Anzeige** (`auto`, `Abo-Limit %`, `Tokens heute`, `API-Kosten Monat`).
+Einstellungen im Property Inspector: **Anbieter**, **Anzeige** (`auto`, `Abo-Limit %`, `Tokens heute`, `Kosten`,
+`API-Kosten Monat`) und das Häkchen **API-Kosten anzeigen** (Setting `showApiCost`, Standard aus).
 
 | Zeile | Inhalt |
 |---|---|
 | oben | Anbieterkürzel (CLAUDE, CODEX, COPILOT, GEMINI, GROK) |
-| Mitte groß | Abo: Fenster + Prozent, z. B. `5h 36%` · Tokens: `1,3M` · API: `$ 12,40` |
-| darunter | Abo: zweites Fenster (`Wo 7%`) · Tokens: `heute · Wo 33M` · API: `API 2026-10` |
-| Balken | Auslastung des Hauptfensters (grün < 70 %, gelb < 90 %, rot) – nur bei Abo |
-| unten | Abo: Zeit bis Reset (`↻ 2h14`); veralteter Abo-Wert: `~ vor 12m`; sonst Alter der Daten (`vor 3m`) |
+| Mitte groß | Abo: Fenster + Prozent, z. B. `5h 36%` · Tokens: `1,3M` · Kosten: `251 / 250 $` · API: `$ 12,40` |
+| darunter | Abo: zweites Fenster (`Wo 7%`) · Tokens: `heute · Wo 33M` · Kosten: `Budget 100%`, `Extra aus` · API: `API 2026-10` |
+| Balken | Abo: Auslastung des Hauptfensters; Kosten: Auslastung des Budgets (grün < 70 %, gelb < 90 %, rot) |
+| unten | Abo/Kosten: Zeit bis Reset (`↻ 2h14`), bei Kosten `· +1` für weitere Posten; veralteter Wert: `~ vor 12m`; sonst Alter der Daten (`vor 3m`) |
 | oben rechts | gelbe Sanduhr: Abo-Endpunkt pausiert nach 429/5xx (Cooldown) |
 
 - **Kurz drücken:** sofort aktualisieren (Abo, Tokens, API für diesen Anbieter). Ein erzwungener Abo-Abruf höchstens
   alle 30 s je Anbieter; ein laufender Cooldown nach 429/5xx wird auch durch Drücken nicht übergangen.
-- **Lang drücken (≥ 0,6 s):** Anzeige wechseln auto → Abo → Tokens → API.
+- **Lang drücken (≥ 0,6 s):** Anzeige wechseln auto → Abo → Tokens → Kosten (mit `showApiCost` zusätzlich → API).
 - **Stream Deck + (Drehregler, Layout `$B1`):** Drehen wechselt die Anzeige, Drücken aktualisiert.
-- `auto` zeigt Abo, wenn ein Abo-Wert existiert, sonst Tokens, sonst API.
+- `auto` zeigt Abo, wenn ein Abo-Wert existiert, sonst Tokens, sonst Kosten. API-Kosten nie automatisch.
+- Alte Einstellung `API-Kosten Monat` ohne Häkchen wird beim Laden zu `Kosten`.
 - Fällt eine Abo-Abfrage aus (429, 5xx, offline, unerwartete Antwort), bleibt der letzte gute Wert grau stehen,
   unten steht `~` und sein Alter (`~ vor 12m`). `Fehler` erscheint nur, wenn es noch nie einen guten Wert gab.
 
-Statustexte: `login` (Anmeldung fehlt/abgelaufen), `Key fehlt` (Keychain-Eintrag nicht angelegt),
+Statustexte: `login` (Anmeldung fehlt/abgelaufen), `Key fehlt` (nur bei eingeschaltetem `showApiCost`: Admin-Schlüssel nicht angelegt),
 `offline`, `n/v` (für diesen Anbieter gibt es die Quelle nicht), `veraltet` (letzter guter Wert, CLI),
 `Fehler` (unerwartete Antwort, noch nie ein guter Wert).
 
@@ -34,9 +37,13 @@ Statustexte: `login` (Anmeldung fehlt/abgelaufen), `Key fehlt` (Keychain-Eintrag
 weil sie bei Claude und Codex das Hundertfache ausmachen und die Zahl sonst nichtssagend wird.
 
 **API-Beträge** kommen von allen Anbietern in US-Dollar und werden als `$` angezeigt (keine Umrechnung in €).
+Abo-Kosten behalten ihre Währung (Claude Extra in €, Claude-Budgets in $), es wird nichts umgerechnet.
 
 ### „Übersicht“
 Fünf Zeilen, je Anbieter Kürzel + Abo-Prozent mit Minibalken bzw. Statustext. Drücken aktualisiert alles.
+Eine sechste Zeile **Kosten** erscheint nur, wenn bei einem Anbieter etwas verbraucht wurde (Betrag > 0) oder ein
+Limit erreicht ist, z. B. `CL 251 / 250 $` (gelb, wenn ein Limit erreicht ist; `+1`, wenn weitere Anbieter betroffen
+sind). Sonst bleibt die Taste bei fünf Zeilen.
 
 ### „Nächste Resets“
 Zeigt die zwei nächsten Abo-Resets aller Anbieter, je Reset drei Zeilen:
@@ -63,6 +70,58 @@ ein (Feld **Blink-Fenster (h)**, Standard 24, Kommazahlen erlaubt, ungültig →
 - Der Blink-Takt läuft als 1-s-Timer nur, solange die Taste sichtbar ist (`onWillAppear` startet, `onWillDisappear`
   stoppt ihn). Ein neues Bild wird nur gesendet, wenn sich etwas geändert hat (Countdown minütlich, Blinkphase).
 
+## Kosten (Abo-Kosten statt API)
+
+Persönliche Abos (Claude Max, ChatGPT Pro, Copilot Individual) haben keine Admin-Schlüssel – die gibt es nur für
+Enterprise/Teams-Organisationen. Deshalb zeigt die Anzeige **Kosten** die Beträge, die der Abo-Endpunkt ohnehin
+mitliefert. Kein zusätzlicher Aufruf, kein Schlüssel: die Werte kommen aus derselben Antwort wie die Abo-Prozente,
+werden mit dem letzten guten Wert in `state.json` → `lastSub` gespeichert und bei 429/Cooldown genauso grau mit
+`~ vor …` weiter angezeigt.
+
+| Anbieter | Posten | Quelle (Feld) | Anzeige |
+|---|---|---|---|
+| Claude | `Extra` | `extra_usage.{used_credits, monthly_limit, utilization, currency, decimal_places, is_enabled, disabled_reason, spend_limit_reached}` | `0 / 25 €`, darunter `Extra aus` (abgeschaltet, z. B. `out_of_credits`) oder `Extra 4%`; `Limit erreicht` bei `spend_limit_reached` |
+| Claude | `Budget` | jedes Objekt der obersten Ebene mit `limit_dollars > 0` (+ `used_dollars`, `remaining_dollars`, `utilization`, `resets_at`) | `251 / 250 $`, darunter `Budget 100%`, Balken, `↻ 10d10h` |
+| Codex | `Credits` | `credits.{balance, has_credits, unlimited, overage_limit_reached}`, `spend_control.{reached, individual_limit}` | `0` + `Credits`; `∞` + `Credits unbegrenzt`; `Credits Limit erreicht` |
+| Codex | `Reset-Credits` | `rate_limit_reset_credits.available_count` | nur wenn > 0 |
+| Copilot | `Overage` | `quota_snapshots.premium_interactions.{overage_count, overage_permitted}` | `0` + `Overage aus` (nicht erlaubt) bzw. `Overage` |
+| Gemini, Grok | – | keine Daten | `n/v` |
+
+- **Claude Extra in Minor-Units:** `monthly_limit` und `used_credits` werden durch `10^decimal_places` geteilt. Live-Antwort
+  vom 2026-10-25: `monthly_limit 2500`, `decimal_places 2`, dazu `spend.limit.amount_minor 2500, exponent 2` → **25,00 €**,
+  nicht 2.500 €. Fehlt `decimal_places`, gilt der Wert unverändert.
+- **Claude-Budget ohne festen Feldnamen:** heute heißt das Objekt `iguana_necktie` (Limit 250 $, verbraucht 251,21 $,
+  Reset 2026-11-05). Die Namen sind intern und wechseln, deshalb wird jedes Objekt mit `limit_dollars > 0` genommen;
+  `five_hour`/`seven_day` haben `limit_dollars: null` und fallen heraus. Mehrere Budgets erscheinen als mehrere Posten.
+  Jedes Budget mit `resets_at` ist auch ein Reset (Fenster `Budget`) auf der Taste „Nächste Resets“.
+- **Welcher Posten auf der Taste steht:** zuerst einer mit erreichtem Limit, dann einer mit Betrag > 0, sonst der erste.
+  Weitere Posten zeigt die Taste als `· +N`, die CLI listet alle.
+
+## API-Kosten (optional, nur Enterprise/Teams)
+
+Admin-Schlüssel (Anthropic Admin API, OpenAI Org-Costs, GitHub-Billing-PAT, xAI Management) gibt es nur für
+Organisationskonten. Der Code dafür ist vorhanden, aber **standardmäßig aus**:
+
+- Taste „Anbieter“: Häkchen **API-Kosten anzeigen** (`showApiCost`). Erst dann liest das Plugin für diesen Anbieter den
+  Schlüsselbund und fragt alle 6 h die Kosten-API ab; die Anzeige `API-Kosten Monat` kommt in den Zyklus.
+  Die eingeschalteten Anbieter landen in `state.json` → `apiProviders`, damit auch der Sonntagsabgleich (launchd) sie
+  abfragt. Ohne Häkchen wird kein `anthropic-admin`, `openai-admin`, `github-billing-pat`, `xai-*` gelesen.
+- CLI: `status --api`, `sync --api`, `doctor --api`.
+
+Schlüssel anlegen (nur wenn ein Org-Konto vorhanden ist), jeweils über das verdeckte Eingabefenster:
+
+```bash
+bash ~/Documents/ClaudeCode-Terminal\&Scripting/tools/apikey_setzen.sh anthropic-admin     # sk-ant-admin01-…  (Anthropic Console → Admin Keys, nur Org-Konten)
+bash ~/Documents/ClaudeCode-Terminal\&Scripting/tools/apikey_setzen.sh openai-admin        # sk-admin-…        (nur Org-Owner)
+bash ~/Documents/ClaudeCode-Terminal\&Scripting/tools/apikey_setzen.sh github-billing-pat  # Fine-grained PAT „Plan: read“
+bash ~/Documents/ClaudeCode-Terminal\&Scripting/tools/apikey_setzen.sh xai-management      # xAI Console → Management Keys
+bash ~/Documents/ClaudeCode-Terminal\&Scripting/tools/apikey_setzen.sh xai-team-id         # Team-ID als „Passwort“
+```
+
+Das Plugin liest mit `security find-generic-password -s <dienst> -a supreme -w` (5 s Timeout, nie interaktiv).
+Fehlt ein Eintrag bei eingeschaltetem Häkchen, zeigt die Taste `Key fehlt`. `doctor` führt die Schlüssel in einem
+eigenen Block „optional (nur Enterprise/Teams)“ als `info`, nie als `missing`.
+
 ## Abo-Laufzeiten
 
 Welche Reset-Fenster jeder Anbieter hat und aus welchem Feld der Zeitpunkt kommt:
@@ -71,7 +130,8 @@ Welche Reset-Fenster jeder Anbieter hat und aus welchem Feld der Zeitpunkt kommt
 |---|---|---|---|
 | Claude | `5h` | 5 h rollierend | `five_hour.resets_at` (+ `five_hour.utilization`) |
 | Claude | `Woche` | 7 Tage | `seven_day.resets_at` (+ `seven_day.utilization`) |
-| Claude | `Extra` | monatlich (Extra Usage) | `extra_usage.resets_at` – nur wenn vorhanden. Die Live-Antwort vom 2026-10-25 hat **kein** Reset-Feld in `extra_usage` (nur `monthly_limit`, `used_credits`, `utilization`, `currency`), daher erscheint `Extra` derzeit nicht |
+| Claude | `Extra` | monatlich (Extra Usage) | `extra_usage.resets_at` – nur wenn vorhanden. Die Live-Antwort vom 2026-10-25 hat **kein** Reset-Feld in `extra_usage`, daher erscheint `Extra` derzeit nicht |
+| Claude | `Budget` | laut Antwort (heute bis 2026-11-05) | `resets_at` jedes Objekts mit `limit_dollars > 0` (siehe „Kosten“) |
 | Codex | `Woche` | 7 Tage (primäres Fenster) | `rate_limit.primary_window.reset_at` (Unix-Sekunden), Länge aus `limit_window_seconds` = 604800 |
 | Codex | `5h` | 5 h, optional | `rate_limit.secondary_window.reset_at`; ist derzeit `null` und wird dann übersprungen |
 | Copilot | `Monat` | monatlich | `quota_reset_date` (Datum, als 00:00 UTC gelesen) |
@@ -83,32 +143,17 @@ Der Fenstername von Codex wird aus `limit_window_seconds` abgeleitet (≤ 24 h �
 
 ## Datenquellen
 
-| Anbieter | Abo | Lokale Tokens | API-Kosten (Monat) |
+| Anbieter | Abo + Kosten | Lokale Tokens | API-Kosten (optional, Enterprise/Teams) |
 |---|---|---|---|
 | Claude | `api.anthropic.com/api/oauth/usage`, Token aus Keychain `Claude Code-credentials` (Fallback `~/.claude/.credentials.json`) | `~/.claude/projects/**/*.jsonl`, Dedupe über `message.id`+`requestId` | Admin-API `cost_report`, Keychain `anthropic-admin` |
 | Codex | `chatgpt.com/backend-api/wham/usage`, Token aus `~/.codex/auth.json` | `~/.codex/sessions/**/*.jsonl`, `token_count`-Ereignisse als Differenzen | `api.openai.com/v1/organization/costs`, Keychain `openai-admin` |
 | Copilot | `api.github.com/copilot_internal/user` mit `gh auth token` | `~/.copilot/data.db`, Tabelle `sessions` (per `/usr/bin/sqlite3`) | Premium-Request-Billing, Keychain `github-billing-pat` |
 | Gemini | n/v (siehe Grenzen) | `~/.gemini/tmp/*/chats/session-*.jsonl` (Feld `tokens`), sonst n/v | n/v |
-| Grok | `cli-chat-proxy.grok.com/v1/billing`, nur wenn `~/.grok/auth.json` existiert | n/v | xAI Management-API, Keychain `xai-management` + `xai-team-id` |
+| Grok | `cli-chat-proxy.grok.com/v1/billing`, nur wenn `~/.grok/auth.json` existiert; Kosten n/v | n/v | xAI Management-API, Keychain `xai-management` + `xai-team-id` |
 
 Lokale Logs werden inkrementell gelesen (Byte-Offsets und mtimes in `~/.config/ai-usage-deck/state.json`).
 Der erste Lauf liest nur Dateien, die in den letzten 7 Tagen geändert wurden; ältere werden nur markiert.
 Tagessummen werden 35 Tage aufbewahrt. Der Keychain-Eintrag `github-copilot-app` wird nie gelesen.
-
-## API-Schlüssel anlegen (optional, nur für die API-Kosten)
-
-Jeder Schlüssel über das verdeckte Eingabefenster in den Schlüsselbund:
-
-```bash
-bash ~/Documents/ClaudeCode-Terminal\&Scripting/tools/apikey_setzen.sh anthropic-admin     # sk-ant-admin01-…  (Anthropic Console → Admin Keys, nur Org-Konten)
-bash ~/Documents/ClaudeCode-Terminal\&Scripting/tools/apikey_setzen.sh openai-admin        # sk-admin-…        (nur Org-Owner)
-bash ~/Documents/ClaudeCode-Terminal\&Scripting/tools/apikey_setzen.sh github-billing-pat  # Fine-grained PAT „Plan: read“
-bash ~/Documents/ClaudeCode-Terminal\&Scripting/tools/apikey_setzen.sh xai-management      # xAI Console → Management Keys
-bash ~/Documents/ClaudeCode-Terminal\&Scripting/tools/apikey_setzen.sh xai-team-id         # Team-ID als „Passwort“
-```
-
-Das Plugin liest mit `security find-generic-password -s <dienst> -a supreme -w` (5 s Timeout, nie interaktiv).
-Fehlt ein Eintrag, zeigt die Taste `Key fehlt` – kein Fehler. Prüfen: `node bin/cli.js doctor`.
 
 ## Bauen, installieren, neu starten
 
@@ -130,11 +175,14 @@ Logs des Plugins: `~/Library/Application Support/com.elgato.StreamDeck/Plugins/t
 ## CLI
 
 ```bash
-node bin/cli.js status            # Tabelle aller Anbieter (Abo, Abo-Quelle, Reset, Tokens heute/Woche, API Monat)
+node bin/cli.js status            # Tabelle aller Anbieter (Abo, Abo-Quelle, Reset, Tokens heute/Woche, Kosten)
 node bin/cli.js status --fresh    # wie status, aber Abo-Werte nicht aus dem 55-s-Cache (Cooldown gilt trotzdem)
-node bin/cli.js sync              # Vollabgleich, hängt je Anbieter eine Zeile an history.jsonl
+node bin/cli.js status --api      # zusätzlich Spalte „API Monat“ (liest die Admin-Schlüssel, nur Enterprise/Teams)
+node bin/cli.js sync              # Vollabgleich, hängt je Anbieter eine Zeile an history.jsonl (API-Kosten nur für state.json → apiProviders)
 node bin/cli.js sync --scheduled  # wie sync, überspringt, wenn der Sonntag-20:00-Slot schon erledigt ist
-node bin/cli.js doctor            # prüft jede Anmeldequelle: found / missing / invalid / warn (ohne Geheimnisse auszugeben)
+node bin/cli.js sync --api        # wie sync, API-Kosten für alle Anbieter
+node bin/cli.js doctor            # prüft jede Anmeldequelle: found / missing / invalid / warn (ohne Geheimnisse auszugeben); API-Schlüssel als info, ungeprüft
+node bin/cli.js doctor --api      # wie doctor, prüft zusätzlich die optionalen API-Schlüssel im Schlüsselbund
 node bin/cli.js resets            # alle anstehenden Resets aufsteigend (Anbieter, Fenster, Ortszeit, Countdown, Verbrauch) + Blink-Bedingung
 node bin/cli.js resets --window 48  # wie resets, Blink-Fenster 48 h statt 24 h
 ```
@@ -148,11 +196,13 @@ Plugin und CLI nutzen denselben Code (`src/providers`, `src/collectors`). Umgebu
 |---|---|
 | Abo-Limits | je Anbieter alle 120 s ± 10 s (Start versetzt um 4 s je Anbieter), solange mindestens eine Taste sichtbar ist; ein guter Wert jünger als 55 s wird aus `state.json` wiederverwendet (Plugin und CLI teilen ihn) |
 | Lokale Tokens | alle 15 min |
-| API-Kosten | alle 6 h |
+| Abo-Kosten | mit jedem Abo-Abruf (dieselbe Antwort) |
+| API-Kosten | alle 6 h, nur für Anbieter mit `showApiCost` |
 | Vollabgleich | Sonntag 20:00 lokal (im Plugin zwischen 20:00 und 20:59) + beim Start, wenn der letzte älter als 7 Tage ist; zusätzlich launchd `tech.farpoint.ai-usage.sync` (`sync --scheduled`) |
 
 Ein Lock (`reconcile.lock`) und der Slot-Check verhindern doppelte Zeilen, wenn Plugin und launchd gleichzeitig laufen.
 `history.jsonl`: `{ts, week, provider, sub_pct, sub_reset, tokens_week_in, tokens_week_out, tokens_week_cached, api_usd_mtd, status}`.
+Ohne eingeschaltete API-Kosten ist `api_usd_mtd` `null` und `status` endet auf `api:aus`.
 
 ## Warum 429 und was tun
 
@@ -197,7 +247,13 @@ So geht dieses Plugin mit 429 um (gilt für alle Abo-Endpunkte: Claude, Codex, C
   Annahmen: `total_input_tokens` enthält Cache-Tokens; ein Sitzungs-Zuwachs wird dem Tag von `updated_at` zugerechnet.
 - **Claude/Codex Abo-Endpunkte** sind inoffiziell und können sich ändern. Bei abgelaufenem Claude-Token zeigt
   die Taste `login` – das Plugin erneuert das Token nicht selbst (das macht Claude Code beim nächsten Start).
-- API-Kosten-Abfragen (Anthropic, OpenAI, GitHub-Billing, xAI) sind implementiert, aber mangels Schlüssel nicht live getestet.
+- API-Kosten-Abfragen (Anthropic, OpenAI, GitHub-Billing, xAI) sind implementiert, aber mangels Schlüssel nicht live getestet
+  (für persönliche Abos ohne Belang, standardmäßig aus).
+- Abo-Kosten: Codex-Credits und Copilot-Overage sind heute `0`; wie die Felder aussehen, wenn tatsächlich Credits gekauft
+  oder Overage erlaubt sind, ist nicht gesehen (nur die Live-Form mit Nullwerten). Was das Claude-Budget (`limit_dollars`)
+  fachlich ist, sagt die Antwort nicht; angezeigt wird es als „Budget“.
+- Die API-Kosten-Einstellung gilt pro Taste. Welche Anbieter eingeschaltet sind, merkt sich das Plugin für alle Tasten, die
+  seit dem Start sichtbar waren; eine gelöschte Taste mit Häkchen bleibt bis zum Plugin-Neustart in `apiProviders`.
 - Kacheln sind als SVG gerendert und nur per Test geprüft, noch nicht auf einem echten Stream Deck angesehen
   (auch die Sanduhr, der `~`-Marker und die Taste „Nächste Resets“ mit Blinken und `+N`-Badge nicht).
 - „Nächste Resets“: Claude `Extra` erscheint erst, wenn die API ein Reset-Feld in `extra_usage` liefert (Feldname
@@ -216,8 +272,9 @@ So geht dieses Plugin mit 429 um (gilt für alle Abo-Endpunkte: Claude, Codex, C
 - [ ] Nicht genutzte Claude-Usage-Plugins (Liste unter „Warum 429“) in der Stream-Deck-App deaktivieren – Philipp – hoch
 - [ ] Bei echtem 429 am Gerät prüfen: Wert bleibt sichtbar, `~ vor …` unten, Sanduhr oben rechts – Philipp – mittel
 - [ ] Prüfen, ob Stream Deck 7.5 `Nodejs.Version "24"` annimmt, sonst `"20"` – Philipp – hoch
-- [ ] Admin-Schlüssel anlegen, die genutzt werden sollen (`anthropic-admin`, `openai-admin`, …) und `doctor` erneut laufen lassen – Philipp – mittel
-- [ ] API-Kosten-Abfragen mit echten Schlüsseln verifizieren (Einheiten Cent/Dollar, Paging) – Claude/Entwicklung – mittel
+- [ ] Kosten-Kachel und Kosten-Zeile der Übersicht am Gerät prüfen (Lesbarkeit von `251 / 250 $`, sechste Zeile) – Philipp – mittel
+- [ ] In claude.ai → Einstellungen → Nutzung prüfen, ob das Extra-Limit 25 € beträgt (Plugin teilt durch `10^decimal_places`) – Philipp – mittel
+- [ ] Klären, was das Claude-Budget 250 $ (heute `iguana_necktie`, 251 $ verbraucht, Reset 05.11.) ist, und ggf. den Namen „Budget“ anpassen – Philipp – niedrig
 - [ ] Nach erster Gemini-CLI-Antwort prüfen, ob `tokens`-Felder in `session-*.jsonl` stehen – Entwicklung – niedrig
 - [ ] Grok: `grok login` ausführen und Format von `~/.grok/auth.json` + Billing-Antwort verifizieren – Philipp – niedrig
 - [ ] Gemini-Abo-Quota über Antigravity-Login (Phase 2) – Entwicklung – niedrig

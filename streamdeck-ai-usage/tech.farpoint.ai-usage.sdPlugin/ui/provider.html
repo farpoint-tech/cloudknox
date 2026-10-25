@@ -20,12 +20,16 @@
 				<option value="auto">auto</option>
 				<option value="sub">Abo-Limit %</option>
 				<option value="tokens">Tokens heute</option>
-				<option value="api">API-Kosten Monat</option>
+				<option value="kosten">Kosten (Abo: Extra, Budget, Credits)</option>
+				<option value="api">API-Kosten Monat (nur mit Häkchen unten)</option>
 			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item label="API-Kosten">
+			<sdpi-checkbox setting="showApiCost" label="anzeigen (nur Enterprise/Teams, Admin-Key nötig)"></sdpi-checkbox>
 		</sdpi-item>
 		<sdpi-item label="Bedienung">
 			<p style="margin: 0; font-size: 9pt; color: #9a9a9a">
-				Kurz drücken: aktualisieren. Lang drücken (≥ 0,6 s): Anzeige wechseln.
+				Kurz drücken: aktualisieren. Lang drücken (≥ 0,6 s): Anzeige wechseln (auto → Abo → Tokens → Kosten, mit API-Kosten zusätzlich → API).
 			</p>
 		</sdpi-item>
 	</body>

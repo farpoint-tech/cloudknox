@@ -2,7 +2,7 @@
 
 ## Ziel
 Ein Stream-Deck-Plugin (Elgato SDK v2, Node 20+, TypeScript), das pro Anbieter
-Abo-Verbrauch UND API-Kosten anzeigt. Eine Taste je Anbieter, eine Übersichtstaste.
+Abo-Verbrauch UND Abo-Kosten anzeigt (API-Kosten nur optional, Enterprise/Teams). Eine Taste je Anbieter, eine Übersichtstaste.
 Abgleich: bei jedem Refresh (Abo-Limits) plus voller Kosten-Abgleich jeden Sonntag 20:00 lokal.
 
 Plugin-UUID: `tech.farpoint.ai-usage`  — Ablage: `streamdeck-ai-usage/` (dieser Ordner)
@@ -16,8 +16,10 @@ Plugin-UUID: `tech.farpoint.ai-usage`  — Ablage: `streamdeck-ai-usage/` (diese
   → JSON `.claudeAiOauth.accessToken`, `.expiresAt` (ms), `.subscriptionType` ("max"), `.refreshToken`
   Fallback-Datei `~/.claude/.credentials.json`. Nie den Refresh selbst machen wenn Claude Code läuft — bei 401 "Claude Code öffnen" anzeigen.
 - Response: `five_hour.utilization` (%), `five_hour.resets_at`, `seven_day.utilization`, `seven_day.resets_at`,
-  `extra_usage.{is_enabled,monthly_limit,used_credits,utilization,currency}`, `limits[]` mit `kind` session/weekly_all.
-  Sonstige Felder (iguana_necktie etc.) ignorieren.
+  `extra_usage.{is_enabled,monthly_limit,used_credits,utilization,currency,decimal_places,disabled_reason,spend_limit_reached}`,
+  `limits[]` mit `kind` session/weekly_all, `spend.{used,limit}.{amount_minor,currency,exponent}`.
+  Objekte der obersten Ebene mit `limit_dollars/used_dollars/remaining_dollars/utilization/resets_at` (heute `iguana_necktie`:
+  250 / 251,21 $, Reset 2026-11-05) → Kosten-Posten „Budget“, Namen nicht fest verdrahtet (siehe „Kosten“).
 - Lokale Tokens: `~/.claude/projects/**/*.jsonl` — Zeilen mit `message.usage` {input_tokens, cache_creation_input_tokens,
   cache_read_input_tokens, output_tokens}, `message.model`, `timestamp`. Dedupe über `message.id`+`requestId`.
 
@@ -26,16 +28,17 @@ Plugin-UUID: `tech.farpoint.ai-usage`  — Ablage: `streamdeck-ai-usage/` (diese
 - Headers: `Authorization: Bearer <tokens.access_token>`, `ChatGPT-Account-Id: <tokens.account_id>`
 - Token: `~/.codex/auth.json` → `.tokens.access_token`, `.tokens.account_id`, `.OPENAI_API_KEY` (optional)
 - Response: `plan_type`, `rate_limit.primary_window.{used_percent,limit_window_seconds,reset_at}`,
-  `rate_limit.secondary_window` (kann null), `credits.balance`
+  `rate_limit.secondary_window` (kann null), `credits.{has_credits,unlimited,overage_limit_reached,balance}`,
+  `spend_control.{reached,individual_limit}`, `rate_limit_reset_credits.{available_count}`
 - Lokale Tokens: `~/.codex/sessions/YYYY/MM/DD/*.jsonl` — `payload.type=="token_count"` →
   `payload.info.total_token_usage` (letzter Wert je Session = Sessionsumme), `payload.rate_limits`.
 
-### GitHub Copilot (Abo)  ⚠️ Token aktuell ungültig
+### GitHub Copilot (Abo)  ✅ (gh-Token seit 2026-10-25 wieder gültig)
 - GET https://api.github.com/copilot_internal/user, `Authorization: Bearer <gh-token>`, `Accept: application/json`
 - Token: `gh auth token` (Keychain-Eintrag `gh:github.com`). Stand 2026-10-25: gh meldet "token in keyring is invalid" →
   Nutzer muss `gh auth refresh -h github.com` ausführen. Plugin zeigt dann "gh login".
   NICHT den Keychain-Eintrag `github-copilot-app` lesen (löst Keychain-Dialog aus).
-- Response (laut Community): `quota_snapshots.premium_interactions.{entitlement,remaining,percent_remaining,unlimited}`, `quota_reset_date`, `copilot_plan`.
+- Response (live 2026-10-25): `quota_snapshots.{premium_interactions,chat,completions}.{entitlement,remaining,percent_remaining,unlimited,overage_count,overage_permitted}`, `quota_reset_date`, `copilot_plan`.
 - Lokale Tokens: `~/.copilot/data.db` (SQLite) Tabelle `sessions` → `total_input_tokens,total_output_tokens,total_cached_tokens,model,created_at,updated_at`.
 
 ### Gemini (Abo)  ⚠️ nur teilweise
@@ -52,13 +55,37 @@ Plugin-UUID: `tech.farpoint.ai-usage`  — Ablage: `streamdeck-ai-usage/` (diese
   GET https://cli-chat-proxy.grok.com/v1/billing?format=credits (`creditUsagePercent`, currentPeriod),
   `/v1/user?include=subscription`, https://grok.com/rest/subscriptions. Implementieren, aber "grok login" anzeigen bis Datei da ist.
 
-### API-Kosten (Monat bis heute)  — Schlüssel nötig, Details aus RESEARCH.md
+### Kosten (Abo-Kosten statt API)  ✅ live 2026-10-25
+Entscheidung Inhaber: nur persönliche Abos, Admin-Schlüssel gibt es nur für Enterprise/Teams. Metrik `kosten` ersetzt `api`
+im Zyklus `auto|sub|tokens|kosten`. Quelle sind die ohnehin geholten Abo-Antworten; `SubPart.cost: CostItem[]` wird mit
+`lastSub` gespeichert (Stale-Regeln des Gates unverändert).
+- `CostItem {label, used?, limit?, currency?, pct?, state?, resetAt?, reached?, unlimited?, note?}` (`src/providers/types.ts`),
+  Formatierung in `src/cost.ts`.
+- Claude `extra_usage` → `Extra`: `used_credits`/`monthly_limit` ÷ 10^`decimal_places` (2500 bei 2 Stellen = 25,00 €,
+  bestätigt durch `spend.limit.amount_minor 2500, exponent 2`), `state` „aus“ wenn `!is_enabled` (`note` = `disabled_reason`),
+  „Limit erreicht“ bei `spend_limit_reached`.
+- Claude Budgets → `Budget`: jedes Objekt der obersten Ebene (kein Array) mit `limit_dollars > 0`; `pct` = `utilization`,
+  sonst used/limit; `reached` bei used ≥ limit oder `remaining_dollars == 0`; `resets_at` zusätzlich als ResetEvent `Budget`.
+- Codex → `Credits` (`balance`, Limit `spend_control.individual_limit`, „unbegrenzt“, „Limit erreicht“ bei `spend_control.reached`
+  oder `credits.overage_limit_reached`), `Reset-Credits` nur bei `available_count > 0`.
+- Copilot → `Overage` (`premium_interactions.overage_count`, „aus“ wenn `!overage_permitted`).
+- Gemini/Grok → `n/v`.
+- Taste: Betrag groß (`251 / 250 $`), Label/Limit klein (`Budget 100%`, `Extra aus`), Balken aus `pct`, unten Reset oder
+  Alter, `· +N` für weitere Posten. Gezeigt wird ein Posten mit erreichtem Limit, sonst einer > 0, sonst der erste.
+- Übersicht: sechste Zeile nur wenn ein Posten > 0 oder ein Limit erreicht ist (`CL 251 / 250 $`, gelb bei Limit).
+- CLI `status`: Spalte „Kosten“ statt „API Monat“.
+
+### API-Kosten (optional, nur Enterprise/Teams)  — Schlüssel nötig, Details aus RESEARCH.md
+- Standard aus. Eingeschaltet je Taste über Setting `showApiCost` (Zyklus dann `…|kosten|api`); nur dann werden die
+  Keychain-Dienste gelesen. Eingeschaltete Anbieter → `state.json` `apiProviders` (für den Sonntagsabgleich).
+  CLI: `status --api`, `sync --api`, `doctor --api`; `doctor` führt die Schlüssel sonst ungeprüft als `info` unter
+  „optional (nur Enterprise/Teams)“.
 - Anthropic Admin API cost_report (Admin-Key `sk-ant-admin…`, Keychain-Dienst `anthropic-admin`)
 - OpenAI organization costs (Admin-Key, Keychain-Dienst `openai-admin`)
 - xAI (Keychain-Dienst `xai-api`) — falls Endpunkt existiert
 - Gemini API — laut Research; sonst "n/v"
-- Schlüssel ausschließlich per `security find-generic-password -s <dienst> -w`. Fehlt der Eintrag → Taste zeigt "Key fehlt",
-  kein Fehler-Spam. Anlegen durch Nutzer: `bash tools/apikey_setzen.sh <dienst>`.
+- Schlüssel ausschließlich per `security find-generic-password -s <dienst> -w`. Fehlt der Eintrag bei eingeschaltetem
+  `showApiCost` → Taste zeigt "Key fehlt", kein Fehler-Spam. Anlegen durch Nutzer: `bash tools/apikey_setzen.sh <dienst>`.
 
 ## Architektur
 ```
@@ -72,7 +99,8 @@ streamdeck-ai-usage/
     keychain.ts                      # security find-generic-password Wrapper, 5s timeout, nie interaktiv (-a <user>)
     scheduler.ts                     # refresh je Anbieter 120s ±10s (Abo, 55-s-Cache + 429-Cooldown in subgate.ts), 15min (lokale Tokens), Sonntag 20:00 voller API-Abgleich
     store.ts                         # ~/.config/ai-usage-deck/state.json + history.jsonl (Wochen-Snapshots)
-    actions/provider-key.ts          # Key-Action: Settings {provider, metric: sub|tokens|api|auto}
+    actions/provider-key.ts          # Key-Action: Settings {provider, metric: auto|sub|tokens|kosten|api, showApiCost}
+    cost.ts                          # Kosten-Posten: Betrag/Label-Formatierung, Auswahl, CLI-Text
     actions/overview-key.ts          # alle Anbieter kompakt
     actions/resets-key.ts            # "Nächste Resets" (tech.farpoint.ai-usage.resets), Blink-Timer 1 s
     resets.ts                        # ResetEvent-Auswahl, Sortierung, Blink-Regel, Countdown-/Ortszeit-Format
@@ -82,7 +110,7 @@ streamdeck-ai-usage/
 ```
 - Build: `@elgato/cli` (npx) + rollup/esbuild, `@elgato/streamdeck` v1.x. Software.MinimumVersion "6.5".
 - Keine externen Runtime-Deps außer `better-sqlite3`-Alternative: `node:sqlite` (Node 22+) oder `sqlite3` CLI per execFile — CLI bevorzugen, kein Native-Build.
-- Taste-Druck: Refresh sofort. Langer Druck: Umschalten Metrik (Abo % / Tokens heute / API € Monat).
+- Taste-Druck: Refresh sofort. Langer Druck: Umschalten Metrik (Abo % / Tokens heute / Kosten; API nur mit `showApiCost`).
 - Fehlerzustände sichtbar: "login", "Key fehlt", "offline", "n/v" — nie leere Kachel, nie stale ohne Alter (zeige "vor 3h").
 - Wochen-Sync Sonntag 20:00: im Plugin-Scheduler (setInterval + Zeitfenster-Check, Nachholen beim Start wenn verpasst)
   UND launchd-Agent `tech.farpoint.ai-usage.sync.plist` als Backup, der `node bin/cli.js sync` ausführt.
@@ -104,4 +132,4 @@ streamdeck-ai-usage/
 - CLI: `node bin/cli.js resets [--window <h>]` listet alle anstehenden Resets aufsteigend und meldet die Blink-Bedingung.
 
 ## Nicht in v1
-Grok Abo ohne auth.json, Gemini Abo-Quota (Antigravity-Login), Copilot Overage-Abrechnung.
+Grok Abo ohne auth.json, Gemini Abo-Quota (Antigravity-Login), Copilot Overage-Abrechnung in Dollar (nur Anzahl `overage_count`).

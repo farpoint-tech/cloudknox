@@ -1,5 +1,104 @@
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
 
+// src/format.ts
+var pad = (n) => String(n).padStart(2, "0");
+function localDay(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function startOfToday(now = /* @__PURE__ */ new Date()) {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+function startOfWeek(now = /* @__PURE__ */ new Date()) {
+  const d = startOfToday(now);
+  const dow = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - dow);
+  return d;
+}
+function startOfMonth(now = /* @__PURE__ */ new Date()) {
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+function isoWeek(now = /* @__PURE__ */ new Date()) {
+  const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 864e5 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${pad(week)}`;
+}
+function lastSundaySlot(now = /* @__PURE__ */ new Date()) {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  if (d.getTime() > now.getTime()) d.setDate(d.getDate() - 7);
+  return d;
+}
+var comma = (s) => s.replace(".", ",");
+function fmtTokens(n) {
+  if (n < 1e3) return String(Math.round(n));
+  if (n < 1e6) return comma((n / 1e3).toFixed(n < 1e4 ? 1 : 0)) + "k";
+  if (n < 1e9) return comma((n / 1e6).toFixed(n < 1e7 ? 1 : 0)) + "M";
+  return comma((n / 1e9).toFixed(1)) + "G";
+}
+function fmtUsd(n) {
+  return "$ " + comma(n.toFixed(2));
+}
+function span(ms) {
+  const m = Math.max(0, Math.round(ms / 6e4));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h${pad(m % 60)}`;
+  return `${Math.floor(h / 24)}d${h % 24}h`;
+}
+function fmtCountdown(resetIso, now = Date.now()) {
+  const t = Date.parse(resetIso);
+  if (!Number.isFinite(t)) return "";
+  return "\u21BB " + span(t - now);
+}
+function fmtAge(iso, now = Date.now()) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  const m = Math.round((now - t) / 6e4);
+  if (m < 1) return "jetzt";
+  if (m < 60) return `vor ${m}m`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `vor ${h}h`;
+  return `vor ${Math.round(h / 24)}d`;
+}
+function fmtWait(ms) {
+  const m = Math.max(1, Math.ceil(ms / 6e4));
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h${pad(m % 60)}`;
+}
+
+// src/cost.ts
+var COST_SOURCE = { claude: true, codex: true, copilot: true, gemini: false, grok: false };
+var SYMBOL = { EUR: "\u20AC", USD: "$", GBP: "\xA3" };
+function fmtNum(n) {
+  const whole = Math.abs(n) >= 100 || Math.abs(n - Math.round(n)) < 5e-3;
+  const s = whole ? String(Math.round(Math.abs(n))) : Math.abs(n).toFixed(2);
+  const [int, dec] = s.split(".");
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return (n < 0 ? "-" : "") + grouped + (dec ? "," + dec : "");
+}
+function currencySymbol(currency) {
+  if (!currency) return "";
+  return SYMBOL[currency.toUpperCase()] ?? currency.toUpperCase();
+}
+function costAmount(c) {
+  if (c.unlimited && c.limit === void 0) return "\u221E";
+  const sym = currencySymbol(c.currency);
+  const used = c.used === void 0 ? "?" : fmtNum(c.used);
+  const body = c.limit === void 0 ? used : `${used} / ${fmtNum(c.limit)}`;
+  return sym ? `${body} ${sym}` : body;
+}
+function costCli(c, now = Date.now()) {
+  const parts = [`${c.label} ${costAmount(c)}`];
+  const flags = [c.state, c.note].filter(Boolean);
+  if (flags.length) parts.push(`(${flags.join(", ")})`);
+  else if (c.pct !== void 0) parts.push(`${Math.round(c.pct)}%`);
+  if (c.resetAt) parts.push(fmtCountdown(c.resetAt, now));
+  return parts.join(" ");
+}
+
 // src/doctor.ts
 import fs9 from "node:fs/promises";
 
@@ -185,7 +284,7 @@ var PROVIDER_DISPLAY = {
   grok: "Grok"
 };
 var WEEKDAY = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
-var pad = (n) => String(n).padStart(2, "0");
+var pad2 = (n) => String(n).padStart(2, "0");
 function resetWindowName(seconds) {
   if (!seconds) return "?";
   if (seconds <= 24 * 3600) return `${Math.round(seconds / 3600)}h`;
@@ -248,76 +347,7 @@ function fmtResetCountdown(resetIso, now = Date.now()) {
 }
 function fmtResetFull(resetIso) {
   const d = new Date(resetIso);
-  return `${WEEKDAY[d.getDay()]} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}. ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// src/format.ts
-var pad2 = (n) => String(n).padStart(2, "0");
-function localDay(d) {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-function startOfToday(now = /* @__PURE__ */ new Date()) {
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-}
-function startOfWeek(now = /* @__PURE__ */ new Date()) {
-  const d = startOfToday(now);
-  const dow = (d.getDay() + 6) % 7;
-  d.setDate(d.getDate() - dow);
-  return d;
-}
-function startOfMonth(now = /* @__PURE__ */ new Date()) {
-  return new Date(now.getFullYear(), now.getMonth(), 1);
-}
-function isoWeek(now = /* @__PURE__ */ new Date()) {
-  const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-  const day = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 864e5 + 1) / 7);
-  return `${d.getUTCFullYear()}-W${pad2(week)}`;
-}
-function lastSundaySlot(now = /* @__PURE__ */ new Date()) {
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0, 0);
-  d.setDate(d.getDate() - d.getDay());
-  if (d.getTime() > now.getTime()) d.setDate(d.getDate() - 7);
-  return d;
-}
-var comma = (s) => s.replace(".", ",");
-function fmtTokens(n) {
-  if (n < 1e3) return String(Math.round(n));
-  if (n < 1e6) return comma((n / 1e3).toFixed(n < 1e4 ? 1 : 0)) + "k";
-  if (n < 1e9) return comma((n / 1e6).toFixed(n < 1e7 ? 1 : 0)) + "M";
-  return comma((n / 1e9).toFixed(1)) + "G";
-}
-function fmtUsd(n) {
-  return "$ " + comma(n.toFixed(2));
-}
-function span(ms) {
-  const m = Math.max(0, Math.round(ms / 6e4));
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 48) return `${h}h${pad2(m % 60)}`;
-  return `${Math.floor(h / 24)}d${h % 24}h`;
-}
-function fmtCountdown(resetIso, now = Date.now()) {
-  const t = Date.parse(resetIso);
-  if (!Number.isFinite(t)) return "";
-  return "\u21BB " + span(t - now);
-}
-function fmtAge(iso, now = Date.now()) {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "";
-  const m = Math.round((now - t) / 6e4);
-  if (m < 1) return "jetzt";
-  if (m < 60) return `vor ${m}m`;
-  const h = Math.round(m / 60);
-  if (h < 48) return `vor ${h}h`;
-  return `vor ${Math.round(h / 24)}d`;
-}
-function fmtWait(ms) {
-  const m = Math.max(1, Math.ceil(ms / 6e4));
-  if (m < 60) return `${m}m`;
-  return `${Math.floor(m / 60)}h${pad2(m % 60)}`;
+  return `${WEEKDAY[d.getDay()]} ${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}. ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 // src/store.ts
@@ -738,6 +768,55 @@ function claudeResets(json) {
   const extra = pick(json, "extra_usage");
   const extraAt = isoOrUndefined(pick(extra, "resets_at") ?? pick(extra, "reset_at") ?? pick(extra, "next_reset_at") ?? pick(extra, "period_end"));
   if (extraAt) out.push({ provider: "claude", window: "Extra", resetsAt: extraAt, pct: num(pick(extra, "utilization")) });
+  for (const b of claudeBudgets(json)) {
+    if (b.resetAt) out.push({ provider: "claude", window: "Budget", resetsAt: b.resetAt, pct: b.pct });
+  }
+  return out;
+}
+function claudeBudgets(json) {
+  const out = [];
+  if (!json || typeof json !== "object") return out;
+  for (const v of Object.values(json)) {
+    if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+    const limit = num(pick(v, "limit_dollars"));
+    if (limit === void 0 || limit <= 0) continue;
+    const used = num(pick(v, "used_dollars"));
+    const remaining = num(pick(v, "remaining_dollars"));
+    const pct = num(pick(v, "utilization")) ?? (used !== void 0 ? used / limit * 100 : void 0);
+    const item = { label: "Budget", used, limit, currency: "USD", pct, resetAt: isoOrUndefined(pick(v, "resets_at")) };
+    item.reached = used !== void 0 && used >= limit || remaining === 0;
+    out.push(item);
+  }
+  return out;
+}
+function claudeCost(json) {
+  const out = [];
+  const extra = pick(json, "extra_usage");
+  if (extra && typeof extra === "object") {
+    const dp = num(pick(extra, "decimal_places")) ?? 0;
+    const scale = (v) => {
+      const n = num(v);
+      return n === void 0 ? void 0 : n / 10 ** dp;
+    };
+    const enabled = pick(extra, "is_enabled") === true;
+    const reached = pick(extra, "spend_limit_reached") === true;
+    const currency = pick(extra, "currency");
+    const item = {
+      label: "Extra",
+      used: scale(pick(extra, "used_credits")),
+      limit: scale(pick(extra, "monthly_limit")),
+      currency: typeof currency === "string" ? currency : void 0,
+      pct: num(pick(extra, "utilization")),
+      reached,
+      resetAt: isoOrUndefined(pick(extra, "resets_at") ?? pick(extra, "reset_at") ?? pick(extra, "next_reset_at") ?? pick(extra, "period_end"))
+    };
+    if (reached) item.state = "Limit erreicht";
+    else if (!enabled) item.state = "aus";
+    const reason = pick(extra, "disabled_reason");
+    if (!enabled && typeof reason === "string") item.note = reason;
+    out.push(item);
+  }
+  out.push(...claudeBudgets(json));
   return out;
 }
 function sumAnthropicCost(json) {
@@ -769,7 +848,7 @@ var claude = {
       return subOnly("claude", { ...h, detail: h.status === "login" ? "Claude Code \xF6ffnen" : h.detail, plan: cred.plan, fetchedAt });
     }
     const w = mapClaudeUsage(r.json);
-    const sub = { status: w.primary ? "ok" : "error", ...w, plan: cred.plan, resets: claudeResets(r.json), fetchedAt };
+    const sub = { status: w.primary ? "ok" : "error", ...w, plan: cred.plan, resets: claudeResets(r.json), cost: claudeCost(r.json), fetchedAt };
     if (!w.primary) sub.detail = "five_hour fehlt";
     return subOnly("claude", sub);
   }, (detail) => subOnly("claude", { status: "error", detail, fetchedAt: nowIso() })),
@@ -848,6 +927,20 @@ function codexResets(json) {
   }
   return out;
 }
+function codexCost(json) {
+  const credits = pick(json, "credits");
+  const spend = pick(json, "spend_control");
+  if (!credits && !spend) return [];
+  const unlimited = pick(credits, "unlimited") === true;
+  const reached = pick(spend, "reached") === true || pick(credits, "overage_limit_reached") === true;
+  const item = { label: "Credits", used: num(pick(credits, "balance")), limit: num(pick(spend, "individual_limit")), unlimited, reached };
+  if (reached) item.state = "Limit erreicht";
+  else if (unlimited) item.state = "unbegrenzt";
+  const out = [item];
+  const resetCredits = num(pick(json, "rate_limit_reset_credits", "available_count"));
+  if (resetCredits !== void 0 && resetCredits > 0) out.push({ label: "Reset-Credits", used: resetCredits });
+  return out;
+}
 function sumOpenAICost(json) {
   let usd = 0;
   const data = pick(json, "data");
@@ -872,7 +965,7 @@ var codex = {
     const m = mapCodexUsage(r.json);
     if (!m.primary) return subOnly("codex", { status: "error", detail: "rate_limit fehlt", plan: m.plan, fetchedAt });
     if (m.secondary && m.secondary.pct > m.primary.pct) [m.primary, m.secondary] = [m.secondary, m.primary];
-    return subOnly("codex", { status: "ok", ...m, resets: codexResets(r.json), fetchedAt });
+    return subOnly("codex", { status: "ok", ...m, resets: codexResets(r.json), cost: codexCost(r.json), fetchedAt });
   }, (detail) => subOnly("codex", { status: "error", detail, fetchedAt: nowIso() })),
   localTokens: (sinceIso) => localTokensFor("codex", sinceIso),
   apiCost: (monthStartIso) => guard(async () => {
@@ -948,6 +1041,15 @@ function copilotResets(json) {
   if (!at) return [];
   return [{ provider: "copilot", window: "Monat", resetsAt: at, pct: mapCopilotUser(json).primary?.pct }];
 }
+function copilotCost(json) {
+  const q = pick(json, "quota_snapshots", "premium_interactions");
+  const count = num(pick(q, "overage_count"));
+  if (!q || count === void 0) return [];
+  const permitted = pick(q, "overage_permitted") === true;
+  const item = { label: "Overage", used: count, reached: false };
+  if (!permitted) item.state = "aus";
+  return [item];
+}
 function sumCopilotBilling(json) {
   const items = pick(json, "usageItems");
   if (!Array.isArray(items)) return 0;
@@ -966,7 +1068,7 @@ var copilot = {
     }
     const m = mapCopilotUser(r.json);
     if (!m.primary) return subOnly("copilot", { status: "error", detail: "quota_snapshots fehlt", plan: m.plan, fetchedAt });
-    return subOnly("copilot", { status: "ok", ...m, resets: copilotResets(r.json), fetchedAt });
+    return subOnly("copilot", { status: "ok", ...m, resets: copilotResets(r.json), cost: copilotCost(r.json), fetchedAt });
   }, (detail) => subOnly("copilot", { status: "error", detail, fetchedAt: nowIso() })),
   localTokens: (sinceIso) => localTokensFor("copilot", sinceIso),
   apiCost: (monthStartIso) => guard(async () => {
@@ -1179,16 +1281,20 @@ async function exists(p) {
     return false;
   }
 }
-async function keyCheck(provider, service, prefix) {
-  const r = await readSecret(service);
+var OPTIONAL_NOTE = "optional (nur Enterprise/Teams)";
+async function keyCheck(provider, service, probe2, prefix) {
   const source = `Keychain "${service}"`;
-  if (r.status === "missing") return { provider, source, result: "missing", note: `bash tools/apikey_setzen.sh ${service}` };
-  if (r.status === "error") return { provider, source, result: "invalid", note: r.detail };
-  if (prefix && !r.value.startsWith(prefix)) return { provider, source, result: "invalid", note: `erwartet Pr\xE4fix ${prefix}\u2026` };
-  return { provider, source, result: "found" };
+  const base = { provider, source, group: "optional" };
+  if (!probe2) return { ...base, result: "info", note: "nicht gepr\xFCft (doctor --api pr\xFCft)" };
+  const r = await readSecret(service);
+  if (r.status === "missing") return { ...base, result: "info", note: `nicht angelegt \u2013 nur n\xF6tig mit showApiCost: bash tools/apikey_setzen.sh ${service}` };
+  if (r.status === "error") return { ...base, result: "invalid", note: r.detail };
+  if (prefix && !r.value.startsWith(prefix)) return { ...base, result: "invalid", note: `erwartet Pr\xE4fix ${prefix}\u2026` };
+  return { ...base, result: "found" };
 }
-async function doctor() {
+async function doctor(opts = {}) {
   const out = [];
+  const api = !!opts.api;
   const cc = await readClaudeCred();
   if (cc.status === "found") {
     const left = cc.expiresAt ? Math.round((cc.expiresAt - Date.now()) / 6e4) : void 0;
@@ -1200,11 +1306,11 @@ async function doctor() {
     });
   } else out.push({ provider: "claude", source: `Keychain "${CLAUDE_KEYCHAIN}"`, result: cc.status, note: cc.detail });
   out.push(subCheck("claude", "GET api.anthropic.com/api/oauth/usage", await probe("claude")));
-  out.push(await keyCheck("claude", ANTHROPIC_ADMIN, "sk-ant-admin"));
+  out.push(await keyCheck("claude", ANTHROPIC_ADMIN, api, "sk-ant-admin"));
   const xc = await readCodexCred();
   out.push({ provider: "codex", source: "~/.codex/auth.json", result: xc.status, note: xc.status === "found" ? xc.accountId ? "account_id vorhanden" : "account_id fehlt" : xc.detail });
   out.push(subCheck("codex", "GET chatgpt.com/backend-api/wham/usage", await probe("codex")));
-  out.push(await keyCheck("codex", OPENAI_ADMIN, "sk-admin-"));
+  out.push(await keyCheck("codex", OPENAI_ADMIN, api, "sk-admin-"));
   const gt = await readGhToken();
   out.push({ provider: "copilot", source: "gh auth token", result: gt.status, note: gt.status === "found" ? void 0 : gt.detail });
   if (gt.status === "found") {
@@ -1212,7 +1318,7 @@ async function doctor() {
   }
   out.push({ provider: "copilot", source: "~/.copilot/data.db", result: await exists(COPILOT_DB) ? "found" : "missing" });
   out.push({ provider: "copilot", source: SQLITE_BIN, result: await exists(SQLITE_BIN) ? "found" : "missing" });
-  out.push(await keyCheck("copilot", GITHUB_BILLING_PAT));
+  out.push(await keyCheck("copilot", GITHUB_BILLING_PAT, api));
   out.push({ provider: "gemini", source: "~/.gemini/oauth_creds.json", result: await exists(GEMINI_OAUTH) ? "found" : "missing", note: "Abo-Quota in v1 n/v" });
   const chats = await listFiles(GEMINI_TMP, (n) => n.startsWith("session-") && n.endsWith(".jsonl"));
   let withUsage = 0;
@@ -1224,8 +1330,8 @@ async function doctor() {
   const gk = await readGrokCred();
   out.push({ provider: "grok", source: "~/.grok/auth.json", result: gk.status, note: gk.status === "found" ? void 0 : gk.detail });
   if (gk.status === "found") out.push(subCheck("grok", "GET cli-chat-proxy.grok.com/v1/billing", await probe("grok")));
-  out.push(await keyCheck("grok", XAI_MANAGEMENT));
-  out.push(await keyCheck("grok", XAI_TEAM_ID));
+  out.push(await keyCheck("grok", XAI_MANAGEMENT, api));
+  out.push(await keyCheck("grok", XAI_TEAM_ID, api));
   let writable = true;
   try {
     await fs9.mkdir(CONFIG_DIR, { recursive: true });
@@ -1247,6 +1353,30 @@ var Hub = class {
    * because a known reset time stays true until it has passed; passed ones are dropped by allResets().
    */
   resetsBy = /* @__PURE__ */ new Map();
+  /**
+   * Providers whose API-key costs are fetched (setting showApiCost, CLI --api). Empty by default: personal
+   * subscriptions have no admin keys, and keychain services are only probed for providers in this set.
+   */
+  apiProviders = /* @__PURE__ */ new Set();
+  /**
+   * Replaces the set of API-cost providers. Providers switched off lose their API value; newly switched-on ones
+   * are fetched. `persist` stores the set in state.json for the weekly reconcile (plugin only).
+   */
+  async setApiProviders(ids, opts = {}) {
+    const next = new Set(ids);
+    const added = [...next].filter((id) => !this.apiProviders.has(id));
+    const changed = added.length > 0 || [...this.apiProviders].some((id) => !next.has(id));
+    this.apiProviders = next;
+    if (!changed) return;
+    for (const id of PROVIDER_IDS) if (!next.has(id)) delete this.views.get(id).api;
+    this.emit();
+    if (opts.persist) {
+      await withState((s) => {
+        s.apiProviders = PROVIDER_IDS.filter((id) => next.has(id));
+      }).catch(() => void 0);
+    }
+    if (added.length) await this.refreshApi(added);
+  }
   /** Remembers the resets of a SubPart that carries a value. */
   noteResets(id, sub) {
     if (sub?.primary) this.resetsBy.set(id, resetsOf(id, sub));
@@ -1307,9 +1437,12 @@ var Hub = class {
       this.emit();
     }
   }
+  /** API-key costs, only for providers in apiProviders (no keychain access otherwise). */
   async refreshApi(ids = PROVIDER_IDS) {
+    const enabled = ids.filter((id) => this.apiProviders.has(id));
+    if (enabled.length === 0) return;
     await Promise.all(
-      ids.map(async (id) => {
+      enabled.map(async (id) => {
         const res = (await PROVIDERS[id].apiCost(startOfMonth().toISOString())).api;
         const view = this.views.get(id);
         const prev = view.api;
@@ -1337,17 +1470,18 @@ async function reconcile(opts = {}) {
         return { ran: false, reason: "dieser Sonntag-Slot ist bereits abgeglichen" };
       }
     }
+    const apiIds = new Set(opts.api ?? (await loadState()).apiProviders ?? []);
     const now = /* @__PURE__ */ new Date();
     const weekIso = startOfWeek(now).toISOString();
     const monthIso = startOfMonth(now).toISOString();
     const lines = [];
     for (const id of PROVIDER_IDS) {
       const p = PROVIDERS[id];
-      const [sub, api] = await Promise.all([p.subscription(), p.apiCost(monthIso)]);
+      const [sub, api] = await Promise.all([p.subscription(), apiIds.has(id) ? p.apiCost(monthIso) : void 0]);
       const tok = await p.localTokens(weekIso);
       const s = sub.sub;
       const t = tok.tokens;
-      const a = api.api;
+      const a = api?.api;
       const tOk = t.status === "ok";
       lines.push({
         ts: now.toISOString(),
@@ -1358,8 +1492,8 @@ async function reconcile(opts = {}) {
         tokens_week_in: tOk ? t.in : null,
         tokens_week_out: tOk ? t.out : null,
         tokens_week_cached: tOk ? t.cached : null,
-        api_usd_mtd: a.usd ?? null,
-        status: `sub:${s.status} tokens:${t.status} api:${a.status}`
+        api_usd_mtd: a?.usd ?? null,
+        status: `sub:${s.status} tokens:${t.status} api:${a ? a.status : "aus"}`
       });
     }
     await appendHistory(lines);
@@ -1414,6 +1548,14 @@ function tokCell(t) {
   if (t.status !== "ok") return STATUS_TEXT[t.status];
   return `${fmtTokens(t.in + t.out)} +${fmtTokens(t.cached)} cache`;
 }
+function costCell(id, v, now) {
+  if (!COST_SOURCE[id]) return "n/v";
+  const s = v.sub;
+  if (!s) return "\u2026";
+  if (!s.cost) return s.primary ? "n/v" : STATUS_TEXT[s.status];
+  if (s.cost.length === 0) return "keine";
+  return (s.status === "ok" ? "" : "~ ") + s.cost.map((c) => costCli(c, now)).join(" \xB7 ");
+}
 function notes(v) {
   const n = [];
   if (v.sub && v.sub.status !== "ok" && v.sub.detail) n.push(`Abo: ${v.sub.detail}`);
@@ -1421,23 +1563,27 @@ function notes(v) {
   if (v.api && v.api.status !== "ok" && v.api.detail) n.push(`API: ${v.api.detail}`);
   return n.join("; ");
 }
-async function status(fresh) {
+async function status(fresh, api) {
   const hub = new Hub();
+  if (api) hub.apiProviders = new Set(PROVIDER_IDS);
   const t0 = Date.now();
   await hub.refreshAll(void 0, { force: fresh });
-  const rows = [["Anbieter", "Abo", "Abo-Quelle", "Reset", "Tokens heute", "Tokens Woche", "API Monat", "Hinweise"]];
+  const head = ["Anbieter", "Abo", "Abo-Quelle", "Reset", "Tokens heute", "Tokens Woche", "Kosten"];
+  const rows = [api ? [...head, "API Monat", "Hinweise"] : [...head, "Hinweise"]];
   for (const id of PROVIDER_IDS) {
     const v = hub.views.get(id);
-    rows.push([
+    const row = [
       META[id].name,
       subCell(v),
       sourceCell(v, Date.now()),
       v.sub?.status === "ok" && v.sub.primary?.resetAt ? fmtCountdown(v.sub.primary.resetAt) : "",
       tokCell(v.today),
       tokCell(v.week),
-      v.api ? v.api.usd !== void 0 ? fmtUsd(v.api.usd) : STATUS_TEXT[v.api.status] : "\u2026",
-      notes(v)
-    ]);
+      costCell(id, v, Date.now())
+    ];
+    if (api) row.push(v.api ? v.api.usd !== void 0 ? fmtUsd(v.api.usd) : STATUS_TEXT[v.api.status] : "\u2026");
+    row.push(notes(v));
+    rows.push(row);
   }
   console.log(table(rows));
   const reused = PROVIDER_IDS.filter((id) => hub.views.get(id).sub?.source === "cache");
@@ -1484,8 +1630,8 @@ Blink-Bedingung (> ${BLINK_MIN_EVENTS} Resets in den n\xE4chsten ${hours} h): ${
   });
   if (without.length) console.log(`Ohne Reset-Daten: ${without.join(", ")}.`);
 }
-async function sync(scheduled) {
-  const r = await reconcile({ scheduled });
+async function sync(scheduled, api) {
+  const r = await reconcile({ scheduled, api: api ? PROVIDER_IDS : void 0 });
   if (!r.ran) {
     console.log(`sync \xFCbersprungen: ${r.reason}`);
     return;
@@ -1494,15 +1640,20 @@ async function sync(scheduled) {
   console.log(`
 ${r.lines.length} Zeilen an ${HISTORY_FILE} angeh\xE4ngt.`);
 }
-async function runDoctor() {
-  const checks = await doctor();
-  console.log(table([["Anbieter", "Quelle", "Ergebnis", "Hinweis"], ...checks.map((c) => [c.provider, c.source, c.result, c.note ?? ""])]));
+async function runDoctor(api) {
+  const checks = await doctor({ api });
+  const head = ["Anbieter", "Quelle", "Ergebnis", "Hinweis"];
+  const rowOf = (c) => [c.provider, c.source, c.result, c.note ?? ""];
+  console.log(table([head, ...checks.filter((c) => !c.group).map(rowOf)]));
+  console.log(`
+API-Kosten-Schl\xFCssel \u2013 ${OPTIONAL_NOTE}, f\xFCr pers\xF6nliche Abos nicht n\xF6tig (Taste: Einstellung showApiCost):`);
+  console.log(table([head, ...checks.filter((c) => c.group === "optional").map(rowOf)]));
 }
 var [cmd, ...args] = process.argv.slice(2);
 var commands = {
-  status: () => status(args.includes("--fresh")),
-  sync: () => sync(args.includes("--scheduled")),
-  doctor: runDoctor,
+  status: () => status(args.includes("--fresh"), args.includes("--api")),
+  sync: () => sync(args.includes("--scheduled"), args.includes("--api")),
+  doctor: () => runDoctor(args.includes("--api")),
   resets: () => {
     const i = args.indexOf("--window");
     return resets(i >= 0 ? args[i + 1] : void 0);
@@ -1510,7 +1661,7 @@ var commands = {
 };
 var fn = commands[cmd ?? ""];
 if (!fn) {
-  console.log("Usage: node bin/cli.js <status [--fresh]|sync [--scheduled]|doctor|resets [--window <h>]>");
+  console.log("Usage: node bin/cli.js <status [--fresh] [--api]|sync [--scheduled] [--api]|doctor [--api]|resets [--window <h>]>");
   process.exitCode = cmd ? 2 : 0;
 } else {
   fn().catch((e) => {

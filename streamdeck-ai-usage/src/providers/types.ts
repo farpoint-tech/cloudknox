@@ -30,6 +30,31 @@ export interface ResetEvent {
 	pct?: number;
 }
 
+/**
+ * One cost/budget figure of a subscription, taken from the same response as the quota windows
+ * (Claude extra_usage + dollar budgets, Codex credits, Copilot overage). Persisted with lastSub.
+ */
+export interface CostItem {
+	/** "Extra", "Budget", "Credits", "Overage". */
+	label: string;
+	/** Amount used; for Codex credits the balance. Money in `currency`, otherwise a count. */
+	used?: number;
+	limit?: number;
+	/** ISO 4217 code ("EUR", "USD"); absent = a count, not money. */
+	currency?: string;
+	/** Utilization in percent (drawn as bar). */
+	pct?: number;
+	/** State text: "aus", "unbegrenzt", "Limit erreicht". */
+	state?: string;
+	resetAt?: string;
+	/** A limit is reached / spending is blocked. */
+	reached?: boolean;
+	/** No limit (Codex credits unlimited). */
+	unlimited?: boolean;
+	/** Raw reason for the CLI, e.g. extra_usage.disabled_reason "out_of_credits". */
+	note?: string;
+}
+
 export interface SubPart {
 	status: Status;
 	/** Primary window (the one drawn as bar). */
@@ -38,6 +63,8 @@ export interface SubPart {
 	plan?: string;
 	/** Every reset this endpoint reports (persisted with the last good value in state.json → lastSub). */
 	resets?: ResetEvent[];
+	/** Subscription costs/budgets from the same response; [] = endpoint reports none. */
+	cost?: CostItem[];
 	detail?: string;
 	fetchedAt: string;
 	/** Where the value came from in this refresh: network, shared 55 s cache, or last-good fallback. */

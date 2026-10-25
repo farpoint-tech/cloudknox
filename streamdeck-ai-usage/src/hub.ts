@@ -24,6 +24,31 @@ export class Hub {
 	 * because a known reset time stays true until it has passed; passed ones are dropped by allResets().
 	 */
 	readonly resetsBy = new Map<ProviderId, ResetEvent[]>();
+	/**
+	 * Providers whose API-key costs are fetched (setting showApiCost, CLI --api). Empty by default: personal
+	 * subscriptions have no admin keys, and keychain services are only probed for providers in this set.
+	 */
+	apiProviders = new Set<ProviderId>();
+
+	/**
+	 * Replaces the set of API-cost providers. Providers switched off lose their API value; newly switched-on ones
+	 * are fetched. `persist` stores the set in state.json for the weekly reconcile (plugin only).
+	 */
+	async setApiProviders(ids: Iterable<ProviderId>, opts: { persist?: boolean } = {}): Promise<void> {
+		const next = new Set(ids);
+		const added = [...next].filter((id) => !this.apiProviders.has(id));
+		const changed = added.length > 0 || [...this.apiProviders].some((id) => !next.has(id));
+		this.apiProviders = next;
+		if (!changed) return;
+		for (const id of PROVIDER_IDS) if (!next.has(id)) delete this.views.get(id)!.api;
+		this.emit();
+		if (opts.persist) {
+			await withState((s) => {
+				s.apiProviders = PROVIDER_IDS.filter((id) => next.has(id));
+			}).catch(() => undefined);
+		}
+		if (added.length) await this.refreshApi(added);
+	}
 
 	/** Remembers the resets of a SubPart that carries a value. */
 	private noteResets(id: ProviderId, sub: SubPart | undefined): void {
@@ -94,9 +119,12 @@ export class Hub {
 		}
 	}
 
+	/** API-key costs, only for providers in apiProviders (no keychain access otherwise). */
 	async refreshApi(ids: ProviderId[] = PROVIDER_IDS): Promise<void> {
+		const enabled = ids.filter((id) => this.apiProviders.has(id));
+		if (enabled.length === 0) return;
 		await Promise.all(
-			ids.map(async (id) => {
+			enabled.map(async (id) => {
 				const res = (await PROVIDERS[id].apiCost(startOfMonth().toISOString())).api!;
 				const view = this.views.get(id)!;
 				const prev = view.api;

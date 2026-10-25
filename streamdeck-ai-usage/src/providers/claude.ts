@@ -4,7 +4,7 @@ import { readSecret } from "../keychain.js";
 import { CLAUDE_CRED_FILE } from "../paths.js";
 import { isoOrUndefined } from "../resets.js";
 import { httpStatus, localTokensFor } from "./common.js";
-import { apiOnly, guard, monthLabel, nowIso, subOnly, type Provider, type ResetEvent, type SubPart, type Window } from "./types.js";
+import { apiOnly, guard, monthLabel, nowIso, subOnly, type CostItem, type Provider, type ResetEvent, type SubPart, type Window } from "./types.js";
 
 export const CLAUDE_KEYCHAIN = "Claude Code-credentials";
 export const ANTHROPIC_ADMIN = "anthropic-admin";
@@ -57,6 +57,67 @@ export function claudeResets(json: unknown): ResetEvent[] {
 	const extra = pick(json, "extra_usage");
 	const extraAt = isoOrUndefined(pick(extra, "resets_at") ?? pick(extra, "reset_at") ?? pick(extra, "next_reset_at") ?? pick(extra, "period_end"));
 	if (extraAt) out.push({ provider: "claude", window: "Extra", resetsAt: extraAt, pct: num(pick(extra, "utilization")) });
+	for (const b of claudeBudgets(json)) {
+		if (b.resetAt) out.push({ provider: "claude", window: "Budget", resetsAt: b.resetAt, pct: b.pct });
+	}
+	return out;
+}
+
+/**
+ * Every top-level object carrying `limit_dollars > 0` (live 2026-10-25: an object named `iguana_necktie`,
+ * limit 250, used 251.2). The key names are internal and change, so none is hard-coded.
+ * five_hour/seven_day carry limit_dollars: null and are skipped.
+ */
+export function claudeBudgets(json: unknown): CostItem[] {
+	const out: CostItem[] = [];
+	if (!json || typeof json !== "object") return out;
+	for (const v of Object.values(json as Record<string, unknown>)) {
+		if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+		const limit = num(pick(v, "limit_dollars"));
+		if (limit === undefined || limit <= 0) continue;
+		const used = num(pick(v, "used_dollars"));
+		const remaining = num(pick(v, "remaining_dollars"));
+		const pct = num(pick(v, "utilization")) ?? (used !== undefined ? (used / limit) * 100 : undefined);
+		const item: CostItem = { label: "Budget", used, limit, currency: "USD", pct, resetAt: isoOrUndefined(pick(v, "resets_at")) };
+		item.reached = (used !== undefined && used >= limit) || remaining === 0;
+		out.push(item);
+	}
+	return out;
+}
+
+/**
+ * Subscription costs of GET /api/oauth/usage: extra_usage (amounts in minor units, scaled by decimal_places –
+ * live 2026-10-25: monthly_limit 2500, decimal_places 2 = 25,00 EUR, matching spend.limit.amount_minor/exponent)
+ * plus the dollar budgets of claudeBudgets().
+ */
+export function claudeCost(json: unknown): CostItem[] {
+	const out: CostItem[] = [];
+	const extra = pick(json, "extra_usage");
+	if (extra && typeof extra === "object") {
+		const dp = num(pick(extra, "decimal_places")) ?? 0;
+		const scale = (v: unknown) => {
+			const n = num(v);
+			return n === undefined ? undefined : n / 10 ** dp;
+		};
+		const enabled = pick(extra, "is_enabled") === true;
+		const reached = pick(extra, "spend_limit_reached") === true;
+		const currency = pick(extra, "currency");
+		const item: CostItem = {
+			label: "Extra",
+			used: scale(pick(extra, "used_credits")),
+			limit: scale(pick(extra, "monthly_limit")),
+			currency: typeof currency === "string" ? currency : undefined,
+			pct: num(pick(extra, "utilization")),
+			reached,
+			resetAt: isoOrUndefined(pick(extra, "resets_at") ?? pick(extra, "reset_at") ?? pick(extra, "next_reset_at") ?? pick(extra, "period_end")),
+		};
+		if (reached) item.state = "Limit erreicht";
+		else if (!enabled) item.state = "aus";
+		const reason = pick(extra, "disabled_reason");
+		if (!enabled && typeof reason === "string") item.note = reason;
+		out.push(item);
+	}
+	out.push(...claudeBudgets(json));
 	return out;
 }
 
@@ -94,7 +155,7 @@ export const claude: Provider = {
 				return subOnly("claude", { ...h, detail: h.status === "login" ? "Claude Code öffnen" : h.detail, plan: cred.plan, fetchedAt });
 			}
 			const w = mapClaudeUsage(r.json);
-			const sub: SubPart = { status: w.primary ? "ok" : "error", ...w, plan: cred.plan, resets: claudeResets(r.json), fetchedAt };
+			const sub: SubPart = { status: w.primary ? "ok" : "error", ...w, plan: cred.plan, resets: claudeResets(r.json), cost: claudeCost(r.json), fetchedAt };
 			if (!w.primary) sub.detail = "five_hour fehlt";
 			return subOnly("claude", sub);
 		}, (detail) => subOnly("claude", { status: "error", detail, fetchedAt: nowIso() })),

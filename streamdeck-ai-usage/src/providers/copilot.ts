@@ -5,7 +5,7 @@ import { readSecret } from "../keychain.js";
 import { GH_CANDIDATES } from "../paths.js";
 import { isoOrUndefined } from "../resets.js";
 import { httpStatus, localTokensFor } from "./common.js";
-import { apiOnly, guard, monthLabel, nowIso, subOnly, type Provider, type ResetEvent, type Window } from "./types.js";
+import { apiOnly, guard, monthLabel, nowIso, subOnly, type CostItem, type Provider, type ResetEvent, type Window } from "./types.js";
 
 export const GITHUB_BILLING_PAT = "github-billing-pat";
 
@@ -65,6 +65,20 @@ export function copilotResets(json: unknown): ResetEvent[] {
 	return [{ provider: "copilot", window: "Monat", resetsAt: at, pct: mapCopilotUser(json).primary?.pct }];
 }
 
+/**
+ * Overage of premium requests: quota_snapshots.premium_interactions.{overage_count, overage_permitted}.
+ * Live 2026-10-25 (plan individual): overage_count 0, overage_permitted false. A count, not money.
+ */
+export function copilotCost(json: unknown): CostItem[] {
+	const q = pick(json, "quota_snapshots", "premium_interactions");
+	const count = num(pick(q, "overage_count"));
+	if (!q || count === undefined) return [];
+	const permitted = pick(q, "overage_permitted") === true;
+	const item: CostItem = { label: "Overage", used: count, reached: false };
+	if (!permitted) item.state = "aus";
+	return [item];
+}
+
 /** Sums premium_request usage netAmount (dollars). */
 export function sumCopilotBilling(json: unknown): number {
 	const items = pick(json, "usageItems");
@@ -87,7 +101,7 @@ export const copilot: Provider = {
 			}
 			const m = mapCopilotUser(r.json);
 			if (!m.primary) return subOnly("copilot", { status: "error", detail: "quota_snapshots fehlt", plan: m.plan, fetchedAt });
-			return subOnly("copilot", { status: "ok", ...m, resets: copilotResets(r.json), fetchedAt });
+			return subOnly("copilot", { status: "ok", ...m, resets: copilotResets(r.json), cost: copilotCost(r.json), fetchedAt });
 		}, (detail) => subOnly("copilot", { status: "error", detail, fetchedAt: nowIso() })),
 
 	localTokens: (sinceIso) => localTokensFor("copilot", sinceIso),

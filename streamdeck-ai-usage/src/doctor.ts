@@ -31,6 +31,8 @@ export interface Check {
 	source: string;
 	result: "found" | "missing" | "invalid" | "ok" | "info" | "warn";
 	note?: string;
+	/** "optional": API-key costs (admin keys exist only for Enterprise/Teams accounts); listed separately as info. */
+	group?: "optional";
 }
 
 async function exists(p: string): Promise<boolean> {
@@ -42,18 +44,27 @@ async function exists(p: string): Promise<boolean> {
 	}
 }
 
-/** Keychain entry presence + optional prefix sanity check. Never returns the value. */
-async function keyCheck(provider: string, service: string, prefix?: string): Promise<Check> {
-	const r = await readSecret(service);
+export const OPTIONAL_NOTE = "optional (nur Enterprise/Teams)";
+
+/**
+ * API-key entry (admin keys for API costs). Without `probe` the keychain is not touched: personal subscriptions
+ * have no admin keys, so the entry is listed as info. With `probe` (doctor --api): presence + prefix check,
+ * a missing entry is still info, never "missing". Never returns the value.
+ */
+async function keyCheck(provider: string, service: string, probe: boolean, prefix?: string): Promise<Check> {
 	const source = `Keychain "${service}"`;
-	if (r.status === "missing") return { provider, source, result: "missing", note: `bash tools/apikey_setzen.sh ${service}` };
-	if (r.status === "error") return { provider, source, result: "invalid", note: r.detail };
-	if (prefix && !r.value.startsWith(prefix)) return { provider, source, result: "invalid", note: `erwartet Präfix ${prefix}…` };
-	return { provider, source, result: "found" };
+	const base = { provider, source, group: "optional" as const };
+	if (!probe) return { ...base, result: "info", note: "nicht geprüft (doctor --api prüft)" };
+	const r = await readSecret(service);
+	if (r.status === "missing") return { ...base, result: "info", note: `nicht angelegt – nur nötig mit showApiCost: bash tools/apikey_setzen.sh ${service}` };
+	if (r.status === "error") return { ...base, result: "invalid", note: r.detail };
+	if (prefix && !r.value.startsWith(prefix)) return { ...base, result: "invalid", note: `erwartet Präfix ${prefix}…` };
+	return { ...base, result: "found" };
 }
 
-export async function doctor(): Promise<Check[]> {
+export async function doctor(opts: { api?: boolean } = {}): Promise<Check[]> {
 	const out: Check[] = [];
+	const api = !!opts.api;
 
 	// Claude
 	const cc = await readClaudeCred();
@@ -67,13 +78,13 @@ export async function doctor(): Promise<Check[]> {
 		});
 	} else out.push({ provider: "claude", source: `Keychain "${CLAUDE_KEYCHAIN}"`, result: cc.status, note: cc.detail });
 	out.push(subCheck("claude", "GET api.anthropic.com/api/oauth/usage", await probe("claude")));
-	out.push(await keyCheck("claude", ANTHROPIC_ADMIN, "sk-ant-admin"));
+	out.push(await keyCheck("claude", ANTHROPIC_ADMIN, api, "sk-ant-admin"));
 
 	// Codex
 	const xc = await readCodexCred();
 	out.push({ provider: "codex", source: "~/.codex/auth.json", result: xc.status, note: xc.status === "found" ? (xc.accountId ? "account_id vorhanden" : "account_id fehlt") : xc.detail });
 	out.push(subCheck("codex", "GET chatgpt.com/backend-api/wham/usage", await probe("codex")));
-	out.push(await keyCheck("codex", OPENAI_ADMIN, "sk-admin-"));
+	out.push(await keyCheck("codex", OPENAI_ADMIN, api, "sk-admin-"));
 
 	// Copilot
 	const gt = await readGhToken();
@@ -83,7 +94,7 @@ export async function doctor(): Promise<Check[]> {
 	}
 	out.push({ provider: "copilot", source: "~/.copilot/data.db", result: (await exists(COPILOT_DB)) ? "found" : "missing" });
 	out.push({ provider: "copilot", source: SQLITE_BIN, result: (await exists(SQLITE_BIN)) ? "found" : "missing" });
-	out.push(await keyCheck("copilot", GITHUB_BILLING_PAT));
+	out.push(await keyCheck("copilot", GITHUB_BILLING_PAT, api));
 
 	// Gemini
 	out.push({ provider: "gemini", source: "~/.gemini/oauth_creds.json", result: (await exists(GEMINI_OAUTH)) ? "found" : "missing", note: "Abo-Quota in v1 n/v" });
@@ -99,8 +110,8 @@ export async function doctor(): Promise<Check[]> {
 	const gk = await readGrokCred();
 	out.push({ provider: "grok", source: "~/.grok/auth.json", result: gk.status, note: gk.status === "found" ? undefined : gk.detail });
 	if (gk.status === "found") out.push(subCheck("grok", "GET cli-chat-proxy.grok.com/v1/billing", await probe("grok")));
-	out.push(await keyCheck("grok", XAI_MANAGEMENT));
-	out.push(await keyCheck("grok", XAI_TEAM_ID));
+	out.push(await keyCheck("grok", XAI_MANAGEMENT, api));
+	out.push(await keyCheck("grok", XAI_TEAM_ID, api));
 
 	// Local config dir
 	let writable = true;
