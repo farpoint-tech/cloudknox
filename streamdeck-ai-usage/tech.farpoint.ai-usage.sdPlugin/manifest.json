@@ -1,0 +1,86 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+	"UUID": "tech.farpoint.ai-usage",
+	"Name": "AI Usage",
+	"Version": "1.0.0.0",
+	"Author": "farpoint",
+	"Description": "Abo-Verbrauch, lokale Tokens und API-Kosten für Claude, Codex, Copilot, Gemini und Grok.",
+	"Category": "AI Usage",
+	"CategoryIcon": "imgs/plugin/category",
+	"Icon": "imgs/plugin/icon",
+	"CodePath": "bin/plugin.js",
+	"SDKVersion": 3,
+	"Software": {
+		"MinimumVersion": "7.1"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "13"
+		}
+	],
+	"Nodejs": {
+		"Version": "24",
+		"Debug": "enabled"
+	},
+	"Actions": [
+		{
+			"UUID": "tech.farpoint.ai-usage.provider",
+			"Name": "Anbieter",
+			"Tooltip": "Drücken: aktualisieren. Lang drücken: Anzeige wechseln (auto/Abo/Tokens/API).",
+			"Icon": "imgs/actions/provider/icon",
+			"PropertyInspectorPath": "ui/provider.html",
+			"Controllers": [
+				"Keypad",
+				"Encoder"
+			],
+			"Encoder": {
+				"layout": "$B1",
+				"TriggerDescription": {
+					"Rotate": "Anzeige wechseln",
+					"Push": "Aktualisieren"
+				}
+			},
+			"States": [
+				{
+					"Image": "imgs/actions/provider/key",
+					"ShowTitle": false
+				}
+			],
+			"UserTitleEnabled": false
+		},
+		{
+			"UUID": "tech.farpoint.ai-usage.overview",
+			"Name": "Übersicht",
+			"Tooltip": "Alle Anbieter kompakt. Drücken: alles aktualisieren.",
+			"Icon": "imgs/actions/overview/icon",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/overview/key",
+					"ShowTitle": false
+				}
+			],
+			"UserTitleEnabled": false
+		},
+		{
+			"UUID": "tech.farpoint.ai-usage.resets",
+			"Name": "Nächste Resets",
+			"Tooltip": "Die zwei nächsten Abo-Resets. Drücken: aktualisieren. Lang drücken: Blinken 1 h stumm/wieder an.",
+			"Icon": "imgs/actions/resets/icon",
+			"PropertyInspectorPath": "ui/resets.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/resets/key",
+					"ShowTitle": false
+				}
+			],
+			"UserTitleEnabled": false
+		}
+	]
+}

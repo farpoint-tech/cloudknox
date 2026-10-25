@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="de">
+	<head>
+		<meta charset="utf-8" />
+		<title>AI Usage – Anbieter</title>
+		<script src="sdpi-components.js"></script>
+	</head>
+	<body>
+		<sdpi-item label="Anbieter">
+			<sdpi-select setting="provider" default="claude">
+				<option value="claude">Claude</option>
+				<option value="codex">ChatGPT / Codex</option>
+				<option value="copilot">GitHub Copilot</option>
+				<option value="gemini">Gemini</option>
+				<option value="grok">Grok</option>
+			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item label="Anzeige">
+			<sdpi-select setting="metric" default="auto">
+				<option value="auto">auto</option>
+				<option value="sub">Abo-Limit %</option>
+				<option value="tokens">Tokens heute</option>
+				<option value="api">API-Kosten Monat</option>
+			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item label="Bedienung">
+			<p style="margin: 0; font-size: 9pt; color: #9a9a9a">
+				Kurz drücken: aktualisieren. Lang drücken (≥ 0,6 s): Anzeige wechseln.
+			</p>
+		</sdpi-item>
+	</body>
+</html>

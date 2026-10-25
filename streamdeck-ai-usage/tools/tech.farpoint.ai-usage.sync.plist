@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>tech.farpoint.ai-usage.sync</string>
+	<!-- Runs the CLI copy inside the installed plugin folder (outside ~/Documents, so no TCC prompt). -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/supreme/.nvm/versions/node/v24.17.0/bin/node</string>
+		<string>/Users/supreme/Library/Application Support/com.elgato.StreamDeck/Plugins/tech.farpoint.ai-usage.sdPlugin/bin/cli.js</string>
+		<string>sync</string>
+		<string>--scheduled</string>
+	</array>
+	<!-- Sunday (0) 20:00 local time. A run missed during sleep is executed on wake. -->
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Weekday</key>
+		<integer>0</integer>
+		<key>Hour</key>
+		<integer>20</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/Users/supreme/.nvm/versions/node/v24.17.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>/Users/supreme/.config/ai-usage-deck/launchd.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/supreme/.config/ai-usage-deck/launchd.log</string>
+	<key>RunAtLoad</key>
+	<false/>
+</dict>
+</plist>
