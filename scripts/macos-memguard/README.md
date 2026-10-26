@@ -49,8 +49,8 @@ Der Monitor berücksichtigt zuerst MEMGUARD_CONFIG, dann die Benutzerdatei unter
 | interval | 10 | Sekunden zwischen Prüfungen; 2–300 |
 | warn_free_percent | 20 | Warnung bei Indikator ≤ Wert |
 | critical_free_percent | 10 | Kritisch bei Indikator ≤ Wert |
-| warn_swapfiles | 20 | Warnung ab dieser Anzahl |
-| critical_swapfiles | 40 | Kritisch ab dieser Anzahl |
+| warn_swapfiles | 50 | Warnung ab dieser Anzahl. Auf einem 64-GB-Mac lagen im Normalbetrieb dauerhaft 20–22 Swap-Dateien vor, bei zwei Watchdog-Panics 76 und 82 (MG-12). |
+| critical_swapfiles | 65 | Kritisch ab dieser Anzahl. Vorläufiger Wert unter den gemessenen Panic-Werten; vor Freigabe mit eigenem Workload prüfen. |
 | warn_repeat_seconds | 600 | Wiederholungsabstand der Warnungen |
 | terminate_grace_seconds | 8 | Wartezeit nach SIGTERM |
 | language | en | Sprache der macOS-Mitteilungen: en/de |

@@ -6,13 +6,16 @@ test('threshold boundaries and unknown measurement fail closed',()=>{
   assert.equal(classify(50,0,defaults),'normal');
   assert.equal(classify(20,0,defaults),'warning');
   assert.equal(classify(10,0,defaults),'critical');
-  assert.equal(classify(90,40,defaults),'critical');
+  assert.equal(classify(90,65,defaults),'critical');
+  assert.equal(classify(90,50,defaults),'warning');
+  // MG-12: 20-22 swap files are normal on a 64 GB Mac and must not warn on their own.
+  assert.equal(classify(90,22,defaults),'normal');
   assert.equal(classify(null,0,defaults),'unknown');
   assert.equal(classify(90,null,defaults),'unknown');
 });
 test('strict validation rejects unsafe ranges, types, patterns and missing keys',()=>{
   assert.deepEqual(validateConfig(defaults),defaults);
-  for(const patch of [{interval:0},{interval:'10'},{interval:1.5},{critical_free_percent:20},{warn_swapfiles:40},{targets:['']},{targets:['a\nbc']},{targets:['work','work']},{notifications:'true'},{extra:1},{targets:[' xxxxxx']}]) assert.throws(()=>validateConfig({...defaults,...patch}));
+  for(const patch of [{interval:0},{interval:'10'},{interval:1.5},{critical_free_percent:20},{warn_swapfiles:65},{targets:['']},{targets:['a\nbc']},{targets:['work','work']},{notifications:'true'},{extra:1},{targets:[' xxxxxx']}]) assert.throws(()=>validateConfig({...defaults,...patch}));
   assert.throws(()=>validateConfig({}));
   assert.throws(()=>validateConfig(null));
 });

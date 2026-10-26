@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 const exec = promisify(execFile);
-export const defaults = Object.freeze({language:'en', notifications:true, interval:10, warn_free_percent:20, critical_free_percent:10, warn_swapfiles:20, critical_swapfiles:40, warn_repeat_seconds:600, terminate_grace_seconds:8, targets:[]});
+export const defaults = Object.freeze({language:'en', notifications:true, interval:10, warn_free_percent:20, critical_free_percent:10, warn_swapfiles:50, critical_swapfiles:65, warn_repeat_seconds:600, terminate_grace_seconds:8, targets:[]});
 export function validateConfig(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Konfiguration muss ein Objekt sein.');
   const keys = Object.keys(defaults);
