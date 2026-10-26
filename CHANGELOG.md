@@ -8,7 +8,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [Unreleased]
 
 ### Added
-- **macOS MemGuard (v1.0.0)**: Neues Tool unter `scripts/macos-memguard/`, das Watchdog-Kernel-Panics durch Speicherdruck verhindert. Warnt unter 20 % freiem Speicher und beendet unter 10 % nur konfigurierte Ziel-Prozesse. Reines zsh ohne Abhängigkeiten, Installation pro Nutzer ohne Admin oder per `.pkg` für MDM.
+- **macOS MemGuard (v1.2.0, Entwurf PR #40)**: Neues Tool unter `scripts/macos-memguard/` gegen Watchdog-Kernel-Panics durch Speicherdruck. zsh-Monitor mit Warnung ab 20 % freiem Speicher oder 50 Swap-Dateien und Beendigung ausschließlich konfigurierter eigener Ziel-Prozesse ab 10 % oder 65 Swap-Dateien. Lokale Weboberfläche (Node.js 22+) mit sortierbaren Prozesstabellen, Konfiguration mit Ist/Soll-Bestätigung, Pause und Protokoll. `MemGuard.app` als eigener Mitteilungsabsender, Installation per `install.sh` oder unsigniertem `.pkg`. Ersetzt den Stand 1.0.0 aus PR #39.
 
 ## [2.4.3] - 2026-04-09 CET
 
