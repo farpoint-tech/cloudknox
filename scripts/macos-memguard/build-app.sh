@@ -1,4 +1,8 @@
 #!/bin/zsh
+# KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+#   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+#   userImpact: none       Kein Effekt für Benutzer; baut nur die App.
+#   adminInterference: low Schreibt nur in den Ausgabeordner und temporäre Ordner.
 # Build an actual application; Finder/notification activation opens the dashboard.
 set -eu
 ROOT="${0:A:h}"

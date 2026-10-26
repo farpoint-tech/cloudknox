@@ -1,4 +1,8 @@
 #!/bin/zsh
+# KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+#   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+#   userImpact: medium     Startet nur die Oberfläche. Nach Bestätigung kann sie den Monitor starten, dann gilt dessen schlimmster Pfad.
+#   adminInterference: medium Reversibilität wie Monitor; Konfigurationsänderungen nur mit Ist/Soll-Bestätigung und Sicherungskopie.
 set -eu
 cd "${0:A:h}/app"
 # Finder/LaunchServices does not inherit the interactive shell's PATH.

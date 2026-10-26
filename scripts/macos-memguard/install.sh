@@ -1,4 +1,8 @@
 #!/bin/zsh
+# KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+#   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+#   userImpact: medium     Installiert und startet den Monitor für den aktuellen Benutzer; danach gilt dessen schlimmster Pfad.
+#   adminInterference: medium Reversibilität: LaunchAgent und Konfiguration pro Benutzer, rückgängig mit uninstall.sh.
 # Per-user install of MemGuard. No admin rights needed.
 # Usage: ./install.sh [--config path/to/config.json]
 set -eu

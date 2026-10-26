@@ -1,4 +1,8 @@
 #!/bin/zsh
+# KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+#   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+#   userImpact: medium     Kann bei kritischem Speicher eingetragene eigene Ziel-Prozesse beenden; ungespeicherte Arbeit in diesen Jobs geht verloren.
+#   adminInterference: medium Reversibilität: beendete Jobs lassen sich nur neu starten. Keine Änderung an Sicherheits- oder Systemkonfiguration.
 # MemGuard - reduces risk from memory pressure; cannot prevent every panic.
 # Watches free memory and swap files. Warns early. On critical pressure it
 # terminates ONLY processes matching the configured target patterns.

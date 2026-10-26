@@ -4,7 +4,7 @@ Lokale Speicherüberwachung für macOS mit Weboberfläche. MemGuard kann Speiche
 
 ## Konzept und Weiterentwicklung
 
-[CONCEPT.md](CONCEPT.md) beschreibt Produkt, Architektur und Sicherheitsregeln. [DEVELOPMENT.md](DEVELOPMENT.md) enthält Einstieg, Dateizuständigkeiten, Tests, Build und native Abnahme. [BACKLOG.md](BACKLOG.md) enthält priorisierte Aufgaben MG-01 bis MG-11 mit Verantwortlichkeiten und Abnahmekriterien. Eine neue Entwicklung kann diese Dokumente ohne Chatverlauf übernehmen.
+[CONCEPT.md](CONCEPT.md) beschreibt Produkt, Architektur und Sicherheitsregeln. [DEVELOPMENT.md](DEVELOPMENT.md) enthält Einstieg, Dateizuständigkeiten, Tests, Build und native Abnahme. [BACKLOG.md](BACKLOG.md) enthält priorisierte Aufgaben MG-01 bis MG-14 mit Verantwortlichkeiten und Abnahmekriterien. Eine neue Entwicklung kann diese Dokumente ohne Chatverlauf übernehmen.
 
 ## Mitteilung anklicken → Statistik
 
@@ -39,6 +39,21 @@ Schwarz ist der Standard. Der Schalter oben rechts wechselt zwischen Schwarz und
 Grundlage ist der maßgebliche CI-Steckbrief „CI_farpoint“ (Juli 2026): Orange #FF6A00 für Hauptaktionen, Navy #1E2A47 und Türkis #00CED1 für Status. Die schwarze Basis ist die angeforderte dunkle Variante. Helle Textakzente bzw. dunklere Akzente im Hellmodus sichern die Lesbarkeit. Raleway und IBM Plex Sans werden lokal aus mitgelieferten WOFF2-Dateien geladen; die OFL-Lizenzen liegen unter app/public/fonts. Es entstehen keine Font-CDN-Anfragen.
 
 MemGuard bleibt der Produktname, „powered by farpoint Solution“ benennt den Absender. Die Oberfläche verwendet sachliche Sie-Ansprache. Die Signallogik wurde für diese Gestaltungsänderung nicht verändert.
+
+## Klassifikation
+
+Jedes ausführbare Skript trägt im Kopf einen Block `KLASSIFIKATION` nach dem Nexus.365-Klassifikationsstandard. Der Standard ist für Microsoft-365-Skripte geschrieben. MemGuard greift auf keinen Tenant zu, er wird hier sinngemäß angewendet: Tier 2, weil nur das Endgerät des Benutzers betroffen ist.
+
+| Skript | tier | userImpact | adminInterference | Bestimmende Achse |
+|---|---|---|---|---|
+| `src/memguard` | 2 | medium | medium | Reversibilität: beendete Ziel-Jobs lassen sich nur neu starten |
+| `MemGuard.command` | 2 | medium | medium | Kann nach Bestätigung den Monitor starten |
+| `install.sh` | 2 | medium | medium | Installiert und startet den Monitor, rückgängig mit `uninstall.sh` |
+| `pkg/scripts/postinstall` | 2 | medium | medium | Wirkungsbereich: alle Benutzer eines Geräts |
+| `uninstall.sh` | 2 | low | medium | Entfernt den Schutz, Neuinstallation stellt ihn wieder her |
+| `pkg/scripts/preinstall` | 2 | low | medium | Stoppt kurz den laufenden Dienst |
+| `build-pkg.sh`, `build-app.sh`, `build-release.sh` | 2 | none | low | Schreiben nur in Ausgabe- und Temporärordner |
+| `native/MemGuard.applescript` | 2 | none | low | Zeigt Mitteilungen, entfernt nur die eigene Mitteilungsdatei |
 
 ## Konfiguration
 

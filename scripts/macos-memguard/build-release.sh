@@ -1,4 +1,8 @@
 #!/bin/zsh
+# KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+#   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+#   userImpact: none       Kein Effekt für Benutzer; baut nur das Release-Archiv.
+#   adminInterference: low Schreibt nur nach dist/ und in temporäre Ordner.
 set -eu
 ROOT="${0:A:h}"
 VERSION=$(awk -F'"' '/^VERSION=/{print $2}' "$ROOT/src/memguard")

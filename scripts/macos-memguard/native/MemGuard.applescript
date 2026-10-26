@@ -1,3 +1,7 @@
+-- KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+--   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+--   userImpact: none       Zeigt Mitteilungen und öffnet die lokale Statistik.
+--   adminInterference: low Entfernt nur die eigene, geprüfte Mitteilungsdatei; keine Konfigurationsänderung.
 -- The compiled application owns notifications. Activating it always opens stats.
 on openDashboard()
   set appRoot to POSIX path of (path to me)

@@ -1,4 +1,8 @@
 #!/bin/zsh
+# KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+#   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+#   userImpact: medium     Installiert den Monitor für alle Benutzer des Geräts und startet ihn für den angemeldeten Benutzer.
+#   adminInterference: medium Wirkungsbereich: alle Benutzer eines Geräts; rückgängig mit sudo uninstall.sh.
 # System-wide install: agent runs in every user's GUI session.
 LABEL="tech.farpoint.memguard"
 AGENT="/Library/LaunchAgents/$LABEL.plist"
