@@ -55,6 +55,10 @@ Jedes ausführbare Skript trägt im Kopf einen Block `KLASSIFIKATION` nach dem N
 | `build-pkg.sh`, `build-app.sh`, `build-release.sh` | 2 | none | low | Schreiben nur in Ausgabe- und Temporärordner |
 | `native/MemGuard.applescript` | 2 | none | low | Zeigt Mitteilungen, entfernt nur die eigene Mitteilungsdatei |
 
+## Entwicklungsort
+
+Für CloudKnox gilt sonst die Regel „Command entwickelt, CloudKnox veröffentlicht“: Scripts entstehen in Nexus.365-Command und werden nach Freigabe hierher kopiert. MemGuard ist davon ausgenommen. Entscheidung des Product Owners vom 27.10.2026: MemGuard ist kein Microsoft-365-Tenant-Werkzeug, sondern läuft ausschließlich auf dem Mac des Benutzers. Es wird deshalb direkt in CloudKnox entwickelt, und dieser Ordner ist die maßgebliche Quelle. Die übrigen CloudKnox-Regeln gelten unverändert: keine Kundendaten, keine Secrets, Klassifikations-Header, selbsttragendes README, MIT-Lizenz.
+
 ## Konfiguration
 
 Der Monitor berücksichtigt zuerst MEMGUARD_CONFIG, dann die Benutzerdatei unter `~/Library/Application Support/MemGuard/config.json`, dann die Systemdatei unter `/Library/Application Support/MemGuard/config.json`. Ohne Datei gelten Standardwerte. Die Oberfläche zeigt Benutzer-/Systemkonfiguration und schreibt ausschließlich die Benutzerkonfiguration. Fremde, über einen anderen Konfigurationspfad gestartete Instanzen werden nicht verwaltet.
