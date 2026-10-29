@@ -2,11 +2,11 @@ import http from 'node:http';
 import { readFile, writeFile, mkdir, rename, unlink, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
-import { homedir, platform } from 'node:os';
+import { homedir, platform, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { defaults, validateConfig, classify, command, parseProcesses } from './core.mjs';
+import { defaults, validateConfig, classify, command, parseProcesses, parsePreview } from './core.mjs';
 import { dashboardIdentity, dashboardVersion } from './open-dashboard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -104,6 +104,25 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
         if(path==='/api/session') return send(res,200,{token,version});
         if(path==='/api/status') return send(res,200,await getSample());
         if(path==='/api/log') return send(res,200,{text:await logTail()});
+        if(path==='/api/preview') {
+          // Read-only: lists what the monitor would signal for these patterns; sends no signal.
+          let targets;
+          try { targets=JSON.parse(new URL(req.url,origin).searchParams.get('targets') ?? '[]'); } catch { return send(res,400,{error:'Zielmuster unlesbar.'}); }
+          let base; try { base=(await configuration()).value; } catch { base=defaults; } // invalid saved config: fall back to defaults, patterns are validated below
+          let candidate;
+          try { candidate=validateConfig({...base,targets}); } catch(error) { return send(res,400,{error:errorText(error)}); }
+          const agent=await agentStatus();
+          const monitorPid=agent.state==='running' && Number.isInteger(agent.pid) && agent.pid>1 ? agent.pid : 1;
+          const temp=join(tmpdir(),`memguard-preview-${randomBytes(8).toString('hex')}.json`);
+          let rows;
+          try {
+            await writeFile(temp,JSON.stringify(candidate),{mode:0o600,flag:'wx'});
+            rows=parsePreview(await sampleCommand('/bin/zsh',[resolve(here,'../src/memguard'),'preview',temp,String(monitorPid)],{timeout:20000}));
+          } finally { try { await unlink(temp); } catch(error) { if(error.code!=='ENOENT') throw error; } }
+          // Respond only after the temporary configuration is gone.
+          const counts={};for(const row of rows) counts[row.status]=(counts[row.status]??0)+1;
+          return send(res,200,{monitorPid,monitorSource:agent.source ?? null,rows,counts});
+        }
         if(path==='/api/export') {
           const state=await getSample();
           const {config,processes,...safe}=state;

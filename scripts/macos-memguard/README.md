@@ -27,6 +27,7 @@ Der Start der Oberfläche aktiviert keine Prozessbeendigung und ersetzt keine In
 - Bis zu 100 Prozesse nach RSS, Suche nach Name/PID und Kennzeichnung passender Ziele. Gemeinsamer Speicher kann mehrfach in RSS enthalten sein.
 - Einstellungen mit vollständigem Ist/Soll-Vergleich, expliziter Bestätigung, Sicherungskopie, Konflikterkennung und vollständigem Rücklesen.
 - Pause und Aufheben der Pause mit separater Bestätigung.
+- Treffer-Vorschau in den Einstellungen: „Treffer prüfen“ listet für die eingegebenen Zielmuster alle eigenen Prozesse mit Entscheidung, PID, Name und Muster. Funktioniert auch für noch nicht gespeicherte Muster und sendet kein Signal.
 - Letzte 60 Protokollzeilen. Diagnoseexport ohne Zielpfade, Prozessnamen, Prozess-IDs und rohe Kommandozeilen. Der Export enthält Messwerte, Schwellenwerte und Monitorstatus; vor Weitergabe prüfen.
 - Responsive deutsche Oberfläche, Tastaturbedienung, native Bestätigungsdialoge.
 
@@ -76,7 +77,7 @@ Der Monitor berücksichtigt zuerst MEMGUARD_CONFIG, dann die Benutzerdatei unter
 | notifications | true | macOS-Mitteilungen aktiv |
 | targets | [] | Leere Liste: ausschließlich warnen |
 
-Die Standards sind Ausgangswerte, keine anhand deines Workloads kalibrierten Grenzen. Zielmuster sind einfache Teilstrings vollständiger Kommandozeilen; keine regulären Ausdrücke. Tilde wird zum Benutzerverzeichnis. Verwende eindeutige Projektpfade mit 4–300 Zeichen; höchstens 50 Muster. Ein Muster kann mehrere Prozesse treffen. Die Oberfläche zeigt nur Treffer unter den 100 größten Prozessen. Vor Aktivierung deshalb zusätzlich `memguard status` prüfen.
+Die Standards sind Ausgangswerte, keine anhand deines Workloads kalibrierten Grenzen. Zielmuster sind einfache Teilstrings vollständiger Kommandozeilen; keine regulären Ausdrücke. Tilde wird zum Benutzerverzeichnis. Verwende eindeutige Projektpfade mit 4–300 Zeichen; höchstens 50 Muster. Ein Muster kann mehrere Prozesse treffen. Die Prozessübersicht zeigt nur die 100 größten Prozesse. Vollständig ist die Treffer-Vorschau: in den Einstellungen „Treffer prüfen“ oder im Terminal `memguard preview [config] [monitor-pid]`. Sie nutzt dieselbe Entscheidungsfunktion wie der Signalpfad. Elternprozesse werden gegen den laufenden Monitor geprüft; läuft keiner, ist nur PID 1 als Elternprozess ausgeschlossen.
 
 Ein laufender Monitor lädt Änderungen nach 30 Prüfzyklen neu, bei zehn Sekunden Intervall ungefähr fünf Minuten, bei Signal-Wartezeiten länger. Speichern und Rücklesen beweist noch keine Übernahme durch den laufenden Monitor. Die Oberfläche bestätigt nicht die Version eines externen Monitors.
 

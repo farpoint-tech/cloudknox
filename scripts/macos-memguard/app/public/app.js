@@ -103,6 +103,31 @@ $('#confirm').addEventListener('click',async()=>{if(!pending)return;$('#confirm'
 $('#pause').addEventListener('click',()=>{if(!state)return;const expected=state.paused;const paused=!expected;confirm(paused?'Prozessbeendigung pausieren?':'Prozessbeendigung wieder zulassen?',paused?'Messungen laufen weiter. Der Monitor soll keine Prozesse mehr beenden.':'Bei kritischen Messwerten kann der Monitor passende Ziele beenden. Ungespeicherte Arbeit kann verloren gehen.',`Objekt: ~/.memguard-off\nBetroffene Objekte: 1\nIst: ${expected?'pausiert':'nicht pausiert'}\nSoll: ${paused?'pausiert':'nicht pausiert'}`,async()=>{const result=await api('/api/pause',{paused,expected});success(`Rückprüfung: ${result.paused?'pausiert':'Pause aufgehoben'}.`);});});
 $('#monitor').addEventListener('click',()=>{if(!state)return;const action=state.agent?.source==='app'?'stop':'start';const revision=state.config.revision;confirm(action==='start'?'Monitor starten?':'Monitor stoppen?',action==='start'?'Der Monitor verwendet die unten gezeigten Zielmuster. Bei kritischen Werten sind SIGTERM und danach SIGKILL möglich.':'Nur der von dieser App gestartete Monitor wird beendet.',`Objekt: MemGuard ${state.version}\nBetroffene Objekte: 1 Monitor\nAktion: ${action}\nZiele:\n${state.config.value.targets.join('\n')||'(keine — nur warnen)'}\nPause: ${state.paused?'aktiv':'inaktiv'}`,async()=>{const result=await api('/api/monitor',{action,revision});success(result.message);});});
 $('#config-form').addEventListener('input',()=>{dirty=true;text('#dirty-state','Ungespeicherte Änderungen');});
+const previewLabels={match:'Würde beendet',ancestor:'Ausgeschlossen: Elternprozess des Monitors',self:'Ausgeschlossen: Vorschau selbst',memguard:'Ausgeschlossen: MemGuard',owner:'Ausgeschlossen: anderer Benutzer',gone:'Inzwischen beendet',pid1:'Ausgeschlossen: PID 1',nomatch:'Kein Treffer mehr',invalid:'Ungültige PID'};
+async function previewTargets(){
+  const field=$('#config-form').elements.namedItem('targets');
+  const targets=field.value.split('\n').map(v=>v.trim()).filter(Boolean);
+  const button=$('#preview-targets');button.disabled=true;text('#preview-summary','Prüfe Treffer …');
+  try{
+    const result=await api(`/api/preview?targets=${encodeURIComponent(JSON.stringify(targets))}`);
+    const match=result.counts.match??0,total=result.rows.length,excluded=total-match;
+    const scope=result.monitorPid>1?`Elternprozesse des laufenden Monitors (PID ${result.monitorPid}) sind ausgeschlossen.`:'Kein Monitor läuft: nur PID 1 ist als Elternprozess ausgeschlossen.';
+    text('#preview-summary',targets.length?`${match} würden bei kritischem Speicher beendet, ${excluded} ausgeschlossen. ${scope} Es wurde kein Signal gesendet.`:'Keine Zielmuster: MemGuard würde nur warnen.');
+    const root=$('#preview-result');root.replaceChildren();root.hidden=!total;
+    if(!total)return;
+    const table=document.createElement('table');table.className='preview-table';
+    const head=table.createTHead().insertRow();for(const label of ['Entscheidung','PID','Prozess','Muster']){const th=document.createElement('th');th.scope='col';th.textContent=label;head.append(th);}
+    const body=table.createTBody();
+    const order={match:0};
+    for(const row of [...result.rows].sort((a,b)=>(order[a.status]??1)-(order[b.status]??1)||a.name.localeCompare(b.name))){
+      const tr=body.insertRow();tr.className=row.status==='match'?'preview-match':'preview-excluded';
+      for(const value of [previewLabels[row.status]??row.status,String(row.pid),row.name,row.pattern]){const td=tr.insertCell();td.textContent=value;}
+    }
+    root.append(table);
+  }catch(e){text('#preview-summary','');error(`Treffer-Vorschau fehlgeschlagen: ${e.message}`);}
+  finally{button.disabled=false;}
+}
+$('#preview-targets').addEventListener('click',previewTargets);
 $('#reload-config').addEventListener('click',()=>{if(dirty)confirm('Eingaben verwerfen?','Die gespeicherte Konfiguration wird erneut in das Formular geladen.','Nur ungespeicherte Formulareingaben sind betroffen.',async()=>{fillConfig();});else fillConfig();});
 $('#config-form').addEventListener('submit',event=>{
   event.preventDefault();if(!state||state.config.error){error('Konfiguration nicht verfügbar.');return;}

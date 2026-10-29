@@ -212,3 +212,13 @@ input:focus-visible,select:focus-visible,textarea:focus-visible { outline:2px so
  .theme-toggle { padding:9px 12px; }
  .brand-lockup { font-size:25px; }
 }
+
+.preview-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:12px 0}
+#preview-summary{font-size:12px}
+#preview-result{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.preview-table{width:100%;border-collapse:collapse;font-size:12px}
+.preview-table th{position:sticky;top:0;background:var(--surface);text-align:left;font-size:10px;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line)}
+.preview-table td{padding:7px 10px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+.preview-table tr:last-child td{border-bottom:0}
+.preview-match td:first-child{color:var(--state-warning);font-weight:600}
+.preview-excluded td{color:var(--muted)}

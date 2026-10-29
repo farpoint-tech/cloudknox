@@ -138,21 +138,39 @@ find_targets() { # prints "pid<TAB>args" for matching processes
 
 # Recheck ownership, start time and command before each signal. Exclude ancestors.
 identity() { ps -p "$1" -o uid=,lstart=,args= 2>/dev/null; }
-safe_target() {
-  local pid=$1 ancestor=$$ pat current owner
-  [[ "$pid" == <-> ]] && (( pid > 1 )) || return 1
-  while (( ancestor > 1 )); do
-    [[ "$pid" == "$ancestor" ]] && return 1
-    ancestor=$(ps -p "$ancestor" -o ppid= 2>/dev/null | tr -d ' ')
-    [[ "$ancestor" == <-> ]] || break
-  done
-  owner=$(ps -p "$pid" -o uid= 2>/dev/null | tr -d ' ')
-  [[ "$owner" == "$(id -u)" ]] || return 1
-  current=$(ps -p "$pid" -o args= 2>/dev/null)
-  [[ "$current" == *memguard* ]] && return 1
-  for pat in "${TARGETS[@]}"; do [[ -n "$pat" && "$current" == *"$pat"* ]] && return 0; done
-  return 1
+# Single source of truth for signal eligibility, shared by the signal path and
+# the preview. Prints "match<TAB>pattern" or one exclusion reason. Never signals.
+#   $1 pid, $2 root of the protected ancestor chain (default: this process)
+#   $3 owner uid and $4 command line: optional snapshot used by the preview.
+#   The signal path passes neither and reads both fresh for every process.
+#   ANCESTORS (assoc, preview only) replaces walking the chain per process.
+target_reason() {
+  local pid=$1 root=${2:-$$} ancestor pat current owner
+  [[ "$pid" == <-> ]] || { print invalid; return; }
+  (( pid > 1 )) || { print pid1; return; }
+  [[ "$pid" == "$$" ]] && { print self; return; }
+  if (( ${+ANCESTORS} )); then
+    (( ${+ANCESTORS[$pid]} )) && { print ancestor; return; }
+  else
+    ancestor=$root
+    while [[ "$ancestor" == <-> ]] && (( ancestor > 1 )); do
+      [[ "$pid" == "$ancestor" ]] && { print ancestor; return; }
+      ancestor=$(ps -p "$ancestor" -o ppid= 2>/dev/null | tr -d ' ')
+    done
+  fi
+  if (( $# >= 4 )); then owner=$3; current=$4
+  else
+    owner=$(ps -p "$pid" -o uid= 2>/dev/null | tr -d ' ')
+    current=$(ps -p "$pid" -o args= 2>/dev/null)
+  fi
+  [[ -n "$owner" ]] || { print gone; return; }
+  [[ "$owner" == "$UID" ]] || { print owner; return; }
+  [[ -n "$current" ]] || { print gone; return; }
+  [[ "$current" == *memguard* ]] && { print memguard; return; }
+  for pat in "${TARGETS[@]}"; do [[ -n "$pat" && "$current" == *"$pat"* ]] && { print -r -- "match	$pat"; return; }; done
+  print nomatch
 }
+safe_target() { [[ "$(target_reason "$1")" == match* ]]; }
 
 # ---------- core ----------
 typeset -g LAST_WARN=0 LAST_CRIT=0
@@ -267,6 +285,44 @@ cmd_selftest() {
   print "test log: $LOG"
   return $rc
 }
+# Lists every own process that a target pattern matches and the decision the
+# monitor would take for it. Sends no signal. Ancestors are evaluated against
+# the running monitor (argument 2); without one only PID 1 is protected there.
+#   memguard preview [config] [monitor-pid]
+cmd_preview() {
+  [[ -n "${1:-}" ]] && MEMGUARD_CONFIG=$1
+  load_cfg || return 1
+  local root=${2:-1} pid uid args pat hit reason name ancestor
+  [[ "$root" == <-> ]] || { print -u2 'Monitor PID must be numeric'; return 2; }
+  (( ${#TARGETS} )) || return 0
+  # Same protected chain the signal path walks, computed once.
+  typeset -gA ANCESTORS=()
+  ancestor=$root
+  while [[ "$ancestor" == <-> ]] && (( ancestor > 1 )); do
+    ANCESTORS[$ancestor]=1
+    ancestor=$(ps -p "$ancestor" -o ppid= 2>/dev/null | tr -d ' ')
+  done
+  local -a rows pids
+  ps -U "$(id -u)" -o pid=,uid=,args= | while read -r pid uid args; do
+    hit=
+    for pat in "${TARGETS[@]}"; do [[ "$args" == *"$pat"* ]] && { hit=$pat; break; }; done
+    [[ -n "$hit" ]] && { rows+=("$pid"$'\t'"$uid"$'\t'"$hit"$'\t'"$args"); pids+=("$pid"); }
+  done
+  # Test hooks: signal "listed" and widen the window between listing and evaluation.
+  [[ -n "${MEMGUARD_TEST_PREVIEW_READY:-}" ]] && : > "$MEMGUARD_TEST_PREVIEW_READY"
+  [[ "${MEMGUARD_TEST_PREVIEW_DELAY:-}" == <-> ]] && sleep "$MEMGUARD_TEST_PREVIEW_DELAY"
+  (( ${#rows} )) || return 0
+  local -A alive=()
+  for pid in $(ps -p "${(j:,:)pids}" -o pid= 2>/dev/null); do alive[$pid]=1; done
+  local row
+  for row in "${rows[@]}"; do
+    pid=${row%%$'\t'*}; row=${row#*$'\t'}; uid=${row%%$'\t'*}; row=${row#*$'\t'}
+    hit=${row%%$'\t'*}; args=${row#*$'\t'}
+    if (( ${+alive[$pid]} )); then reason=$(target_reason "$pid" "$root" "$uid" "$args"); else reason=gone; fi
+    if [[ "$args" =~ '/([^/]+)\.app/' ]]; then name=$match[1]; else name=${${args%% *}:t}; fi
+    print -r -- "${reason%%$'\t'*}	$pid	${name//[[:cntrl:]]/ }	${hit//[[:cntrl:]]/ }"
+  done
+}
 case "${1:-status}" in
   run) cmd_run ;;
   once) load_cfg && step ;;
@@ -274,7 +330,8 @@ case "${1:-status}" in
   pause) touch "$PAUSE_FILE"; print "paused: MemGuard keeps measuring but will not terminate anything" ;;
   resume) rm -f "$PAUSE_FILE"; print "resumed" ;;
   selftest) cmd_selftest ;;
+  preview) shift; cmd_preview "$@" ;;
   log) tail -${2:-30} "$LOG" ;;
   version) print $VERSION ;;
-  *) print "usage: memguard [status|pause|resume|selftest|log [n]|version]"; exit 2 ;;
+  *) print "usage: memguard [status|pause|resume|selftest|preview [config] [monitor-pid]|log [n]|version]"; exit 2 ;;
 esac

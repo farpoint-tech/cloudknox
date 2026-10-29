@@ -79,3 +79,27 @@ test('test server cannot start real processes and static files have CSP',async t
   assert.match(await res.text(),/Speicher im Blick/);
   assert.equal((await fetch(app.url+'/../server.mjs')).status,404);
 });
+test('preview endpoint validates patterns, passes the monitor PID and cleans up',async t=>{
+  const calls=[];
+  const sampleCommand=async(file,args,options)=>{
+    if(file==='/bin/zsh'&&args[1]==='preview'){
+      calls.push({args,options,config:JSON.parse(await readFile(args[2],'utf8'))});
+      return 'match\t210\trender\t/ltx-video/\nancestor\t1\tlaunchd\t/ltx-video/';
+    }
+    return fixture(file,args);
+  };
+  const {get}=await setup(t,sampleCommand);
+  const ok=await get('/api/preview?targets='+encodeURIComponent(JSON.stringify(['/ltx-video/'])));
+  assert.equal(ok.status,200);
+  assert.deepEqual(ok.data.counts,{match:1,ancestor:1});
+  assert.equal(ok.data.monitorPid,1,'test mode has no running monitor');
+  assert.equal(calls[0].args[3],'1');
+  assert.deepEqual(calls[0].config.targets,['/ltx-video/']);
+  assert.ok(calls[0].options.timeout>=10000);
+  await assert.rejects(readFile(calls[0].args[2]),{code:'ENOENT'},'temporary config removed');
+  const bad=await get('/api/preview?targets='+encodeURIComponent(JSON.stringify(['ab'])));
+  assert.equal(bad.status,400);
+  assert.equal(calls.length,1,'invalid patterns never reach the monitor');
+  const garbage=await get('/api/preview?targets=%7Bnot-json');
+  assert.equal(garbage.status,400);
+});

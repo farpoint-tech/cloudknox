@@ -22,8 +22,8 @@ export function classify(free, swapfiles, config) {
   if (free <= config.warn_free_percent || swapfiles >= config.warn_swapfiles) return 'warning';
   return 'normal';
 }
-export async function command(file, args) {
-  const {stdout} = await exec(file, args, {timeout:4000, maxBuffer:4*1024*1024, env:{...process.env,LC_ALL:'C'}});
+export async function command(file, args, {timeout=4000}={}) {
+  const {stdout} = await exec(file, args, {timeout, maxBuffer:4*1024*1024, env:{...process.env,LC_ALL:'C'}});
   return stdout.trim();
 }
 export function parseProcesses(raw, targets, uid, home = homedir()) {
@@ -39,4 +39,14 @@ export function parseProcesses(raw, targets, uid, home = homedir()) {
       cpuPercent:cpu===undefined ? null : Number(cpu), nice:nice===undefined ? null : Number(nice),
       target:Number(owner)===uid && !cmd.includes('memguard') && targets.some(t => cmd.includes(t.replaceAll('~',home)))}];
   }).sort((a,b)=>b.rssBytes-a.rssBytes);
+}
+
+// Parses "status<TAB>pid<TAB>name<TAB>pattern" lines from `memguard preview`.
+export const previewStatuses = Object.freeze(['match','ancestor','self','memguard','owner','gone','pid1','nomatch','invalid']);
+export function parsePreview(raw) {
+  return raw.split('\n').flatMap(line => {
+    const [status,pid,name,pattern] = line.split('\t');
+    if (!previewStatuses.includes(status) || !/^\d+$/.test(pid ?? '')) return [];
+    return [{status, pid:Number(pid), name:name ?? '', pattern:pattern ?? ''}];
+  });
 }

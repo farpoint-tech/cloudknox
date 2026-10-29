@@ -127,3 +127,50 @@ test('notification payloads are unique private data, not interpolated AppleScrip
   assert.equal((await stat(notificationDir)).mode&0o777,0o700);
   for(const payload of payloads) assert.equal((await stat(join(notificationDir,payload))).mode&0o777,0o600);
 });
+// MG-04: preview lists every match with its decision and never sends a signal.
+const previewRows=out=>out.stdout.trim().split('\n').filter(Boolean).map(l=>{const [status,pid,name,pattern]=l.split('\t');return {status,pid:Number(pid),name,pattern};});
+test('preview lists a broad pattern match per process and sends no signal',async t=>{
+  const a=await dummy(t),b=await dummy(t);
+  const prefix='mg-test-';
+  const {run,config}=await setup(t,{targets:[prefix]});
+  const rows=previewRows(await run(['preview',config,'1']));
+  for(const d of [a,b]){const row=rows.find(r=>r.pid===d.child.pid);assert.ok(row,'dummy listed');assert.equal(row.status,'match');assert.equal(row.pattern,prefix);}
+  assert.equal(a.child.signalCode,null);assert.equal(b.child.signalCode,null);
+  assert.equal(a.child.exitCode,null);assert.equal(b.child.exitCode,null);
+});
+test('preview without any match prints nothing and succeeds',async t=>{
+  const {run,config}=await setup(t,{targets:['zz-no-such-process-'+Math.random().toString(36).slice(2)]});
+  const out=await run(['preview',config,'1']);
+  assert.equal(out.stdout.trim(),'');
+});
+test('preview excludes the running monitor and its ancestors',async t=>{
+  const marker='mg-test-'+Math.random().toString(36).slice(2);
+  const parent=spawn('/bin/sh',['-c','/bin/sleep 60; :'],{argv0:marker,stdio:'ignore'});
+  const exited=new Promise(resolve=>parent.once('exit',resolve));
+  t.after(async()=>{if(parent.exitCode===null&&parent.signalCode===null)parent.kill();await exited;});
+  await new Promise(resolve=>setTimeout(resolve,150));
+  const child=(await exec('/usr/bin/pgrep',['-P',String(parent.pid)])).stdout.trim().split('\n')[0];
+  const {run,config}=await setup(t,{targets:[marker]});
+  const rows=previewRows(await run(['preview',config,child]));
+  assert.equal(rows.find(r=>r.pid===parent.pid)?.status,'ancestor');
+  assert.equal(parent.signalCode,null);
+  const free=previewRows(await run(['preview',config,'1']));
+  assert.equal(free.find(r=>r.pid===parent.pid)?.status,'match','without a monitor the same process would be signalled');
+});
+test('preview reports a process that vanished between listing and evaluation',async t=>{
+  const target=await dummy(t);
+  const {config,env,root}=await setup(t,{targets:[target.marker]});
+  const ready=join(root,'listed');
+  const pending=exec('/bin/zsh',[script,'preview',config,'1'],{env:{...env,MEMGUARD_TEST_PREVIEW_DELAY:'5',MEMGUARD_TEST_PREVIEW_READY:ready},timeout:20000});
+  // Kill the dummy only after the preview has listed it; no timing guess.
+  for(let i=0;i<300;i++){try{await stat(ready);break;}catch{await new Promise(resolve=>setTimeout(resolve,50));}}
+  await stat(ready);
+  target.child.kill();await target.exited;
+  const rows=previewRows(await pending);
+  assert.deepEqual(rows.map(r=>[r.pid,r.status]),[[target.child.pid,'gone']]);
+});
+test('signal path and preview share one decision: memguard commands stay excluded',async t=>{
+  const {run,config}=await setup(t,{targets:['memguard']});
+  const rows=previewRows(await run(['preview',config,'1']));
+  assert.ok(rows.every(r=>r.status!=='match'),'no process whose command contains memguard may be a match');
+});

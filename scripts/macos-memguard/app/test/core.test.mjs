@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaults,validateConfig,classify,parseProcesses} from '../core.mjs';
+import {defaults,validateConfig,classify,parseProcesses,parsePreview} from '../core.mjs';
 
 test('threshold boundaries and unknown measurement fail closed',()=>{
   assert.equal(classify(50,0,defaults),'normal');
@@ -36,4 +36,8 @@ test('process parser reads CPU and nice when present and stays compatible withou
   assert.equal(audio.cpuPercent,0);assert.equal(audio.nice,-1);assert.equal(audio.name,'coreaudiod');
   assert.equal(old.cpuPercent,null);assert.equal(old.nice,null);assert.equal(old.name,'old-format');
   assert.deepEqual(result.map(p=>p.pid),[300,301,302]);
+});
+test('preview parser keeps known decisions and drops malformed lines',()=>{
+  const rows=parsePreview('match\t210\trender\t/ltx\nancestor\t1\tlaunchd\t/x\nbogus\t5\tx\ty\nmatch\tnotapid\tx\ty\n\ngone\t77\tworker\t/ltx');
+  assert.deepEqual(rows,[{status:'match',pid:210,name:'render',pattern:'/ltx'},{status:'ancestor',pid:1,name:'launchd',pattern:'/x'},{status:'gone',pid:77,name:'worker',pattern:'/ltx'}]);
 });

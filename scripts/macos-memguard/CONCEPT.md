@@ -50,7 +50,7 @@ Die App benötigt Node.js ≥22. Der Monitor benötigt die macOS-Bordmittel; int
 
 Zustände: `normal`, `warning`, `critical`, `unknown`. Fehlt ein Pflichtmesswert oder ist die Konfiguration ungültig, ist keine Aussage „gesund“ zulässig. `kern.memorystatus_level` wird als Kernel-Indikator bezeichnet, nicht als prozentual belegter/freier RAM der Aktivitätsanzeige.
 
-Prozessdaten enthalten PID, Anzeigename, RSS, eigenen Benutzer und Mustertreffer. Rohe Kommandozeilen bleiben im Backend. Die Übersicht enthält die 100 größten Prozesse; Treffer dort sind keine vollständige betroffene Population. Der Verlauf umfasst 180 Abfragen im Arbeitsspeicher und wird nicht dauerhaft archiviert.
+Prozessdaten enthalten PID, Anzeigename, RSS, eigenen Benutzer und Mustertreffer. Rohe Kommandozeilen bleiben im Backend. Die Übersicht enthält die 100 größten Prozesse; Treffer dort sind keine vollständige betroffene Population. Vollständig ist die Treffer-Vorschau (`memguard preview`, `GET /api/preview`): Sie listet jeden eigenen Prozess, den ein Muster trifft, mit der Entscheidung aus derselben Funktion `target_reason`, die auch vor jedem Signal läuft. Sie sendet kein Signal. Der Verlauf umfasst 180 Abfragen im Arbeitsspeicher und wird nicht dauerhaft archiviert.
 
 Die Konfiguration besteht ausschließlich aus den in `app/core.mjs` definierten Feldern. Referenz: `src/config.default.json`. Shell und Node müssen identische Typ-/Bereichsregeln behalten. Zielmuster sind Teilstrings, keine regulären Ausdrücke. Leere Liste bedeutet ausschließlich warnen.
 
@@ -75,5 +75,5 @@ Die Click-to-open-Kette ist technisch implementiert. Unit-/API-Tests, realer App
 
 - [ ] P1 · Betreiber/QA: Sichtbaren Mitteilungsklick inklusive geschlossenem Dashboard nach Installation abnehmen (MG-02).
 - [ ] P1 · Betreiber: Upgrade und Rückkehr zur gesicherten Version für das konkrete Zielgerät freigeben und verifizieren (MG-03).
-- [ ] P1 · Entwicklung: Vollständige Prozessvorschau für neue Zielmuster umsetzen (MG-04).
+- [x] P1 · Entwicklung: Vollständige Prozessvorschau für neue Zielmuster umgesetzt am 29.10.2026 (MG-04).
 - [ ] P2 · Entwicklung/Release: Weitere Arbeitspakete mit Abnahmekriterien siehe BACKLOG.md.
