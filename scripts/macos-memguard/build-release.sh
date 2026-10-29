@@ -1,0 +1,25 @@
+#!/bin/zsh
+# KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+#   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+#   userImpact: none       Kein Effekt für Benutzer; baut nur das Release-Archiv.
+#   adminInterference: low Schreibt nur nach dist/ und in temporäre Ordner.
+set -eu
+ROOT="${0:A:h}"
+VERSION=$(awk -F'"' '/^VERSION=/{print $2}' "$ROOT/src/memguard")
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/MemGuard/app" "$ROOT/dist"
+for file in MemGuard.command README.md REVIEW.md DEVELOPMENT.md CONCEPT.md BACKLOG.md install.sh uninstall.sh build-pkg.sh build-release.sh build-app.sh; do
+  cp "$ROOT/$file" "$STAGE/MemGuard/$file"
+done
+cp -R "$ROOT/src" "$ROOT/pkg" "$STAGE/MemGuard/"
+cp -R "$ROOT/native" "$STAGE/MemGuard/"
+mkdir -p "$STAGE/MemGuard/dist"
+/usr/bin/ditto --norsrc "$ROOT/dist/MemGuard.app" "$STAGE/MemGuard/dist/MemGuard.app"
+for file in package.json server.mjs core.mjs open-dashboard.mjs public test; do
+  cp -R "$ROOT/app/$file" "$STAGE/MemGuard/app/$file"
+done
+chmod +x "$STAGE/MemGuard/MemGuard.command"
+COPYFILE_DISABLE=1 /usr/bin/ditto -c -k --norsrc --keepParent "$STAGE/MemGuard" "$ROOT/dist/MemGuard-$VERSION.zip"
+/usr/bin/shasum -a 256 "$ROOT/dist/MemGuard-$VERSION.zip" > "$ROOT/dist/MemGuard-$VERSION.zip.sha256"
+print "Paket: $ROOT/dist/MemGuard-$VERSION.zip"

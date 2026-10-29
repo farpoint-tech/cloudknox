@@ -1,17 +1,21 @@
 #!/bin/zsh
-# MemGuard - prevents macOS watchdog panics caused by memory pressure.
+# KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+#   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+#   userImpact: medium     Kann bei kritischem Speicher eingetragene eigene Ziel-Prozesse beenden; ungespeicherte Arbeit in diesen Jobs geht verloren.
+#   adminInterference: medium Reversibilität: beendete Jobs lassen sich nur neu starten. Keine Änderung an Sicherheits- oder Systemkonfiguration.
+# MemGuard - reduces risk from memory pressure; cannot prevent every panic.
 # Watches free memory and swap files. Warns early. On critical pressure it
 # terminates ONLY processes matching the configured target patterns.
 # No dependencies beyond macOS itself.
 emulate -L zsh
 setopt no_unset pipe_fail
 
-VERSION="1.0.0"
+VERSION="1.2.0"
 SYS_DIR="/Library/Application Support/MemGuard"
 USER_DIR="$HOME/Library/Application Support/MemGuard"
-LOG_DIR="$HOME/Library/Logs/MemGuard"
+LOG_DIR="${MEMGUARD_LOG_DIR:-$HOME/Library/Logs/MemGuard}"
 LOG="$LOG_DIR/memguard.log"
-PAUSE_FILE="$HOME/.memguard-off"
+PAUSE_FILE="${MEMGUARD_PAUSE_FILE:-$HOME/.memguard-off}"
 
 # ---------- config ----------
 cfg_file() {
@@ -34,33 +38,84 @@ cfg_targets() {
   done
 }
 load_cfg() {
+  local f; f=$(cfg_file)
+  if [[ -n "$f" ]] && ! plutil -convert xml1 -o /dev/null "$f"; then
+    print -u2 'Invalid configuration: monitoring stopped'; return 1
+  fi
+  if [[ -n "$f" ]]; then
+    local key expected count i
+    for key in interval warn_free_percent critical_free_percent warn_swapfiles critical_swapfiles warn_repeat_seconds terminate_grace_seconds language notifications targets; do
+      expected=integer
+      [[ "$key" == language ]] && expected=string
+      [[ "$key" == notifications ]] && expected=bool
+      [[ "$key" == targets ]] && expected=array
+      [[ "$(plutil -type "$key" "$f" 2>/dev/null)" == "$expected" ]] || { print -u2 "Invalid configuration type: $key"; return 1; }
+    done
+    count=$(plutil -extract targets raw -o - "$f")
+    (( count <= 50 )) || { print -u2 'Too many targets'; return 1; }
+    for (( i=0; i<count; i++ )); do
+      [[ "$(plutil -type "targets.$i" "$f" 2>/dev/null)" == string ]] || { print -u2 'Target must be a string'; return 1; }
+    done
+  fi
   INTERVAL=$(cfg interval 10)
   WARN_FREE=$(cfg warn_free_percent 20)
   CRIT_FREE=$(cfg critical_free_percent 10)
-  WARN_SWAP=$(cfg warn_swapfiles 20)
-  CRIT_SWAP=$(cfg critical_swapfiles 40)
+  WARN_SWAP=$(cfg warn_swapfiles 50)
+  CRIT_SWAP=$(cfg critical_swapfiles 65)
   WARN_REPEAT=$(cfg warn_repeat_seconds 600)
   GRACE=$(cfg terminate_grace_seconds 8)
   LANG_UI=$(cfg language en)
   NOTIFY=$(cfg notifications true)
   if [[ -n "${MEMGUARD_TARGETS:-}" ]]; then TARGETS=(${(s:|:)MEMGUARD_TARGETS}); else TARGETS=(${(f)"$(cfg_targets)"}); fi
+  local val
+  for val in "$INTERVAL" "$WARN_FREE" "$CRIT_FREE" "$WARN_SWAP" "$CRIT_SWAP" "$WARN_REPEAT" "$GRACE"; do
+    [[ "$val" == <-> && ${#val} -le 6 ]] || { print -u2 'Configuration requires bounded non-negative integers'; return 1; }
+  done
+  (( INTERVAL >= 2 && INTERVAL <= 300 && CRIT_FREE < WARN_FREE && WARN_FREE <= 100 && WARN_SWAP >= 1 && WARN_SWAP < CRIT_SWAP && CRIT_SWAP <= 1000 && WARN_REPEAT >= 30 && WARN_REPEAT <= 86400 && GRACE >= 1 && GRACE <= 60 )) || { print -u2 'Configuration thresholds out of range'; return 1; }
+  [[ "$NOTIFY" == true || "$NOTIFY" == false ]] || return 1
+  [[ "$LANG_UI" == en || "$LANG_UI" == de ]] || return 1
+  for val in "${TARGETS[@]}"; do
+    [[ ${#val} -ge 4 && ${#val} -le 300 && "$val" != *[[:cntrl:]]* && "$val" != [[:space:]]* && "$val" != *[[:space:]] ]] || { print -u2 'Target must contain 4-300 characters, no controls or surrounding whitespace'; return 1; }
+  done
 }
 
 # ---------- helpers ----------
 ts() { date "+%Y-%m-%d %H:%M:%S"; }
-log() { mkdir -p "$LOG_DIR"; print -r -- "$(ts) $*" >> "$LOG"; }
+log() {
+  mkdir -p "$LOG_DIR"
+  local size=0
+  [[ -f "$LOG" ]] && size=$(stat -f %z "$LOG" 2>/dev/null)
+  [[ "$size" == <-> ]] && (( size > 5242880 )) && mv -f "$LOG" "$LOG.1"
+  print -r -- "$(ts) $*" >> "$LOG"
+}
 t() { # t <en> <de>
   [[ "$LANG_UI" == de ]] && print -r -- "$2" || print -r -- "$1"
 }
+deliver_notification() { /usr/bin/open -n -g -a "$1" "$2"; }
 notify() {
   [[ "$NOTIFY" == true ]] || return 0
-  local title=${1//\"/\'} body=${2//\"/\'}
-  osascript -e "display notification \"$body\" with title \"$title\" sound name \"Basso\"" >/dev/null 2>&1
+  local app="${MEMGUARD_NOTIFICATION_APP:-$USER_DIR/MemGuard.app}"
+  if [[ ! -d "$app" ]]; then app="$SYS_DIR/MemGuard.app"; fi
+  if [[ ! -d "$app" ]]; then
+    log 'ERROR notification app missing; install MemGuard.app to enable clickable statistics'; return 1
+  fi
+  local payload_dir="$LOG_DIR/notifications" payload
+  mkdir -p "$payload_dir"; chmod 700 "$payload_dir"
+  payload=$(mktemp "$payload_dir/memguard-notification.XXXXXXXX") || return 1
+  chmod 600 "$payload"
+  if /usr/bin/plutil -create xml1 "$payload" &&
+     /usr/bin/plutil -insert title -string "$1" "$payload" &&
+     /usr/bin/plutil -insert body -string "$2" "$payload" &&
+     deliver_notification "$app" "$payload"; then return 0; fi
+  log "ERROR notification delivery failed; payload=$payload"; return 1
 }
 measure() {
   if [[ -n "${MEMGUARD_FAKE_FREE:-}" ]]; then FREE=$MEMGUARD_FAKE_FREE
-  else FREE=$(sysctl -n kern.memorystatus_level 2>/dev/null); [[ "$FREE" == <-> ]] || FREE=100; fi
-  SWAPFILES=$(ls /System/Volumes/VM 2>/dev/null | grep -c '^swapfile')
+  else FREE=$(sysctl -n kern.memorystatus_level 2>/dev/null); fi
+  [[ "$FREE" == <-> ]] && (( FREE <= 100 )) || { FREE=unknown; return 1; }
+  [[ -d /System/Volumes/VM && -r /System/Volumes/VM ]] || { SWAPFILES=unknown; return 1; }
+  local files=(/System/Volumes/VM/swapfile*(N.))
+  SWAPFILES=${#files}
 }
 top_apps() { # biggest apps by resident memory, grouped by .app bundle
   ps -Axo rss=,comm= | awk '
@@ -73,18 +128,54 @@ top_apps() { # biggest apps by resident memory, grouped by .app bundle
 find_targets() { # prints "pid<TAB>args" for matching processes
   (( ${#TARGETS} )) || return 0
   local self=$$ pat
-  ps -Axo pid=,args= | while read -r pid args; do
-    [[ "$pid" == "$self" || "$args" == *memguard* ]] && continue
+  ps -U "$(id -u)" -o pid=,args= | while read -r pid args; do
+    [[ "$pid" == "$self" || "$pid" == "$PPID" || "$pid" -le 1 || "$args" == *memguard* ]] && continue
     for pat in $TARGETS; do
       [[ -n "$pat" && "$args" == *"$pat"* ]] && { print -r -- "$pid	$args"; break; }
     done
   done
 }
 
+# Recheck ownership, start time and command before each signal. Exclude ancestors.
+identity() { ps -p "$1" -o uid=,lstart=,args= 2>/dev/null; }
+# Single source of truth for signal eligibility, shared by the signal path and
+# the preview. Prints "match<TAB>pattern" or one exclusion reason. Never signals.
+#   $1 pid, $2 root of the protected ancestor chain (default: this process)
+#   $3 owner uid and $4 command line: optional snapshot used by the preview.
+#   The signal path passes neither and reads both fresh for every process.
+#   ANCESTORS (assoc, preview only) replaces walking the chain per process.
+target_reason() {
+  local pid=$1 root=${2:-$$} ancestor pat current owner
+  [[ "$pid" == <-> ]] || { print invalid; return; }
+  (( pid > 1 )) || { print pid1; return; }
+  [[ "$pid" == "$$" ]] && { print self; return; }
+  if (( ${+ANCESTORS} )); then
+    (( ${+ANCESTORS[$pid]} )) && { print ancestor; return; }
+  else
+    ancestor=$root
+    while [[ "$ancestor" == <-> ]] && (( ancestor > 1 )); do
+      [[ "$pid" == "$ancestor" ]] && { print ancestor; return; }
+      ancestor=$(ps -p "$ancestor" -o ppid= 2>/dev/null | tr -d ' ')
+    done
+  fi
+  if (( $# >= 4 )); then owner=$3; current=$4
+  else
+    owner=$(ps -p "$pid" -o uid= 2>/dev/null | tr -d ' ')
+    current=$(ps -p "$pid" -o args= 2>/dev/null)
+  fi
+  [[ -n "$owner" ]] || { print gone; return; }
+  [[ "$owner" == "$UID" ]] || { print owner; return; }
+  [[ -n "$current" ]] || { print gone; return; }
+  [[ "$current" == *memguard* ]] && { print memguard; return; }
+  for pat in "${TARGETS[@]}"; do [[ -n "$pat" && "$current" == *"$pat"* ]] && { print -r -- "match	$pat"; return; }; done
+  print nomatch
+}
+safe_target() { [[ "$(target_reason "$1")" == match* ]]; }
+
 # ---------- core ----------
 typeset -g LAST_WARN=0 LAST_CRIT=0
 step() {
-  measure
+  if ! measure; then log 'ERROR measurement unavailable; no process signals sent'; return 0; fi
   local now=$(date +%s) crit=0 warn=0
   (( FREE <= CRIT_FREE || SWAPFILES >= CRIT_SWAP )) && crit=1
   (( FREE <= WARN_FREE || SWAPFILES >= WARN_SWAP )) && warn=1
@@ -93,21 +184,36 @@ step() {
   if (( crit )) && [[ ! -e "$PAUSE_FILE" ]]; then
     local found; found=$(find_targets)
     if [[ -n "$found" ]]; then
-      local pids=() names=() line
-      for line in ${(f)found}; do pids+=(${line%%	*}); names+=("${${line#*	}%% *}"); done
-      kill -TERM $pids 2>/dev/null
-      sleep $GRACE
-      local hard=() p
-      for p in $pids; do kill -0 $p 2>/dev/null && { kill -KILL $p 2>/dev/null; hard+=($p); }; done
-      log "CRITICAL free=${FREE}% swapfiles=$SWAPFILES terminated pids=${(j:,:)pids} sigkill=${(j:,:)hard} names=${(j:,:)${names:t}} top=[$top]"
-      notify "MemGuard: $(t 'process stopped' 'Prozess gestoppt')" \
-        "$(t "Only ${FREE}% free. Stopped: ${(j:, :)${names:t}}" "Nur ${FREE}% frei. Gestoppt: ${(j:, :)${names:t}}")"
+      local pids=() names=() line p before
+      local -A identities
+      for line in ${(f)found}; do
+        p=${line%%$'\t'*}
+        safe_target "$p" || continue
+        before=$(identity "$p"); [[ -n "$before" ]] || continue
+        [[ ! -e "$PAUSE_FILE" && "$(identity "$p")" == "$before" ]] || continue
+        if kill -TERM "$p" 2>/dev/null; then
+          pids+=("$p"); identities[$p]=$before; names+=("${${line#*$'\t'}%% *}")
+        fi
+      done
+      (( ${#pids} )) || return 0
+      sleep "$GRACE"
+      local hard=()
+      # Re-evaluate pressure and the pause switch after the grace period.
+      if measure && (( FREE <= CRIT_FREE || SWAPFILES >= CRIT_SWAP )) && [[ ! -e "$PAUSE_FILE" ]]; then
+        for p in "${pids[@]}"; do
+          [[ "$(identity "$p")" == "${identities[$p]}" ]] && safe_target "$p" || continue
+          if kill -KILL "$p" 2>/dev/null; then hard+=("$p"); fi
+        done
+      fi
+      log "CRITICAL free=${FREE}% swapfiles=$SWAPFILES term_sent=${(j:,:)pids} kill_sent=${(j:,:)hard} names=${(j:,:)${names:t}} top=[$top]"
+      notify "MemGuard: $(t 'stop requested' 'Beenden angefordert')" \
+        "$(t "${FREE}% available. Signal sent: ${(j:, :)${names:t}}" "${FREE}% verfügbar. Signal gesendet: ${(j:, :)${names:t}}")"
       LAST_WARN=$now; return 0
     fi
     if (( now - LAST_CRIT > 120 )); then
       log "CRITICAL free=${FREE}% swapfiles=$SWAPFILES no-target top=[$top]"
       notify "MemGuard: $(t 'memory critical' 'Speicher kritisch')" \
-        "$(t "Only ${FREE}% free. Largest: $top. Close apps now." "Nur ${FREE}% frei. Größte: $top. Apps jetzt schließen.")"
+        "$(t "Memory indicator ${FREE}%. Largest: $top. Close apps now." "Speicherindikator ${FREE}%. Größte: $top. Apps jetzt schließen.")"
       LAST_CRIT=$now
     fi
     return 0
@@ -115,24 +221,34 @@ step() {
   if (( now - LAST_WARN > WARN_REPEAT )); then
     log "WARN free=${FREE}% swapfiles=$SWAPFILES paused=$([[ -e $PAUSE_FILE ]] && echo yes || echo no) top=[$top]"
     notify "MemGuard: $(t 'memory low' 'Speicher knapp')" \
-      "$(t "${FREE}% free, $SWAPFILES swap files. Largest: $top" "${FREE}% frei, $SWAPFILES Swap-Dateien. Größte: $top")"
+      "$(t "Memory indicator ${FREE}%, $SWAPFILES swap files. Largest: $top" "Speicherindikator ${FREE}%, $SWAPFILES Swap-Dateien. Größte: $top")"
     LAST_WARN=$now
   fi
 }
 
 # ---------- commands ----------
 cmd_run() {
-  load_cfg
+  load_cfg || return 1
+  local lock_dir="$LOG_DIR/monitor.lock"
+  mkdir -p "$LOG_DIR"
+  if ! mkdir "$lock_dir" 2>/dev/null; then
+    print -u2 "Monitor lock exists: $lock_dir (check for a running instance before removing a stale lock)"; return 1
+  fi
+  print $$ > "$lock_dir/pid"
+  trap 'rm -f "$lock_dir/pid"; rmdir "$lock_dir"' EXIT
+  trap 'exit 0' TERM INT HUP
   log "START v$VERSION config=$(cfg_file) warn=${WARN_FREE}% crit=${CRIT_FREE}% targets=${(j:|:)TARGETS}"
   local n=0
   while true; do
     step
     sleep $INTERVAL
-    (( ++n % 30 == 0 )) && load_cfg   # pick up config changes every ~5 min
+    (( ++n % 30 == 0 )) && { load_cfg || return 1; }
   done
 }
 cmd_status() {
-  load_cfg; measure
+  load_cfg || return 1
+  SWAPFILES=unknown
+  measure || print -u2 'Measurement unavailable; no healthy state inferred'
   print "MemGuard $VERSION"
   print "  config:      $(cfg_file || true)"
   print "  free memory: ${FREE}%   (warn <= $WARN_FREE, critical <= $CRIT_FREE)"
@@ -147,28 +263,75 @@ cmd_status() {
   [[ -f "$LOG" ]] && { print "  last log:"; tail -3 "$LOG" | sed 's/^/    /'; }
 }
 cmd_selftest() {
-  load_cfg
+  load_cfg || return 1
+  local test_dir; test_dir=$(mktemp -d)
+  LOG_DIR="$test_dir"; LOG="$test_dir/selftest.log"; PAUSE_FILE="$test_dir/pause"
+  # Isolate the selftest from real pressure, user pause state and logs.
+  measure() { FREE=$MEMGUARD_FAKE_FREE; SWAPFILES=0; }
   local dummy="memgu4rd-selftest-dummy" rc=0
   ( exec -a "$dummy" /bin/sleep 300 ) & local dp=$!
   sleep 1
-  NOTIFY=false; GRACE=1; LOG="$LOG_DIR/selftest.log"; TARGETS=("$dummy")
+  NOTIFY=false; GRACE=1; TARGETS=("$dummy")
   MEMGUARD_FAKE_FREE=5; step
   if kill -0 $dp 2>/dev/null; then print "FAIL: dummy target still running"; kill $dp; rc=1
   else print "OK   critical + target  -> target terminated"; fi
-  TARGETS=(); LAST_CRIT=0; step; print "OK   critical, no target -> warning only"
-  MEMGUARD_FAKE_FREE=15; LAST_WARN=0; step; print "OK   low memory -> warning"
-  MEMGUARD_FAKE_FREE=80; step; print "OK   normal -> nothing"
-  print "log: $LOG_DIR/selftest.log"
+  TARGETS=(); LAST_CRIT=0; step
+  if grep -q 'no-target' "$LOG"; then print 'OK   critical, no target -> warning only'; else rc=1; fi
+  MEMGUARD_FAKE_FREE=$WARN_FREE; LAST_WARN=0; step
+  if grep -q WARN "$LOG"; then print 'OK   low memory -> warning'; else rc=1; fi
+  local before; before=$(wc -l < "$LOG")
+  MEMGUARD_FAKE_FREE=100; step
+  if [[ "$(wc -l < "$LOG")" == "$before" ]]; then print 'OK   normal -> nothing'; else rc=1; fi
+  print "test log: $LOG"
   return $rc
+}
+# Lists every own process that a target pattern matches and the decision the
+# monitor would take for it. Sends no signal. Ancestors are evaluated against
+# the running monitor (argument 2); without one only PID 1 is protected there.
+#   memguard preview [config] [monitor-pid]
+cmd_preview() {
+  [[ -n "${1:-}" ]] && MEMGUARD_CONFIG=$1
+  load_cfg || return 1
+  local root=${2:-1} pid uid args pat hit reason name ancestor
+  [[ "$root" == <-> ]] || { print -u2 'Monitor PID must be numeric'; return 2; }
+  (( ${#TARGETS} )) || return 0
+  # Same protected chain the signal path walks, computed once.
+  typeset -gA ANCESTORS=()
+  ancestor=$root
+  while [[ "$ancestor" == <-> ]] && (( ancestor > 1 )); do
+    ANCESTORS[$ancestor]=1
+    ancestor=$(ps -p "$ancestor" -o ppid= 2>/dev/null | tr -d ' ')
+  done
+  local -a rows pids
+  ps -U "$(id -u)" -o pid=,uid=,args= | while read -r pid uid args; do
+    hit=
+    for pat in "${TARGETS[@]}"; do [[ "$args" == *"$pat"* ]] && { hit=$pat; break; }; done
+    [[ -n "$hit" ]] && { rows+=("$pid"$'\t'"$uid"$'\t'"$hit"$'\t'"$args"); pids+=("$pid"); }
+  done
+  # Test hooks: signal "listed" and widen the window between listing and evaluation.
+  [[ -n "${MEMGUARD_TEST_PREVIEW_READY:-}" ]] && : > "$MEMGUARD_TEST_PREVIEW_READY"
+  [[ "${MEMGUARD_TEST_PREVIEW_DELAY:-}" == <-> ]] && sleep "$MEMGUARD_TEST_PREVIEW_DELAY"
+  (( ${#rows} )) || return 0
+  local -A alive=()
+  for pid in $(ps -p "${(j:,:)pids}" -o pid= 2>/dev/null); do alive[$pid]=1; done
+  local row
+  for row in "${rows[@]}"; do
+    pid=${row%%$'\t'*}; row=${row#*$'\t'}; uid=${row%%$'\t'*}; row=${row#*$'\t'}
+    hit=${row%%$'\t'*}; args=${row#*$'\t'}
+    if (( ${+alive[$pid]} )); then reason=$(target_reason "$pid" "$root" "$uid" "$args"); else reason=gone; fi
+    if [[ "$args" =~ '/([^/]+)\.app/' ]]; then name=$match[1]; else name=${${args%% *}:t}; fi
+    print -r -- "${reason%%$'\t'*}	$pid	${name//[[:cntrl:]]/ }	${hit//[[:cntrl:]]/ }"
+  done
 }
 case "${1:-status}" in
   run) cmd_run ;;
-  once) load_cfg; step ;;
+  once) load_cfg && step ;;
   status) cmd_status ;;
   pause) touch "$PAUSE_FILE"; print "paused: MemGuard keeps measuring but will not terminate anything" ;;
   resume) rm -f "$PAUSE_FILE"; print "resumed" ;;
   selftest) cmd_selftest ;;
+  preview) shift; cmd_preview "$@" ;;
   log) tail -${2:-30} "$LOG" ;;
   version) print $VERSION ;;
-  *) print "usage: memguard [status|pause|resume|selftest|log [n]|version]"; exit 2 ;;
+  *) print "usage: memguard [status|pause|resume|selftest|preview [config] [monitor-pid]|log [n]|version]"; exit 2 ;;
 esac

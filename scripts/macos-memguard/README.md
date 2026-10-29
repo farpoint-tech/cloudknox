@@ -1,110 +1,126 @@
-# MemGuard
+# MemGuard 1.2.0
 
-Stops macOS from freezing into a watchdog kernel panic when memory runs out.
+Lokale Speicherüberwachung für macOS mit Weboberfläche. MemGuard kann Speicherengpässe abmildern, garantiert aber keinen Schutz vor Kernel-Panics.
 
-A Mac under extreme memory pressure fills its compressor, creates dozens of swap files and stops responding. After about 90 seconds the kernel's watchdog forces a restart (`watchdog timeout: no checkins from watchdogd`). Everything open is lost.
+## Konzept und Weiterentwicklung
 
-MemGuard checks memory every 10 seconds:
+[CONCEPT.md](CONCEPT.md) beschreibt Produkt, Architektur und Sicherheitsregeln. [DEVELOPMENT.md](DEVELOPMENT.md) enthält Einstieg, Dateizuständigkeiten, Tests, Build und native Abnahme. [BACKLOG.md](BACKLOG.md) enthält priorisierte Aufgaben MG-01 bis MG-14 mit Verantwortlichkeiten und Abnahmekriterien. Eine neue Entwicklung kann diese Dokumente ohne Chatverlauf übernehmen.
 
-| Situation | Default | What MemGuard does |
-|---|---|---|
-| Low | ≤ 20 % free or ≥ 20 swap files | Notification naming the three largest apps |
-| Critical | ≤ 10 % free or ≥ 40 swap files | Terminates **only** processes that match your `targets`, then notifies |
-| Critical, no target running | | Notification only. MemGuard never kills anything you did not list |
+## Mitteilung anklicken → Statistik
 
-Typical targets are heavy local jobs that are safe to restart: video or image generation, local LLM runners, training scripts. Losing one job is better than losing the whole machine.
+Ab 1.2.0 ist **MemGuard.app** der eigene Mitteilungsabsender. Ein Klick auf die Mitteilung bzw. „Show/Anzeigen“ aktiviert die App und öffnet die lokale Statistikseite. Eine Datei muss dafür weder ausgewählt noch manuell geöffnet werden. Der Starter verwendet einen passenden laufenden Server erneut oder startet ihn und wartet auf dessen Bereitschaft. Die interne Mitteilungsdatei ist ausschließlich Datentransport zwischen Monitor und App.
 
-- No dependencies. Plain zsh plus tools that ship with macOS. Tested on macOS 26.6 (Apple Silicon). Older versions are untested.
-- No admin rights needed for the per-user install.
-- No network access, no telemetry.
+Die installierte Version muss dafür aktualisiert sein. Alte Meldungen von osascript/Script Editor behalten ihren alten Absender; sie sind kein Test der neuen Version. Sichtbare Zustellung und Klickverhalten hängen zusätzlich von den macOS-Mitteilungs-/Fokuseinstellungen ab und müssen nach Installation geprüft werden.
 
-## Install
+## Starten
 
-**Single Mac, current user, no admin:**
+Voraussetzungen: macOS und Node.js 22 oder neuer. Es gibt keine npm-Laufzeitabhängigkeiten; kein npm install nötig. Das ZIP entpacken und **dist/MemGuard.app** öffnen. Alternativ aus dem Quellordner `zsh MemGuard.command` starten. Beides öffnet die lokale Statistikseite.
+
+Der Starter verwendet standardmäßig `http://127.0.0.1:8765`; der Server bindet nur an `127.0.0.1`. Optional: `MEMGUARD_PORT=8765 zsh MemGuard.command`. Keine Cloud, keine Telemetrie, keine externen Schriftarten. Der App-Starter lässt den Statistikserver im Hintergrund laufen; dessen Ausgabe steht unter ~/Library/Logs/MemGuard/dashboard.log. Das Schließen des Browser-Tabs stoppt ihn nicht. Für Entwicklung kann node app/server.mjs direkt im Terminal gestartet und mit Ctrl+C beendet werden.
+
+Der Start der Oberfläche aktiviert keine Prozessbeendigung und ersetzt keine Installation. Ein bestehender LaunchAgent wird als extern verwaltet angezeigt. Nur wenn kein Dienst vorhanden ist, lässt sich der gebündelte Monitor nach Bestätigung starten. Bei unbekanntem Dienststatus bleibt der Start gesperrt. Ein aus der App gestarteter Monitor endet mit dem Server; ein externer Dienst läuft unabhängig weiter.
+
+## Oberfläche
+
+- Live-Messwerte alle fünf Sekunden: Kernel-Indikator, physischer RAM, belegter Swap, Swap-Dateien.
+- Verlauf der letzten 180 Abfragen während der Serverlaufzeit; mehrere Tabs teilen sich den Verlauf.
+- Bis zu 100 Prozesse nach RSS, Suche nach Name/PID und Kennzeichnung passender Ziele. Gemeinsamer Speicher kann mehrfach in RSS enthalten sein.
+- Einstellungen mit vollständigem Ist/Soll-Vergleich, expliziter Bestätigung, Sicherungskopie, Konflikterkennung und vollständigem Rücklesen.
+- Pause und Aufheben der Pause mit separater Bestätigung.
+- Treffer-Vorschau in den Einstellungen: „Treffer prüfen“ listet für die eingegebenen Zielmuster alle eigenen Prozesse mit Entscheidung, PID, Name und Muster. Funktioniert auch für noch nicht gespeicherte Muster und sendet kein Signal.
+- Letzte 60 Protokollzeilen. Diagnoseexport ohne Zielpfade, Prozessnamen, Prozess-IDs und rohe Kommandozeilen. Der Export enthält Messwerte, Schwellenwerte und Monitorstatus; vor Weitergabe prüfen.
+- Responsive deutsche Oberfläche, Tastaturbedienung, native Bestätigungsdialoge.
+
+Die Prozentanzeige stammt aus `kern.memorystatus_level`. Sie ist ein Kernel-Indikator, kein RAM-Belegungswert der Aktivitätsanzeige und keine Absturzprognose. Fehlende Pflichtmesswerte erscheinen als unbekannt. Ein gesunder Zustand wird daraus nicht abgeleitet.
+
+## Darstellung und farpoint-CI
+
+Schwarz ist der Standard. Der Schalter oben rechts wechselt zwischen Schwarz und Hell und merkt die Auswahl im lokalen Browserspeicher für diese Adresse. Bei einem anderen Port gilt eine andere Browseradresse; für dieselbe Auswahl über Serverneustarts einen festen MEMGUARD_PORT verwenden.
+
+Grundlage ist der maßgebliche CI-Steckbrief „CI_farpoint“ (Juli 2026): Orange #FF6A00 für Hauptaktionen, Navy #1E2A47 und Türkis #00CED1 für Status. Die schwarze Basis ist die angeforderte dunkle Variante. Helle Textakzente bzw. dunklere Akzente im Hellmodus sichern die Lesbarkeit. Raleway und IBM Plex Sans werden lokal aus mitgelieferten WOFF2-Dateien geladen; die OFL-Lizenzen liegen unter app/public/fonts. Es entstehen keine Font-CDN-Anfragen.
+
+MemGuard bleibt der Produktname, „powered by farpoint Solution“ benennt den Absender. Die Oberfläche verwendet sachliche Sie-Ansprache. Die Signallogik wurde für diese Gestaltungsänderung nicht verändert.
+
+## Klassifikation
+
+Jedes ausführbare Skript trägt im Kopf einen Block `KLASSIFIKATION` nach dem Nexus.365-Klassifikationsstandard. Der Standard ist für Microsoft-365-Skripte geschrieben. MemGuard greift auf keinen Tenant zu, er wird hier sinngemäß angewendet: Tier 2, weil nur das Endgerät des Benutzers betroffen ist.
+
+| Skript | tier | userImpact | adminInterference | Bestimmende Achse |
+|---|---|---|---|---|
+| `src/memguard` | 2 | medium | medium | Reversibilität: beendete Ziel-Jobs lassen sich nur neu starten |
+| `MemGuard.command` | 2 | medium | medium | Kann nach Bestätigung den Monitor starten |
+| `install.sh` | 2 | medium | medium | Installiert und startet den Monitor, rückgängig mit `uninstall.sh` |
+| `pkg/scripts/postinstall` | 2 | medium | medium | Wirkungsbereich: alle Benutzer eines Geräts |
+| `uninstall.sh` | 2 | low | medium | Entfernt den Schutz, Neuinstallation stellt ihn wieder her |
+| `pkg/scripts/preinstall` | 2 | low | medium | Stoppt kurz den laufenden Dienst |
+| `build-pkg.sh`, `build-app.sh`, `build-release.sh` | 2 | none | low | Schreiben nur in Ausgabe- und Temporärordner |
+| `native/MemGuard.applescript` | 2 | none | low | Zeigt Mitteilungen, entfernt nur die eigene Mitteilungsdatei |
+
+## Entwicklungsort
+
+Für CloudKnox gilt sonst die Regel „Command entwickelt, CloudKnox veröffentlicht“: Scripts entstehen in Nexus.365-Command und werden nach Freigabe hierher kopiert. MemGuard ist davon ausgenommen. Entscheidung des Product Owners vom 27.10.2026: MemGuard ist kein Microsoft-365-Tenant-Werkzeug, sondern läuft ausschließlich auf dem Mac des Benutzers. Es wird deshalb direkt in CloudKnox entwickelt, und dieser Ordner ist die maßgebliche Quelle. Die übrigen CloudKnox-Regeln gelten unverändert: keine Kundendaten, keine Secrets, Klassifikations-Header, selbsttragendes README, MIT-Lizenz.
+
+## Konfiguration
+
+Der Monitor berücksichtigt zuerst MEMGUARD_CONFIG, dann die Benutzerdatei unter `~/Library/Application Support/MemGuard/config.json`, dann die Systemdatei unter `/Library/Application Support/MemGuard/config.json`. Ohne Datei gelten Standardwerte. Die Oberfläche zeigt Benutzer-/Systemkonfiguration und schreibt ausschließlich die Benutzerkonfiguration. Fremde, über einen anderen Konfigurationspfad gestartete Instanzen werden nicht verwaltet.
+
+| Feld | Standard | Bedeutung |
+|---|---:|---|
+| interval | 10 | Sekunden zwischen Prüfungen; 2–300 |
+| warn_free_percent | 20 | Warnung bei Indikator ≤ Wert |
+| critical_free_percent | 10 | Kritisch bei Indikator ≤ Wert |
+| warn_swapfiles | 50 | Warnung ab dieser Anzahl. Auf einem 64-GB-Mac lagen im Normalbetrieb dauerhaft 20–22 Swap-Dateien vor, bei zwei Watchdog-Panics 76 und 82 (MG-12). |
+| critical_swapfiles | 65 | Kritisch ab dieser Anzahl. Vorläufiger Wert unter den gemessenen Panic-Werten; vor Freigabe mit eigenem Workload prüfen. |
+| warn_repeat_seconds | 600 | Wiederholungsabstand der Warnungen |
+| terminate_grace_seconds | 8 | Wartezeit nach SIGTERM |
+| language | en | Sprache der macOS-Mitteilungen: en/de |
+| notifications | true | macOS-Mitteilungen aktiv |
+| targets | [] | Leere Liste: ausschließlich warnen |
+
+Die Standards sind Ausgangswerte, keine anhand deines Workloads kalibrierten Grenzen. Zielmuster sind einfache Teilstrings vollständiger Kommandozeilen; keine regulären Ausdrücke. Tilde wird zum Benutzerverzeichnis. Verwende eindeutige Projektpfade mit 4–300 Zeichen; höchstens 50 Muster. Ein Muster kann mehrere Prozesse treffen. Die Prozessübersicht zeigt nur die 100 größten Prozesse. Vollständig ist die Treffer-Vorschau: in den Einstellungen „Treffer prüfen“ oder im Terminal `memguard preview [config] [monitor-pid]`. Sie nutzt dieselbe Entscheidungsfunktion wie der Signalpfad. Elternprozesse werden gegen den laufenden Monitor geprüft; läuft keiner, ist nur PID 1 als Elternprozess ausgeschlossen.
+
+Ein laufender Monitor lädt Änderungen nach 30 Prüfzyklen neu, bei zehn Sekunden Intervall ungefähr fünf Minuten, bei Signal-Wartezeiten länger. Speichern und Rücklesen beweist noch keine Übernahme durch den laufenden Monitor. Die Oberfläche bestätigt nicht die Version eines externen Monitors.
+
+## Signalverhalten
+
+1. JSON-Typen und Wertebereiche prüfen. Ungültige Konfiguration stoppt den Monitor.
+2. Messen. Bei fehlenden Pflichtwerten protokollieren und keine Signale senden.
+3. Bei kritischen Werten und aufgehobener Pause nur passende Prozesse des eigenen Benutzers auswählen. Eigener Prozess, Vorfahren, PID 1 und MemGuard-Kommandos sind ausgeschlossen.
+4. Eigentümer, Startzeit und Kommandozeile vor SIGTERM prüfen.
+5. Nach der Wartezeit erneut messen. SIGKILL nur bei weiterhin kritischen Werten, unveränderter Identität und aufgehobener Pause.
+
+Das Log unterscheidet gesendete Signale von bestätigtem Prozessende (`term_sent`, `kill_sent`). Rotation bei mehr als 5 MiB; eine Vorgängerversion bleibt. Eine Locksperre verhindert parallele Instanzen der neuen Monitorversion. Nach einem nicht abfangbaren Abbruch kann ein verwaistes monitor.lock bleiben. Vor dessen manueller Entfernung die dort hinterlegte PID und den Dienst prüfen.
+
+Zwischen Identitätsprüfung und Signal bleibt ein nicht atomar ausschließbares Zeitfenster. SIGKILL kann ungespeicherte Arbeit unwiederbringlich verwerfen.
+
+## Bestehende Installation aktualisieren
+
+`install.sh` installiert den Hintergrundmonitor als Benutzer-LaunchAgent und die zugehörige MemGuard.app. Zuerst die aktuelle App mit zsh build-app.sh bauen bzw. das vollständige ZIP verwenden. Der Installer sichert vorhandene Dateien in einem update-backup-Ordner. Das Öffnen der Oberfläche führt diesen Schritt nicht aus. Vor dem Update Binärdatei, Konfiguration und LaunchAgent sichern. Ohne --config bleibt die Konfiguration erhalten. Nach ausdrücklicher Freigabe `./install.sh` ausführen und anschließend mit der installierten Binärdatei `version` und `status` prüfen.
+
+Zuerst ohne Zielmuster bzw. pausiert pilotieren. Abbruchkriterien: unbekannte Messwerte, unerwartete Treffer, wiederholte Monitorabbrüche. Für einen Rollback Dienst beenden, gesicherte Binärdatei/LaunchAgent wiederherstellen und Dienst erneut prüfen. Bereits verlorene Prozessarbeit lässt sich dadurch nicht wiederherstellen.
+
+Die vorhandenen build-pkg.sh und uninstall.sh bleiben verfügbar. ZIP und PKG enthalten seit 1.2.0 auch MemGuard.app. Das App-Bundle ist lokal ad hoc signiert; es ist weder Developer-ID-signiert noch notarisiert. Das PKG muss zusätzlich für seine Zielumgebung abgenommen werden.
+
+## Tests und Paket
+
+Aus diesem Ordner:
 
 ```bash
-./install.sh
+npm --prefix app test
+node --check app/server.mjs
+node --check app/public/app.js
+zsh -n src/memguard
+zsh src/memguard selftest
+zsh build-app.sh
+zsh build-release.sh
 ```
 
-With your own config:
+Die Monitor-Tests benötigen macOS und verwenden eigene Wegwerfprozesse sowie temporäre Konfigurationen. Benutzerkonfiguration und installierter Dienst bleiben unverändert. Der Selftest isoliert Pause/Messwerte und zeigt seinen temporären Logpfad.
 
-```bash
-./install.sh --config my-config.json
-```
+Browserprüfung: Playwright als Testwerkzeug bereitstellen. MEMGUARD_PLAYWRIGHT_PATH kann auf eine vorhandene Installation zeigen, MEMGUARD_BROWSER_PATH auf Chromium oder Edge. Aus app dann `node test/browser.mjs` ausführen. Screenshots in app/test-results verwenden Testdaten. GitHub Actions führt die Syntax-, Unit-, API- und Monitor-Tests auf macOS aus; Browsertests sind separat. Siehe REVIEW.md für den belegten Prüfstand.
 
-**Many Macs (MDM, Intune, Jamf) or all users:** deploy `dist/MemGuard-<version>.pkg`. It installs to `/Library/Application Support/MemGuard`, starts in every user's session and links `/usr/local/bin/memguard`.
+## Offene Punkte
 
-## Configure
-
-Config lookup order:
-
-1. `~/Library/Application Support/MemGuard/config.json` (per user)
-2. `/Library/Application Support/MemGuard/config.json` (pkg default)
-
-```json
-{
-  "language": "en",
-  "notifications": true,
-  "interval": 10,
-  "warn_free_percent": 20,
-  "critical_free_percent": 10,
-  "warn_swapfiles": 20,
-  "critical_swapfiles": 40,
-  "warn_repeat_seconds": 600,
-  "terminate_grace_seconds": 8,
-  "targets": ["~/ltx-video/", "mlx_video", "ComfyUI/main.py", "ollama runner"]
-}
-```
-
-- `targets`: plain substrings matched against the full command line (`ps -o args`). `~` expands to the home folder. Empty list means warn only.
-- `language`: `en` or `de`.
-- Matching processes get SIGTERM, then SIGKILL after `terminate_grace_seconds`.
-- Changes are picked up within about 5 minutes, or immediately after `launchctl kickstart -k gui/$(id -u)/tech.farpoint.memguard`.
-
-`src/config.example-ml.json` contains example targets for local AI workloads.
-
-## Use
-
-```bash
-memguard status     # free memory, swap files, largest apps, matching targets
-memguard pause      # keep measuring, never terminate (creates ~/.memguard-off)
-memguard resume
-memguard selftest   # terminates a harmless dummy process, nothing else
-memguard log 50
-```
-
-Log: `~/Library/Logs/MemGuard/memguard.log`
-
-## Uninstall
-
-```bash
-./uninstall.sh            # per-user install
-sudo ./uninstall.sh       # pkg install
-```
-
-Config and logs are kept.
-
-## Build the pkg
-
-```bash
-./build-pkg.sh
-SIGN_ID="Developer ID Installer: Name (TEAMID)" ./build-pkg.sh   # signed
-```
-
-Unsigned packages trigger a Gatekeeper warning when opened by double-click. MDM deployment usually requires a signed package. Signing needs an Apple Developer ID Installer certificate, and notarization (`xcrun notarytool`) is recommended for distribution outside MDM.
-
-Files created by some sandboxed tools carry a `com.apple.provenance` attribute. `pkgutil --payload-files` then lists `._` entries. They are restored as attributes on install, not as files. Build from a regular Terminal session for a clean payload.
-
-## Limits
-
-- The thresholds are starting values. Watch the log for a week and adjust.
-- MemGuard cannot help if one process grabs all memory within less than one interval.
-- The underlying cause is still too much work for the available RAM. MemGuard buys time, it does not add memory.
-
----
-
-**Kurz auf Deutsch:** MemGuard verhindert Abstürze durch Speichermangel. Unter 20 % freiem Speicher kommt eine Warnung. Unter 10 % beendet MemGuard nur die Prozesse, die unter `targets` eingetragen sind, etwa lokale Video- oder KI-Jobs. Installation ohne Admin mit `./install.sh`, für viele Macs per `.pkg`. Mit `"language": "de"` kommen die Mitteilungen auf Deutsch.
-
-## License
-
-MIT, see the repository [LICENSE](../../LICENSE).
+- [ ] P1 · Betreiber: Austausch einer bestehenden Installation freigeben und anschließend live prüfen.
+- [ ] P1 · Betreiber: Repräsentativen Workload pilotieren und Zielmuster/Schwellenwerte anhand echter Messungen freigeben.
+- [ ] P2 · Release-Verantwortlicher: Bei Bedarf Apple-Signierung und Notarisierung für native Distribution ergänzen.

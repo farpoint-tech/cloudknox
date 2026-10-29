@@ -620,20 +620,24 @@ pwsh -Command "Import-Module ./CISEdgeBenchmark.psd1; Invoke-CISEdgeEnforce -Dry
 
 ### 10. MemGuard – Schutz vor Speicher-Panics (macOS)
 **Pfad:** `scripts/macos-memguard/`
-**Dokumentation:** [`scripts/macos-memguard/README.md`](scripts/macos-memguard/README.md)
+**Dokumentation:** [README](scripts/macos-memguard/README.md) · [Konzept](scripts/macos-memguard/CONCEPT.md) · [Entwicklung](scripts/macos-memguard/DEVELOPMENT.md) · [Arbeitsvorrat](scripts/macos-memguard/BACKLOG.md)
+**Stand:** Version 1.2.0, Entwurf in PR #40. Noch nicht freigegeben.
 
-Verhindert, dass ein Mac unter extremem Speicherdruck einfriert und mit `watchdog timeout` neu startet. Prüft alle 10 Sekunden den freien Speicher und die Swap-Dateien.
+MemGuard soll verhindern, dass ein Mac unter extremem Speicherdruck einfriert und mit `watchdog timeout` neu startet. Ein Monitor in zsh prüft alle 10 Sekunden den Kernel-Speicherindikator und die Zahl der Swap-Dateien.
 
-- Unter 20 % frei: Mitteilung mit den drei größten Apps.
-- Unter 10 % frei: beendet nur Prozesse, die in `targets` eingetragen sind, etwa lokale Video- oder KI-Jobs. Andere Apps fasst MemGuard nie an.
-- Reines zsh, keine Abhängigkeiten, keine Admin-Rechte für die Einzelplatz-Installation.
-- Für viele Macs per `.pkg` über Intune oder Jamf verteilbar.
+- Warnung bei höchstens 20 % freiem Speicher oder ab 50 Swap-Dateien. Die Mitteilung nennt die größten Apps.
+- Kritisch bei höchstens 10 % oder ab 65 Swap-Dateien. Dann beendet MemGuard ausschließlich eigene Prozesse, die auf ein Muster in `targets` passen, etwa lokale Video- oder KI-Jobs. Ohne Ziele wird nur gewarnt.
+- Lokale Weboberfläche unter `http://127.0.0.1:8765` mit Live-Werten, sortierbaren Prozesstabellen (Speicher, RAM-Anteil, CPU, Priorität), Konfiguration mit Ist/Soll-Bestätigung, Pause und Protokoll. Benötigt Node.js 22 oder neuer, keine npm-Abhängigkeiten.
+- `MemGuard.app` ist der eigene Mitteilungsabsender. Ein Klick öffnet die Statistik statt des Skripteditors.
+- Einzelplatz-Installation ohne Admin-Rechte per `install.sh`, für viele Macs per `.pkg`. Das Paket ist nicht signiert.
 
 ```bash
 cd scripts/macos-memguard
-./install.sh
-memguard status
+zsh MemGuard.command      # Oberfläche starten, ersetzt keine Installation
+./install.sh              # Monitor als LaunchAgent installieren
 ```
+
+Offen vor einer Freigabe: Klick auf eine echte Mitteilung am Zielgerät (MG-02), freigegebenes Update bestehender Installationen (MG-03), Signierung und Notarisierung (MG-09). Die Schwellen sind vorläufig (MG-12).
 
 ---
 
@@ -1034,3 +1038,12 @@ Für kritische Probleme in Produktionsumgebungen:
 ---
 
 **© 2025 Farpoint Technologies. Alle Rechte vorbehalten.**
+
+## MemGuard für macOS
+
+Lokale Speicherüberwachung mit grafischer Oberfläche und eigenem Mitteilungs-App-Einstieg. Einstieg: [Bedienung](scripts/macos-memguard/README.md), [Konzept](scripts/macos-memguard/CONCEPT.md), [Entwicklungsübergabe](scripts/macos-memguard/DEVELOPMENT.md), [Aufgaben mit Abnahmekriterien](scripts/macos-memguard/BACKLOG.md).
+
+### Offene Punkte MemGuard
+
+- [ ] P1 · Betreiber/QA: Native Mitteilungsaktivierung und freigegebenes Upgrade gemäß MemGuard-BACKLOG abnehmen.
+- [ ] P2 · Maintainer: Folgeentwicklung anhand der dokumentierten Arbeitspakete priorisieren.
