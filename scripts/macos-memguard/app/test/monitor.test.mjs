@@ -244,7 +244,7 @@ test('monitor heartbeat carries version, PID, loaded revision and effective valu
   const targets=['~/mg-heartbeat-test/'];
   const {root,env,config}=await setup(t,{interval:2,targets});
   const monitor=await startMonitor(t,env);
-  const beat=await until(()=>readBeat(root));
+  const beat=await until(async()=>{const b=await readBeat(root);return b&&b.measurement==='ok'?b:null;});
   assert.equal(beat.version,await scriptVersion());assert.equal(beat.pid,monitor.child.pid);assert.equal(beat.measurement,'ok');assert.equal(beat.paused,false);
   assert.equal(beat.config.path,config);
   assert.equal(beat.config.revision,sha(`${config}\n${await readFile(config,'utf8')}`),'zsh and Node compute the same revision');
