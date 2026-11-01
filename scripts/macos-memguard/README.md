@@ -89,7 +89,7 @@ Ein laufender Monitor lädt Änderungen nach 30 Prüfzyklen neu, bei zehn Sekund
 4. Eigentümer, Startzeit und Kommandozeile vor SIGTERM prüfen.
 5. Nach der Wartezeit erneut messen. SIGKILL nur bei weiterhin kritischen Werten, unveränderter Identität und aufgehobener Pause.
 
-Das Log unterscheidet gesendete Signale von bestätigtem Prozessende (`term_sent`, `kill_sent`). Rotation bei mehr als 5 MiB; eine Vorgängerversion bleibt. Eine Locksperre verhindert parallele Instanzen der neuen Monitorversion. Nach einem nicht abfangbaren Abbruch kann ein verwaistes monitor.lock bleiben. Vor dessen manueller Entfernung die dort hinterlegte PID und den Dienst prüfen.
+Das Log unterscheidet gesendete Signale von bestätigtem Prozessende (`term_sent`, `kill_sent`). Rotation bei mehr als 5 MiB; eine Vorgängerversion bleibt. Eine Locksperre (`monitor.lock` mit PID im Log-Ordner) verhindert parallele Instanzen. Sie wird beim Beenden entfernt. Nach einem nicht abfangbaren Abbruch, einem Absturz oder einem Neustart bleibt sie liegen und wird beim nächsten Start übernommen, wenn die gespeicherte PID kein laufender `memguard run` ist. Gehört sie einem laufenden Monitor, startet die zweite Instanz nicht und meldet das. Ein Lock ohne PID gilt in den ersten fünf Sekunden als „wird gerade angelegt“.
 
 Zwischen Identitätsprüfung und Signal bleibt ein nicht atomar ausschließbares Zeitfenster. SIGKILL kann ungespeicherte Arbeit unwiederbringlich verwerfen.
 

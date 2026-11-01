@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
-import {mkdtemp,writeFile,readFile,rm,mkdir,readdir,stat} from 'node:fs/promises';
+import {mkdtemp,writeFile,readFile,rm,mkdir,readdir,stat,utimes} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -72,7 +72,8 @@ step
 test('second monitor refuses an existing lock',async t=>{
   const {root,run}=await setup(t);
   await mkdir(join(root,'logs/monitor.lock'),{recursive:true});
-  await assert.rejects(run(['run']),/Monitor lock exists/);
+  // A fresh lock without an owner is still refused; the message names the reason.
+  await assert.rejects(run(['run']),/being created by another instance/);
 });
 
 for(const scenario of ['persistent','recovered','paused']) {
@@ -173,4 +174,62 @@ test('signal path and preview share one decision: memguard commands stay exclude
   const {run,config}=await setup(t,{targets:['memguard']});
   const rows=previewRows(await run(['preview',config,'1']));
   assert.ok(rows.every(r=>r.status!=='match'),'no process whose command contains memguard may be a match');
+});
+// Single-instance lock lifecycle. A stale lock must never keep the protection off.
+const until=async(check,ms=15000)=>{const end=Date.now()+ms;for(;;){const v=await check();if(v)return v;if(Date.now()>end)throw Error('timeout waiting for condition');await new Promise(resolve=>setTimeout(resolve,50));}};
+const present=async path=>{try{await stat(path);return true;}catch{return false;}};
+async function startMonitor(t,env){
+  const child=spawn('/bin/zsh',[script,'run'],{env:{...env,MEMGUARD_FAKE_FREE:'100'},stdio:['ignore','ignore','pipe']});
+  let stderr='';child.stderr.on('data',chunk=>{stderr+=chunk;});
+  const exited=new Promise(resolve=>child.once('exit',(code,signal)=>resolve({code,signal})));
+  t.after(async()=>{if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');await exited;});
+  return {child,exited,stderr:()=>stderr};
+}
+const lockPid=async root=>Number((await readFile(join(root,'logs/monitor.lock/pid'),'utf8')).trim());
+const monitorReady=async(root,child)=>until(async()=>{try{return await lockPid(root)===child.pid;}catch{return false;}});
+test('monitor removes its lock on a normal stop and starts again',async t=>{
+  const {root,env}=await setup(t,{interval:2});
+  const first=await startMonitor(t,env);await monitorReady(root,first.child);
+  first.child.kill('SIGTERM');await first.exited;
+  assert.equal(await present(join(root,'logs/monitor.lock')),false,'lock removed by the EXIT trap');
+  assert.ok(!first.stderr().includes('not set'),first.stderr());
+  const second=await startMonitor(t,env);await monitorReady(root,second.child);
+  assert.equal(second.child.exitCode,null,'second start is running');
+  second.child.kill('SIGTERM');await second.exited;
+});
+test('a lock left by a killed monitor is taken over',async t=>{
+  const {root,env}=await setup(t,{interval:2});
+  const first=await startMonitor(t,env);await monitorReady(root,first.child);
+  first.child.kill('SIGKILL');await first.exited;
+  assert.equal(await present(join(root,'logs/monitor.lock')),true,'SIGKILL cannot clean up, as after a crash or reboot');
+  const second=await startMonitor(t,env);await monitorReady(root,second.child);
+  assert.match(second.stderr(),/stale monitor lock/);
+  assert.equal(second.child.exitCode,null);
+  second.child.kill('SIGTERM');await second.exited;
+});
+test('a second instance does not start while a monitor is running',async t=>{
+  const {root,env}=await setup(t,{interval:2});
+  const first=await startMonitor(t,env);await monitorReady(root,first.child);
+  const second=await startMonitor(t,env);const result=await second.exited;
+  assert.equal(result.code,1);assert.match(second.stderr(),/already running/);
+  assert.equal(first.child.exitCode,null,'first monitor keeps running');assert.equal(await lockPid(root),first.child.pid);
+  first.child.kill('SIGTERM');await first.exited;
+});
+test('a lock without an owner PID is respected while fresh and replaced when old',async t=>{
+  const {root,env}=await setup(t,{interval:2});
+  const lock=join(root,'logs/monitor.lock');await mkdir(lock,{recursive:true});
+  const fresh=await startMonitor(t,env);const refused=await fresh.exited;
+  assert.equal(refused.code,1);assert.match(fresh.stderr(),/being created/);assert.equal(await present(lock),true,'fresh lock untouched');
+  const old=new Date(Date.now()-60000);await utimes(lock,old,old);
+  const taken=await startMonitor(t,env);await monitorReady(root,taken.child);
+  assert.match(taken.stderr(),/stale monitor lock/);
+  taken.child.kill('SIGTERM');await taken.exited;
+});
+test('a lock whose PID now belongs to another program is stale',async t=>{
+  const {root,env}=await setup(t,{interval:2});
+  const other=await dummy(t);
+  const lock=join(root,'logs/monitor.lock');await mkdir(lock,{recursive:true});await writeFile(join(lock,'pid'),String(other.child.pid));
+  const monitor=await startMonitor(t,env);await monitorReady(root,monitor.child);
+  assert.match(monitor.stderr(),/stale monitor lock/);assert.equal(other.child.signalCode,null,'the unrelated program is never touched');
+  monitor.child.kill('SIGTERM');await monitor.exited;
 });

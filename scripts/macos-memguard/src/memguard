@@ -172,6 +172,36 @@ target_reason() {
 }
 safe_target() { [[ "$(target_reason "$1")" == match* ]]; }
 
+# ---------- single instance ----------
+# One monitor per user. A lock left behind by a killed monitor, a crash or a
+# reboot must not keep the protection off: it is taken over when the recorded
+# PID is gone or no longer belongs to a memguard monitor.
+typeset -g LOCK_DIR=
+monitor_alive() { # $1 pid
+  local args
+  [[ "$1" == <-> && "$1" != "$$" ]] || return 1
+  args=$(ps -p "$1" -o args= 2>/dev/null) || return 1
+  [[ "$args" =~ '(^|[ /])memguard run( |$)' ]]
+}
+acquire_lock() {
+  local recorded= mtime
+  if mkdir "$LOCK_DIR" 2>/dev/null; then print $$ > "$LOCK_DIR/pid"; return 0; fi
+  [[ -r "$LOCK_DIR/pid" ]] && recorded=$(<"$LOCK_DIR/pid")
+  if [[ -z "$recorded" ]]; then
+    # The owner may be between mkdir and writing its PID: give it a moment.
+    mtime=$(stat -f %m "$LOCK_DIR" 2>/dev/null || print 0)
+    if (( $(date +%s) - mtime < 5 )); then
+      print -u2 "Monitor lock is being created by another instance: $LOCK_DIR"; return 1
+    fi
+  elif monitor_alive "$recorded"; then
+    print -u2 "Monitor already running (PID $recorded, lock $LOCK_DIR)"; return 1
+  fi
+  print -u2 "Taking over stale monitor lock (PID ${recorded:-unknown} is not a running monitor)"
+  rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR" 2>/dev/null
+  if mkdir "$LOCK_DIR" 2>/dev/null; then print $$ > "$LOCK_DIR/pid"; return 0; fi
+  print -u2 "Monitor lock taken by another instance: $LOCK_DIR"; return 1
+}
+
 # ---------- core ----------
 typeset -g LAST_WARN=0 LAST_CRIT=0
 step() {
@@ -229,13 +259,11 @@ step() {
 # ---------- commands ----------
 cmd_run() {
   load_cfg || return 1
-  local lock_dir="$LOG_DIR/monitor.lock"
+  LOCK_DIR="$LOG_DIR/monitor.lock"
   mkdir -p "$LOG_DIR"
-  if ! mkdir "$lock_dir" 2>/dev/null; then
-    print -u2 "Monitor lock exists: $lock_dir (check for a running instance before removing a stale lock)"; return 1
-  fi
-  print $$ > "$lock_dir/pid"
-  trap 'rm -f "$lock_dir/pid"; rmdir "$lock_dir"' EXIT
+  acquire_lock || return 1
+  # The EXIT trap runs after this function has returned: it must not use locals.
+  trap 'rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR" 2>/dev/null' EXIT
   trap 'exit 0' TERM INT HUP
   log "START v$VERSION config=$(cfg_file) warn=${WARN_FREE}% crit=${CRIT_FREE}% targets=${(j:|:)TARGETS}"
   local n=0
