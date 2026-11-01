@@ -222,3 +222,14 @@ input:focus-visible,select:focus-visible,textarea:focus-visible { outline:2px so
 .preview-table tr:last-child td{border-bottom:0}
 .preview-match td:first-child{color:var(--state-warning);font-weight:600}
 .preview-excluded td{color:var(--muted)}
+
+.levels-box{margin:14px 0 6px}
+.levels-box h3{font-size:13px;margin:0 0 8px}
+.levels{list-style:none;margin:0 0 6px;padding:0;border:1px solid var(--line);border-radius:8px}
+.levels li{display:grid;grid-template-columns:96px 150px 1fr;gap:10px;align-items:baseline;padding:9px 12px;border-bottom:1px solid var(--line);font-size:12px}
+.levels li:last-child{border-bottom:0}
+.level-ok strong{color:var(--state-normal,var(--link))}
+.level-open strong{color:var(--state-warning)}
+.level-name{font-weight:600}
+.level-note{color:var(--muted)}
+@media (max-width:640px){.levels li{grid-template-columns:1fr;gap:2px}}

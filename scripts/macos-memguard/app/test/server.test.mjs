@@ -4,7 +4,7 @@ import {mkdtemp,rm,readFile,readdir,writeFile,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createApp} from '../server.mjs';
-import {defaults} from '../core.mjs';
+import {defaults,targetsDigest} from '../core.mjs';
 import {get as httpGet} from 'node:http';
 const fixture=async(file,args)=>{
   if(args.includes('kern.memorystatus_level'))return '50';
@@ -102,4 +102,46 @@ test('preview endpoint validates patterns, passes the monitor PID and cleans up'
   assert.equal(calls.length,1,'invalid patterns never reach the monitor');
   const garbage=await get('/api/preview?targets=%7Bnot-json');
   assert.equal(garbage.status,400);
+});
+// MG-05: protection is shown only from a fresh heartbeat of a real monitor.
+test('heartbeat decides protection and the saved, loaded and verified levels',async t=>{
+  const proc={alive:true,args:'/bin/zsh /Users/u/Library/Application Support/MemGuard/memguard run'};
+  const sampleCommand=async(file,args)=>{
+    if(file==='/bin/ps'&&args[0]==='-p'){if(proc.alive)return proc.args;throw Error('no such process');}
+    return fixture(file,args);
+  };
+  const {home,get}=await setup(t,sampleCommand);
+  const cfgPath=join(home,'Library/Application Support/MemGuard/config.json');
+  await mkdir(join(home,'Library/Application Support/MemGuard'),{recursive:true});
+  const saved={...defaults,targets:['~/ltx-video/']};
+  await writeFile(cfgPath,JSON.stringify(saved,null,2)+'\n');
+  const logDir=join(home,'Library/Logs/MemGuard');await mkdir(logDir,{recursive:true});
+  const info=(await get('/api/status')).data.config;
+  const now=()=>Math.floor(Date.now()/1000);
+  const beat=(patch={})=>JSON.stringify({app:'tech.farpoint.memguard.monitor',version:'1.2.0',pid:4242,startedAt:now()-100,time:now()-3,validForSeconds:19,paused:false,measurement:'ok',
+    config:{path:info.path,revision:info.revision,loadedAt:now()-100},
+    effective:{interval:saved.interval,warnFreePercent:saved.warn_free_percent,criticalFreePercent:saved.critical_free_percent,warnSwapfiles:saved.warn_swapfiles,criticalSwapfiles:saved.critical_swapfiles,targetCount:1,targetsDigest:targetsDigest(saved.targets,home)},...patch});
+  const status=async()=>(await get('/api/status')).data;
+  const put=text=>writeFile(join(logDir,'heartbeat.json'),text);
+
+  let s=await status();assert.equal(s.heartbeat.state,'none');assert.equal(s.configLevels.saved.ok,true);assert.equal(s.configLevels.loaded.ok,false);
+  await put(beat());
+  s=await status();assert.equal(s.heartbeat.state,'active');assert.equal(s.heartbeat.version,'1.2.0');
+  assert.equal(s.configLevels.loaded.ok,true);assert.equal(s.configLevels.verified.ok,true);
+  await put(beat({time:now()-60}));
+  s=await status();assert.equal(s.heartbeat.state,'stale','too old, even though the file is there');assert.equal(s.configLevels.loaded.ok,false);assert.equal(s.configLevels.verified.ok,false);
+  await put(beat());proc.alive=false;
+  s=await status();assert.equal(s.heartbeat.state,'stale','the reported process is gone');assert.match(s.heartbeat.problems.join(' '),/läuft nicht mehr/);
+  proc.alive=true;proc.args='/usr/bin/vim notes.md';
+  s=await status();assert.equal(s.heartbeat.state,'stale','the PID belongs to another program');
+  proc.args='/bin/zsh /x/memguard run';
+  await put(beat({config:{path:info.path,revision:'f'.repeat(64),loadedAt:now()-100}}));
+  s=await status();assert.equal(s.heartbeat.state,'active');assert.equal(s.configLevels.loaded.ok,false,'saved but not loaded yet');assert.equal(s.configLevels.saved.ok,true);
+  await put('{"app": "nope"');
+  s=await status();assert.equal(s.heartbeat.state,'invalid');assert.equal(s.configLevels.loaded.ok,false);
+  await put(beat());
+  const exported=(await get('/api/export')).data;
+  assert.equal(exported.monitorHeartbeat.state,'active');assert.deepEqual(exported.configLevels,{saved:true,loaded:true,verified:true});
+  assert.equal(exported.heartbeat,undefined);assert.ok(!JSON.stringify(exported).includes(info.path),'no configuration path in the export');
+  assert.ok(!JSON.stringify(exported).includes('4242'),'no PID in the export');
 });

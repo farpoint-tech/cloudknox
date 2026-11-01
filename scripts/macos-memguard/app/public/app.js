@@ -73,6 +73,22 @@ function fillConfig(){
   configRevision=state.config.revision;configLoaded=true;dirty=false;text('#dirty-state','Keine Änderungen');
   text('#config-path',`Quelle: ${state.config.path}${state.config.inherited?' · Beim Speichern entsteht eine benutzerspezifische Konfiguration.':''}`);
 }
+function ago(seconds){if(seconds===null||seconds===undefined)return '—';if(seconds<90)return `${Math.max(0,Math.round(seconds))} s`;if(seconds<5400)return `${Math.round(seconds/60)} min`;return `${Math.round(seconds/3600)} h`;}
+function renderLevels(){
+  const root=$('#config-levels');root.replaceChildren();const levels=state.configLevels;if(!levels)return;
+  const rows=[
+    ['Gespeichert',levels.saved,levels.saved.ok?`Revision ${levels.saved.revision.slice(0,8)}`:levels.saved.reason],
+    ['Vom Monitor geladen',levels.loaded,levels.loaded.ok?`Geladen um ${new Date(levels.loaded.loadedAt*1000).toLocaleTimeString('de-DE')}`:levels.loaded.reason],
+    ['Wirksam geprüft',levels.verified,levels.verified.ok?(state.heartbeat?.paused?'Werte stimmen. Pausiert: es wird nichts beendet.':'Werte stimmen, letzte Messung erfolgreich.'):levels.verified.reason]
+  ];
+  for(const [label,level,detail] of rows){
+    const li=document.createElement('li');li.className=level.ok?'level-ok':'level-open';
+    const mark=document.createElement('strong');mark.textContent=level.ok?'Ja':'Nicht belegt';
+    const name=document.createElement('span');name.className='level-name';name.textContent=label;
+    const note=document.createElement('span');note.className='level-note';note.textContent=detail;
+    li.append(mark,name,note);root.append(li);
+  }
+}
 function render(){
   const level=state.state;
   const color=statusColor(level);
@@ -80,16 +96,24 @@ function render(){
   text('#free',state.free===null?'—':`${state.free}%`);$('#gauge-value').style.stroke=color;$('#gauge-value').style.strokeDashoffset=421*(1-(state.free??0)/100);
   text('#ram',bytes(state.totalBytes));text('#swap',bytes(state.swapUsedBytes));text('#swap-files',`${state.swapfiles??'—'} Swap-Dateien`);text('#target-count',state.config.value.targets.length);text('#target-matches',`${state.processes.filter(p=>p.target).length} Treffer in den Top 100`);
   const running=state.agent?.state==='running',external=state.agent?.source==='launchagent';
-  text('#monitor-status',running?'Aktiv':state.agent?.source?'Geladen':'Inaktiv');text('#monitor-source',external?'Installierter LaunchAgent':state.agent?.source==='app'?'Durch diese App gestartet':'Nur Anzeige · kein Schutz aktiv');
-  text('#monitor-pill',running?'Monitor läuft':'Monitor nicht aktiv');text('#pause-pill',state.paused?'Prozessbeendigung pausiert':'Prozessbeendigung nicht pausiert');
+  const hb=state.heartbeat||{state:'none',problems:[]},live=hb.state==='active';
+  const origin=external?'Installierter Dienst':state.agent?.source==='app'?'Durch diese App gestartet':'Monitor';
+  let monitorStatus,monitorSource,monitorPill;
+  if(live){monitorStatus='Aktiv';monitorSource=`${origin} · Version ${hb.version} · Rückmeldung vor ${ago(hb.ageSeconds)}`;monitorPill='Monitor läuft';}
+  else if(hb.state==='stale'){monitorStatus='Keine Rückmeldung';monitorSource=`Letzte Rückmeldung vor ${ago(hb.ageSeconds)}. ${hb.problems[0]} Schutz nicht belegt.`;monitorPill='Monitor ohne Rückmeldung';}
+  else if(hb.state==='invalid'){monitorStatus='Rückmeldung ungültig';monitorSource=`${hb.problems[0]} Schutz nicht belegt.`;monitorPill='Monitor ohne Rückmeldung';}
+  else if(running){monitorStatus='Ohne Rückmeldung';monitorSource=`${origin} ist geladen, meldet sich aber nicht. Ältere Version (vor 1.2.0) oder gerade gestartet. Schutz nicht belegt.`;monitorPill='Monitor ohne Rückmeldung';}
+  else{monitorStatus='Inaktiv';monitorSource='Nur Anzeige · kein Schutz aktiv';monitorPill='Monitor nicht aktiv';}
+  text('#monitor-status',monitorStatus);text('#monitor-source',monitorSource);
+  text('#monitor-pill',monitorPill);text('#pause-pill',state.paused?'Prozessbeendigung pausiert':'Prozessbeendigung nicht pausiert');
   const pause=$('#pause');pause.disabled=false;pause.textContent=state.paused?'Pause aufheben':'Beenden pausieren';
   const monitor=$('#monitor');monitor.disabled=external||state.agent?.source==='unknown'||!!state.config.error;monitor.textContent=state.agent?.source==='unknown'?'Status unbekannt':external?'Extern verwaltet':running?'Monitor stoppen':'Monitor starten';
-  text('#agent-note',external?'Der installierte Dienst wird hier nicht ersetzt. Seine Version ist nicht verifiziert. Die neue Version muss separat installiert werden.':'Ein hier gestarteter Monitor endet mit dem Server. Ein geschlossener Browser-Tab stoppt ihn nicht.');
+  text('#agent-note',external?(live?`Der installierte Dienst meldet Version ${hb.version}. Er wird hier nicht ersetzt.`:'Der installierte Dienst wird hier nicht ersetzt. Seine Version ist nicht verifiziert, weil er sich nicht meldet. Die neue Version muss separat installiert werden.'):'Ein hier gestarteter Monitor endet mit dem Server. Ein geschlossener Browser-Tab stoppt ihn nicht.');
   const points=state.history;let segments=[],current=[];
   points.forEach((p,i)=>{if(p.free===null){if(current.length)segments.push(current);current=[];}else current.push(`${points.length===1?0:i/(points.length-1)*640},${145-p.free*1.4}`);});if(current.length)segments.push(current);
   const svg=$('#chart');svg.querySelectorAll('.series').forEach(el=>el.remove());$('#chart-line').setAttribute('points','');
   for(const points of segments){const line=document.createElementNS('http://www.w3.org/2000/svg','polyline');line.classList.add('series');line.setAttribute('points',points.join(' '));line.setAttribute('fill','none');line.setAttribute('stroke',color);line.setAttribute('stroke-width','2.5');svg.append(line);}
-  renderLists();if(!configLoaded||!dirty)fillConfig();
+  renderLists();renderLevels();if(!configLoaded||!dirty)fillConfig();
   text('#updated',`Messung: ${new Date(state.time).toLocaleTimeString('de-DE')}`);
   const errors=[...state.errors,...(state.monitorError?[state.monitorError]:[]),...(state.agent?.error?[state.agent.error]:[])];$('#error').hidden=!errors.length;if(errors.length)error(errors.join(' · '));
 }

@@ -6,7 +6,8 @@ import {mkdtemp,writeFile,readFile,rm,mkdir,readdir,stat,utimes} from 'node:fs/p
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {defaults} from '../core.mjs';
+import {createHash} from 'node:crypto';
+import {defaults,parseHeartbeat,assessMonitor,targetsDigest} from '../core.mjs';
 const exec=promisify(execFile);
 const script=fileURLToPath(new URL('../../src/memguard',import.meta.url));
 async function setup(t,patch={}){
@@ -178,8 +179,8 @@ test('signal path and preview share one decision: memguard commands stay exclude
 // Single-instance lock lifecycle. A stale lock must never keep the protection off.
 const until=async(check,ms=15000)=>{const end=Date.now()+ms;for(;;){const v=await check();if(v)return v;if(Date.now()>end)throw Error('timeout waiting for condition');await new Promise(resolve=>setTimeout(resolve,50));}};
 const present=async path=>{try{await stat(path);return true;}catch{return false;}};
-async function startMonitor(t,env){
-  const child=spawn('/bin/zsh',[script,'run'],{env:{...env,MEMGUARD_FAKE_FREE:'100'},stdio:['ignore','ignore','pipe']});
+async function startMonitor(t,env,extra={}){
+  const child=spawn('/bin/zsh',[script,'run'],{env:{...env,MEMGUARD_FAKE_FREE:'100',...extra},stdio:['ignore','ignore','pipe']});
   let stderr='';child.stderr.on('data',chunk=>{stderr+=chunk;});
   const exited=new Promise(resolve=>child.once('exit',(code,signal)=>resolve({code,signal})));
   t.after(async()=>{if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');await exited;});
@@ -231,5 +232,66 @@ test('a lock whose PID now belongs to another program is stale',async t=>{
   const lock=join(root,'logs/monitor.lock');await mkdir(lock,{recursive:true});await writeFile(join(lock,'pid'),String(other.child.pid));
   const monitor=await startMonitor(t,env);await monitorReady(root,monitor.child);
   assert.match(monitor.stderr(),/stale monitor lock/);assert.equal(other.child.signalCode,null,'the unrelated program is never touched');
+  monitor.child.kill('SIGTERM');await monitor.exited;
+});
+
+// MG-05: the zsh monitor writes the heartbeat, the Node code reads and judges it.
+const sha=text=>createHash('sha256').update(text).digest('hex');
+const readBeat=async root=>{try{const r=parseHeartbeat(await readFile(join(root,'logs/heartbeat.json'),'utf8'));return r.ok?r.value:null;}catch{return null;}};
+const processArgs=async pid=>{try{return (await exec('/bin/ps',['-p',String(pid),'-o','args='])).stdout.trim();}catch{return null;}};
+const scriptVersion=async()=>(await readFile(script,'utf8')).match(/^VERSION="([^"]+)"/m)[1];
+test('monitor heartbeat carries version, PID, loaded revision and effective values, and disappears on stop',async t=>{
+  const targets=['~/mg-heartbeat-test/'];
+  const {root,env,config}=await setup(t,{interval:2,targets});
+  const monitor=await startMonitor(t,env);
+  const beat=await until(()=>readBeat(root));
+  assert.equal(beat.version,await scriptVersion());assert.equal(beat.pid,monitor.child.pid);assert.equal(beat.measurement,'ok');assert.equal(beat.paused,false);
+  assert.equal(beat.config.path,config);
+  assert.equal(beat.config.revision,sha(`${config}\n${await readFile(config,'utf8')}`),'zsh and Node compute the same revision');
+  assert.deepEqual(beat.effective,{interval:2,warnFreePercent:20,criticalFreePercent:10,warnSwapfiles:50,criticalSwapfiles:65,targetCount:1,targetsDigest:targetsDigest(targets,process.env.HOME)});
+  assert.ok(beat.validForSeconds>=3*2,'declares a validity window longer than a few cycles');
+  const verdict=assessMonitor({heartbeat:beat,nowSeconds:Math.floor(Date.now()/1000),processArgs:await processArgs(beat.pid)});
+  assert.equal(verdict.state,'active',JSON.stringify(verdict));
+  const first=beat.time;await until(async()=>(await readBeat(root))?.time>first);
+  monitor.child.kill('SIGTERM');await monitor.exited;
+  assert.equal(await present(join(root,'logs/heartbeat.json')),false,'a clean stop removes the heartbeat');
+  assert.equal(await present(join(root,'logs/monitor.lock')),false);
+});
+test('monitor loads a changed configuration only at its next reload and reports exactly that',async t=>{
+  const {root,env,config}=await setup(t,{interval:2});
+  const edit=async patch=>{const next={...JSON.parse(await readFile(config,'utf8')),...patch};await writeFile(config,JSON.stringify(next));return next;};
+  const slow=await startMonitor(t,env);
+  const before=await until(()=>readBeat(root));
+  await edit({warn_free_percent:25});
+  const afterWrite=before.time;await until(async()=>(await readBeat(root))?.time>afterWrite);
+  const still=await readBeat(root);
+  assert.equal(still.config.revision,before.config.revision,'saved is not loaded: the monitor reloads every 30 cycles');
+  assert.equal(still.effective.warnFreePercent,20);
+  assert.notEqual(sha(`${config}\n${await readFile(config,'utf8')}`),still.config.revision,'the file on disk has moved on');
+  slow.child.kill('SIGTERM');await slow.exited;
+  const fast=await startMonitor(t,env,{MEMGUARD_TEST_RELOAD_EVERY:'1'});
+  const start=await until(()=>readBeat(root));assert.equal(start.effective.warnFreePercent,25);
+  await edit({warn_free_percent:30,critical_free_percent:5});
+  const reloaded=await until(async()=>{const b=await readBeat(root);return b?.effective.warnFreePercent===30?b:null;});
+  assert.equal(reloaded.effective.criticalFreePercent,5);
+  assert.equal(reloaded.config.revision,sha(`${config}\n${await readFile(config,'utf8')}`));
+  assert.ok(reloaded.config.loadedAt>=start.config.loadedAt);assert.notEqual(reloaded.config.revision,start.config.revision);
+  fast.child.kill('SIGTERM');await fast.exited;
+});
+test('a killed monitor leaves a heartbeat that is not trusted',async t=>{
+  const {root,env}=await setup(t,{interval:2});
+  const monitor=await startMonitor(t,env);const beat=await until(()=>readBeat(root));
+  monitor.child.kill('SIGKILL');await monitor.exited;
+  const left=await readBeat(root);assert.ok(left,'SIGKILL cannot clean up');
+  const verdict=assessMonitor({heartbeat:left,nowSeconds:left.time+1,processArgs:await processArgs(left.pid)});
+  assert.equal(verdict.state,'stale');assert.match(verdict.problems.join(' '),/läuft nicht mehr/);
+  const hung=assessMonitor({heartbeat:left,nowSeconds:left.time+left.validForSeconds+1,processArgs:'/bin/zsh /x/memguard run'});
+  assert.equal(hung.state,'stale','a hung monitor that is still a process stops being trusted when it stops reporting');
+});
+test('monitor reports a failed measurement instead of looking healthy',async t=>{
+  const {root,env}=await setup(t,{interval:2});
+  const monitor=await startMonitor(t,env,{MEMGUARD_FAKE_FREE:'not-a-number'});
+  const beat=await until(async()=>{const b=await readBeat(root);return b&&b.measurement==='failed'?b:null;});
+  assert.equal(beat.measurement,'failed');
   monitor.child.kill('SIGTERM');await monitor.exited;
 });

@@ -15,6 +15,7 @@ SYS_DIR="/Library/Application Support/MemGuard"
 USER_DIR="$HOME/Library/Application Support/MemGuard"
 LOG_DIR="${MEMGUARD_LOG_DIR:-$HOME/Library/Logs/MemGuard}"
 LOG="$LOG_DIR/memguard.log"
+HEARTBEAT="$LOG_DIR/heartbeat.json"
 PAUSE_FILE="${MEMGUARD_PAUSE_FILE:-$HOME/.memguard-off}"
 
 # ---------- config ----------
@@ -202,10 +203,69 @@ acquire_lock() {
   print -u2 "Monitor lock taken by another instance: $LOCK_DIR"; return 1
 }
 
+# ---------- heartbeat ----------
+# The monitor reports its own state so that nothing infers protection from
+# "the service is loaded". Written atomically every cycle, removed on a clean
+# exit. A file that is not refreshed within validForSeconds is stale: a killed
+# or hung monitor leaves a file behind, and the dashboard must not trust it.
+typeset -g HB_FAILED=0 STARTED_AT=0 MEASURE_STATE=unknown
+typeset -g CFG_REVISION=none CFG_PATH= CFG_LOADED_AT=0 CFG_TARGETS_DIGEST=
+json_str() { local s=${1//[[:cntrl:]]/ }; s=${s//\\/\\\\}; s=${s//\"/\\\"}; print -rn -- "\"$s\""; }
+# sha256 over "<path>\n<file bytes>": the same value the dashboard computes as
+# its configuration revision. "none" when no configuration file is in use.
+config_revision() {
+  local f; f=$(cfg_file)
+  [[ -n "$f" && -r "$f" ]] || { print none; return; }
+  { print -r -- "$f"; /bin/cat "$f"; } | /usr/bin/shasum -a 256 | /usr/bin/cut -d' ' -f1
+}
+# Loads the configuration and records the revision that was actually parsed.
+# A file that changes while it is being read is read again; a revision that was
+# not the one parsed is never claimed.
+load_cfg_tracked() {
+  local before after attempt
+  for attempt in 1 2 3; do
+    before=$(config_revision)
+    load_cfg || return 1
+    after=$(config_revision)
+    [[ "$before" == "$after" ]] && break
+  done
+  [[ "$before" == "$after" ]] && CFG_REVISION=$after || CFG_REVISION=unstable
+  CFG_PATH=$(cfg_file)
+  CFG_LOADED_AT=$(date +%s)
+  CFG_TARGETS_DIGEST=$(print -r -- "${(F)TARGETS}" | /usr/bin/shasum -a 256 | /usr/bin/cut -d' ' -f1)
+}
+write_heartbeat() {
+  local now valid tmp ok=0
+  now=$(date +%s); valid=$(( 3 * INTERVAL + GRACE + 5 ))
+  tmp="$LOG_DIR/.heartbeat.$$.tmp"
+  {
+    print -r -- '{'
+    print -r -- '  "app": "tech.farpoint.memguard.monitor",'
+    print -r -- "  \"version\": \"$VERSION\","
+    print -r -- "  \"pid\": $$,"
+    print -r -- "  \"startedAt\": $STARTED_AT,"
+    print -r -- "  \"time\": $now,"
+    print -r -- "  \"validForSeconds\": $valid,"
+    print -r -- "  \"paused\": $([[ -e $PAUSE_FILE ]] && print true || print false),"
+    print -r -- "  \"measurement\": \"$MEASURE_STATE\","
+    print -r -- "  \"config\": {\"path\": $(json_str "$CFG_PATH"), \"revision\": \"$CFG_REVISION\", \"loadedAt\": $CFG_LOADED_AT},"
+    print -r -- "  \"effective\": {\"interval\": $INTERVAL, \"warnFreePercent\": $WARN_FREE, \"criticalFreePercent\": $CRIT_FREE, \"warnSwapfiles\": $WARN_SWAP, \"criticalSwapfiles\": $CRIT_SWAP, \"targetCount\": ${#TARGETS}, \"targetsDigest\": \"$CFG_TARGETS_DIGEST\"}"
+    print -r -- '}'
+  } > "$tmp" 2>/dev/null && /bin/mv -f "$tmp" "$HEARTBEAT" 2>/dev/null && ok=1
+  if (( ok )); then HB_FAILED=0
+  else
+    /bin/rm -f "$tmp" 2>/dev/null
+    (( HB_FAILED )) || log 'WARN heartbeat not written; the dashboard cannot verify this monitor'
+    HB_FAILED=1
+  fi
+  return 0
+}
+
 # ---------- core ----------
 typeset -g LAST_WARN=0 LAST_CRIT=0
 step() {
-  if ! measure; then log 'ERROR measurement unavailable; no process signals sent'; return 0; fi
+  if ! measure; then MEASURE_STATE=failed; log 'ERROR measurement unavailable; no process signals sent'; return 0; fi
+  MEASURE_STATE=ok
   local now=$(date +%s) crit=0 warn=0
   (( FREE <= CRIT_FREE || SWAPFILES >= CRIT_SWAP )) && crit=1
   (( FREE <= WARN_FREE || SWAPFILES >= WARN_SWAP )) && warn=1
@@ -258,19 +318,24 @@ step() {
 
 # ---------- commands ----------
 cmd_run() {
-  load_cfg || return 1
+  load_cfg_tracked || return 1
   LOCK_DIR="$LOG_DIR/monitor.lock"
   mkdir -p "$LOG_DIR"
   acquire_lock || return 1
   # The EXIT trap runs after this function has returned: it must not use locals.
-  trap 'rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR" 2>/dev/null' EXIT
+  STARTED_AT=$(date +%s)
+  trap 'rm -f "$LOCK_DIR/pid" "$HEARTBEAT"; rmdir "$LOCK_DIR" 2>/dev/null' EXIT
   trap 'exit 0' TERM INT HUP
-  log "START v$VERSION config=$(cfg_file) warn=${WARN_FREE}% crit=${CRIT_FREE}% targets=${(j:|:)TARGETS}"
-  local n=0
+  log "START v$VERSION config=$(cfg_file) rev=${CFG_REVISION[1,12]} warn=${WARN_FREE}% crit=${CRIT_FREE}% targets=${(j:|:)TARGETS}"
+  # Test hook: reload more often than every 30 cycles.
+  local n=0 reload_every=30
+  [[ "${MEMGUARD_TEST_RELOAD_EVERY:-}" == <-> ]] && (( MEMGUARD_TEST_RELOAD_EVERY >= 1 )) && reload_every=$MEMGUARD_TEST_RELOAD_EVERY
+  write_heartbeat
   while true; do
     step
+    write_heartbeat
     sleep $INTERVAL
-    (( ++n % 30 == 0 )) && { load_cfg || return 1; }
+    (( ++n % reload_every == 0 )) && { load_cfg_tracked || return 1; write_heartbeat; }
   done
 }
 cmd_status() {
@@ -279,6 +344,7 @@ cmd_status() {
   measure || print -u2 'Measurement unavailable; no healthy state inferred'
   print "MemGuard $VERSION"
   print "  config:      $(cfg_file || true)"
+  print "  config rev:  $(config_revision | /usr/bin/cut -c1-12)"
   print "  free memory: ${FREE}%   (warn <= $WARN_FREE, critical <= $CRIT_FREE)"
   print "  swap files:  $SWAPFILES   (warn >= $WARN_SWAP, critical >= $CRIT_SWAP)"
   print "  paused:      $([[ -e $PAUSE_FILE ]] && echo yes || echo no)"

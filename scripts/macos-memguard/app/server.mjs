@@ -6,7 +6,7 @@ import { homedir, platform, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { defaults, validateConfig, classify, command, parseProcesses, parsePreview } from './core.mjs';
+import { defaults, validateConfig, classify, command, parseProcesses, parsePreview, parseHeartbeat, assessMonitor, configLevels } from './core.mjs';
 import { dashboardIdentity, dashboardVersion } from './open-dashboard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -24,7 +24,7 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
   async function configuration() {
     const path = existsSync(userConfig) ? userConfig : (!testMode && existsSync(systemConfig) ? systemConfig : null);
     const raw = path ? await readFile(path,'utf8') : JSON.stringify(defaults,null,2)+'\n';
-    return {value:validateConfig(JSON.parse(raw)), revision:hash(`${path}\n${raw}`), path:path || userConfig, writablePath:userConfig, inherited:path===systemConfig};
+    return {value:validateConfig(JSON.parse(raw)), revision:hash(`${path}\n${raw}`), exists:Boolean(path), path:path || userConfig, writablePath:userConfig, inherited:path===systemConfig};
   }
   async function agentStatus() {
     if (monitor) return {state:'running',source:'app',pid:monitor.pid,version};
@@ -37,6 +37,20 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
       if(/Could not find service|Could not find specified service/.test(error.stderr || '')) return {state:'stopped',source:null};
       return {state:'unknown',source:'unknown',error:'LaunchAgent-Status nicht lesbar; Start gesperrt.'};
     }
+  }
+  // What the monitor reports about itself. A loaded service is not protection:
+  // only a fresh heartbeat from a process that is really a memguard monitor is.
+  async function monitorReport() {
+    const file = join(logDir,'heartbeat.json');
+    let raw, heartbeat = null, parseProblem = null, processArgs = null;
+    try {
+      const info = await stat(file);
+      if (info.size > 8192) parseProblem = 'Heartbeat ungültig: zu groß.';
+      else raw = await readFile(file,'utf8');
+    } catch(error) { if (error.code !== 'ENOENT') parseProblem = 'Heartbeat-Datei nicht lesbar.'; }
+    if (raw !== undefined) { const parsed = parseHeartbeat(raw); if (parsed.ok) heartbeat = parsed.value; else parseProblem = parsed.problem; }
+    if (heartbeat) { try { processArgs = await sampleCommand('/bin/ps',['-p',String(heartbeat.pid),'-o','args=']); } catch { processArgs = null; } }
+    return {heartbeat, monitor:assessMonitor({heartbeat, parseProblem, nowSeconds:Math.floor(Date.now()/1000), processArgs})};
   }
   async function sample() {
     const errors=[];
@@ -61,9 +75,11 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
     if(free===null && freeRaw!==null) errors.push('Speicherindikator unlesbar');
     const processes=processesRaw===null ? [] : parseProcesses(processesRaw,config.value.targets,process.getuid(),home).slice(0,100);
     const state=config.error ? 'unknown' : classify(free,swapfiles,config.value);
+    const report=await monitorReport();
+    const levels=configLevels({config,monitor:report.monitor,heartbeat:report.heartbeat,home});
     const now=new Date().toISOString();
     history.push({time:now,free,swapUsedBytes}); if(history.length>180) history.shift();
-    cache={version,time:now,state,free,totalBytes,swapUsedBytes,swapfiles,processes,config,paused:existsSync(pauseFile),agent:take(5,'Monitor'),monitorError,errors,history:[...history]};
+    cache={version,time:now,state,free,totalBytes,swapUsedBytes,swapfiles,processes,config,paused:existsSync(pauseFile),agent:take(5,'Monitor'),heartbeat:report.monitor,configLevels:levels,monitorError,errors,history:[...history]};
     return cache;
   }
   function getSample() {
@@ -125,8 +141,10 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
         }
         if(path==='/api/export') {
           const state=await getSample();
-          const {config,processes,...safe}=state;
-          return send(res,200,{...safe,config:{...config.value,targets:config.value.targets.map(()=> '[redacted]')},processes:processes.map(({rssBytes,own,target})=>({rssBytes,own,target}))});
+          const {config,processes,heartbeat,configLevels:levels,...safe}=state;
+          return send(res,200,{...safe,config:{...config.value,targets:config.value.targets.map(()=> '[redacted]')},processes:processes.map(({rssBytes,own,target})=>({rssBytes,own,target})),
+            monitorHeartbeat:{state:heartbeat.state,ageSeconds:heartbeat.ageSeconds??null,version:heartbeat.version??null},
+            configLevels:{saved:levels.saved.ok,loaded:levels.loaded.ok,verified:levels.verified.ok}});
         }
         return send(res,404,{error:'Nicht gefunden.'});
       }
