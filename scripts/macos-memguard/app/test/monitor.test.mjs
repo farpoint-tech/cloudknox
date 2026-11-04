@@ -235,6 +235,23 @@ test('a lock whose PID now belongs to another program is stale',async t=>{
   monitor.child.kill('SIGTERM');await monitor.exited;
 });
 
+test('a stop request is not lost while the monitor is starting',async t=>{
+  // A SIGTERM that lands while the shell forks a command substitution used to be run by that child
+  // only, so the monitor kept running. Traced runs are slow enough to hit this window often:
+  // against the old script 48 of 150 such stops were lost, so twelve rounds fail it almost surely.
+  const {root,env}=await setup(t,{interval:2});
+  for(let round=1;round<=12;round++){
+    const child=spawn('/bin/zsh',['-x',script,'run'],{env:{...env,MEMGUARD_FAKE_FREE:'100'},stdio:['ignore','ignore','ignore']});
+    const exited=new Promise(resolve=>child.once('exit',()=>resolve('exited')));
+    t.after(()=>{if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');});
+    // Poll tightly: the window is a few milliseconds right after the lock appears.
+    for(let tries=0;tries<5000;tries++){try{if(await lockPid(root)===child.pid)break;}catch{}await new Promise(resolve=>setTimeout(resolve,2));}
+    child.kill('SIGTERM');
+    const outcome=await Promise.race([exited,new Promise(resolve=>setTimeout(()=>resolve('still running'),6000))]);
+    assert.equal(outcome,'exited',`round ${round}: SIGTERM right after the lock appeared was lost`);
+  }
+});
+
 // MG-05: the zsh monitor writes the heartbeat, the Node code reads and judges it.
 const sha=text=>createHash('sha256').update(text).digest('hex');
 const readBeat=async root=>{try{const r=parseHeartbeat(await readFile(join(root,'logs/heartbeat.json'),'utf8'));return r.ok?r.value:null;}catch{return null;}};

@@ -178,6 +178,7 @@ safe_target() { [[ "$(target_reason "$1")" == match* ]]; }
 # reboot must not keep the protection off: it is taken over when the recorded
 # PID is gone or no longer belongs to a memguard monitor.
 typeset -g LOCK_DIR=
+typeset -g LOCK_OWNED=0 # set only by the instance that really holds the lock; the EXIT trap removes nothing else
 monitor_alive() { # $1 pid
   local args
   [[ "$1" == <-> && "$1" != "$$" ]] || return 1
@@ -186,7 +187,7 @@ monitor_alive() { # $1 pid
 }
 acquire_lock() {
   local recorded= mtime
-  if mkdir "$LOCK_DIR" 2>/dev/null; then print $$ > "$LOCK_DIR/pid"; return 0; fi
+  if mkdir "$LOCK_DIR" 2>/dev/null; then print $$ > "$LOCK_DIR/pid"; LOCK_OWNED=1; return 0; fi
   [[ -r "$LOCK_DIR/pid" ]] && recorded=$(<"$LOCK_DIR/pid")
   if [[ -z "$recorded" ]]; then
     # The owner may be between mkdir and writing its PID: give it a moment.
@@ -199,7 +200,7 @@ acquire_lock() {
   fi
   print -u2 "Taking over stale monitor lock (PID ${recorded:-unknown} is not a running monitor)"
   rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR" 2>/dev/null
-  if mkdir "$LOCK_DIR" 2>/dev/null; then print $$ > "$LOCK_DIR/pid"; return 0; fi
+  if mkdir "$LOCK_DIR" 2>/dev/null; then print $$ > "$LOCK_DIR/pid"; LOCK_OWNED=1; return 0; fi
   print -u2 "Monitor lock taken by another instance: $LOCK_DIR"; return 1
 }
 
@@ -317,15 +318,21 @@ step() {
 }
 
 # ---------- commands ----------
+# A stop request that arrives while this shell forks a command substitution is run by that
+# child, not by the main shell. Measured with `zsh -x`: the trap's `exit 0` ended only the child
+# and the monitor kept running, so a `launchctl stop` could be lost. $$ is the main shell's PID
+# in every subshell, so a child passes the request on and the main shell stops itself.
+stop_requested() { (( ZSH_SUBSHELL )) && kill -TERM $$ 2>/dev/null; exit 0 }
 cmd_run() {
+  # Traps first, before anything is announced (lock, heartbeat).
+  # The EXIT trap also runs after this function has returned: it must not use locals.
+  trap 'if (( LOCK_OWNED )); then rm -f "$LOCK_DIR/pid" "$HEARTBEAT"; rmdir "$LOCK_DIR" 2>/dev/null; fi' EXIT
+  trap 'stop_requested' TERM INT HUP
   load_cfg_tracked || return 1
   LOCK_DIR="$LOG_DIR/monitor.lock"
   mkdir -p "$LOG_DIR"
   acquire_lock || return 1
-  # The EXIT trap runs after this function has returned: it must not use locals.
   STARTED_AT=$(date +%s)
-  trap 'rm -f "$LOCK_DIR/pid" "$HEARTBEAT"; rmdir "$LOCK_DIR" 2>/dev/null' EXIT
-  trap 'exit 0' TERM INT HUP
   log "START v$VERSION config=$(cfg_file) rev=${CFG_REVISION[1,12]} warn=${WARN_FREE}% crit=${CRIT_FREE}% targets=${(j:|:)TARGETS}"
   # Test hook: reload more often than every 30 cycles.
   local n=0 reload_every=30
