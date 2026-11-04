@@ -28,7 +28,7 @@ Der Start der Oberfläche aktiviert keine Prozessbeendigung und ersetzt keine In
 - Einstellungen mit vollständigem Ist/Soll-Vergleich, expliziter Bestätigung, Sicherungskopie, Konflikterkennung und vollständigem Rücklesen.
 - Pause und Aufheben der Pause mit separater Bestätigung.
 - Treffer-Vorschau in den Einstellungen: „Treffer prüfen“ listet für die eingegebenen Zielmuster alle eigenen Prozesse mit Entscheidung, PID, Name und Muster. Funktioniert auch für noch nicht gespeicherte Muster und sendet kein Signal.
-- Letzte 60 Protokollzeilen. Diagnoseexport ohne Zielpfade, Prozessnamen, Prozess-IDs und rohe Kommandozeilen. Der Export enthält Messwerte, Schwellenwerte und Monitorstatus; vor Weitergabe prüfen.
+- Letzte 60 Protokollzeilen. Diagnoseexport ohne Zielpfade, Prozessnamen, Prozess-IDs und rohe Kommandozeilen. Der Export enthält ausschließlich freigegebene Messwerte, Schwellenwerte und Monitorstatus. Fehler werden als Anzahl bzw. Fehlerflag exportiert; Freitextfehler bleiben lokal. Vor Weitergabe prüfen.
 - Responsive deutsche Oberfläche, Tastaturbedienung, native Bestätigungsdialoge.
 
 Die Prozentanzeige stammt aus `kern.memorystatus_level`. Sie ist ein Kernel-Indikator, kein RAM-Belegungswert der Aktivitätsanzeige und keine Absturzprognose. Fehlende Pflichtmesswerte erscheinen als unbekannt. Ein gesunder Zustand wird daraus nicht abgeleitet.

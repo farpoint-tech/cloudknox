@@ -189,10 +189,25 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
         }
         if(path==='/api/export') {
           const state=await getSample();
-          const {config,processes,heartbeat,configLevels:levels,...safe}=state;
-          return send(res,200,{...safe,config:{...config.value,targets:config.value.targets.map(()=> '[redacted]')},processes:processes.map(({rssBytes,own,target})=>({rssBytes,own,target})),
+          const {config:{value:config},processes,heartbeat,configLevels:levels}=state;
+          // Shareable diagnostics use an allowlist at every level. Never spread
+          // sampled state: future fields and free-text errors may identify users.
+          return send(res,200,{
+            version:state.version,time:state.time,state:state.state,free:state.free,
+            totalBytes:state.totalBytes,swapUsedBytes:state.swapUsedBytes,swapfiles:state.swapfiles,
+            paused:state.paused,errorCount:state.errors.length,monitorFailed:Boolean(state.monitorError),
+            agent:{state:['running','stopped','waiting','unknown'].includes(state.agent?.state)?state.agent.state:'unknown',
+              source:['app','launchagent','unknown'].includes(state.agent?.source)?state.agent.source:null},
+            config:{language:config.language,notifications:config.notifications,interval:config.interval,
+              warn_free_percent:config.warn_free_percent,critical_free_percent:config.critical_free_percent,
+              warn_swapfiles:config.warn_swapfiles,critical_swapfiles:config.critical_swapfiles,
+              warn_repeat_seconds:config.warn_repeat_seconds,terminate_grace_seconds:config.terminate_grace_seconds,
+              targets:config.targets.map(()=> '[redacted]')},
+            processes:processes.map(({rssBytes,own,target})=>({rssBytes,own,target})),
             monitorHeartbeat:{state:heartbeat.state,ageSeconds:heartbeat.ageSeconds??null,version:heartbeat.version??null},
-            configLevels:{saved:levels.saved.ok,loaded:levels.loaded.ok,verified:levels.verified.ok}});
+            configLevels:{saved:levels.saved.ok,loaded:levels.loaded.ok,verified:levels.verified.ok},
+            history:state.history.map(({time,free,swapUsedBytes})=>({time,free,swapUsedBytes}))
+          });
         }
         return send(res,404,{error:'Nicht gefunden.'});
       }
