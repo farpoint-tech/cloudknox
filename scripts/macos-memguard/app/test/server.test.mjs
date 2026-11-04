@@ -30,6 +30,38 @@ test('live API returns metrics without raw command lines; export redacts identit
   const exported=(await get('/api/export')).data;
   assert.equal(exported.processes[0].pid,undefined);assert.equal(exported.processes[0].name,undefined);assert.equal(exported.config.path,undefined);
 });
+test('diagnostic export excludes running LaunchAgent identities and configuration errors',async t=>{
+  const home=await mkdtemp(join(tmpdir(),'memguard-export-private-'));
+  const directory=join(home,'Library/Application Support/MemGuard');
+  await mkdir(directory,{recursive:true});
+  await writeFile(join(directory,'config.json'),JSON.stringify({...defaults,targets:['/private/customer-worker']}));
+  const sampleCommand=async(file,args)=>file==='/bin/launchctl'
+    ? 'state = running\n pid = 424242' : fixture(file,args);
+  const app=await createApp({home,sampleCommand,testMode:false});
+  t.after(async()=>{await app.close();await rm(home,{recursive:true,force:true});});
+  const get=async path=>(await fetch(app.url+path)).json();
+  const status=await get('/api/status');
+  assert.equal(status.agent.pid,424242,'fixture reaches the real LaunchAgent branch');
+  let exported=await get('/api/export');
+  assert.deepEqual(exported.agent,{state:'running',source:'launchagent'});
+  assert.equal(exported.free,50);
+  assert.equal(exported.totalBytes,32*1024**3);
+  assert.deepEqual(exported.config.targets,['[redacted]']);
+  assert.deepEqual(exported.processes,[{rssBytes:2048*1024,own:true,target:false}]);
+  for(const privateValue of ['424242',home,'customer-worker','worker','SECRET','/private/test'])
+    assert.ok(!JSON.stringify(exported).includes(privateValue),privateValue);
+  // JSON parser errors can quote arbitrary file content and stay local.
+  await writeFile(join(directory,'config.json'),'CUSTOMER_SECRET_PATH /private/customer');
+  const failed=await get('/api/status');
+  assert.ok(failed.errors.length>0,'invalid configuration is observed');
+  exported=await get('/api/export');
+  assert.equal(exported.state,'unknown');
+  assert.ok(exported.errorCount>0);
+  assert.equal(exported.errors,undefined);
+  assert.equal(exported.monitorError,undefined);
+  assert.ok(!JSON.stringify(exported).includes('CUSTOMER_SECRET_PATH'));
+  assert.ok(!JSON.stringify(exported).includes('/private/customer'));
+});
 test('CSRF token, origin, host, explicit consent and HTTP method are enforced',async t=>{
   const {app,post}=await setup(t);
   assert.equal((await post('/api/pause',{confirm:true,paused:true,expected:false},{'X-Memguard-Token':'wrong'})).status,403);
