@@ -233,3 +233,16 @@ input:focus-visible,select:focus-visible,textarea:focus-visible { outline:2px so
 .level-name{font-weight:600}
 .level-note{color:var(--muted)}
 @media (max-width:640px){.levels li{grid-template-columns:1fr;gap:2px}}
+.remedy-steps{list-style:none;margin:0 0 14px;padding:0;border:1px solid var(--line);border-radius:8px}
+.remedy-step{display:grid;grid-template-columns:1fr auto;gap:8px 16px;align-items:start;padding:14px;border-bottom:1px solid var(--line);font-size:12px}
+.remedy-step:last-child{border-bottom:0}
+.remedy-step h4{font-size:13px;margin:0 0 4px}
+.remedy-step p{margin:0 0 4px;color:var(--text-secondary);line-height:1.55;overflow-wrap:anywhere}
+.remedy-risk{display:inline-block;margin-left:8px;padding:2px 7px;border-radius:5px;background:var(--subtle);font-size:10px;font-weight:600;color:var(--text-secondary)}
+.remedy-risk-high{color:var(--state-critical)}
+.remedy-risk-medium{color:var(--state-warning)}
+.remedy-advice{color:var(--ink)}
+.remedy-caution{color:var(--state-warning)}
+.remedy-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.phrase-row{display:flex;flex-direction:column;gap:6px;margin:12px 0;font-size:12px}
+@media (max-width:640px){.remedy-step{grid-template-columns:1fr}.remedy-actions{justify-content:flex-start}}

@@ -1,6 +1,6 @@
 'use strict';
 const $=selector=>document.querySelector(selector);
-let state=null,token=null,dirty=false,configLoaded=false,pending=null,inFlight=false,tab='overview',configRevision=null;
+let state=null,token=null,dirty=false,configLoaded=false,pending=null,inFlight=false,tab='overview',configRevision=null,proposal=null,advised=null,advisorInfo={enabled:false,configured:false},phraseRequired=null,advisorLoaded=false,advisorDirty=false;
 const titles={overview:'Speicher im Blick.',processes:'Prozesse im Überblick.',settings:'Überwachung konfigurieren.',logs:'Ereignisse nachvollziehen.'};
 const labels={normal:'Speicher im Normalbereich',warning:'Speicher wird knapp',critical:'Speicher kritisch',unknown:'Messung unvollständig'};
 const copy={normal:'Die gemessenen Werte liegen innerhalb Ihrer konfigurierten Schwellen.',warning:'Eine Warnschwelle ist erreicht. Prüfen Sie die größten Prozesse und laufenden Aufgaben.',critical:'Eine kritische Schwelle ist erreicht. Ein aktiver, nicht pausierter Monitor darf konfigurierte Ziele beenden.',unknown:'Mindestens eine erforderliche Messung oder die Konfiguration fehlt. Daraus lässt sich kein gesunder Zustand ableiten.'};
@@ -14,7 +14,7 @@ async function api(path,data){
   const response=await fetch(path,{method:data?'POST':'GET',cache:'no-store',headers:data?{'Content-Type':'application/json','X-Memguard-Token':token}:{},body:data?JSON.stringify({...data,confirm:true}):undefined,signal:AbortSignal.timeout(12000)});
   const result=await response.json();if(!response.ok) throw Error(result.error||`HTTP ${response.status}`);return result;
 }
-function showTab(next){tab=next;document.querySelectorAll('.tab').forEach(el=>{el.hidden=el.id!==next;});document.querySelectorAll('nav [data-tab]').forEach(el=>{el.classList.toggle('active',el.dataset.tab===next);el.setAttribute('aria-current',el.dataset.tab===next?'page':'false');});text('#page-title',titles[next]);if(next==='logs') loadLog();}
+function showTab(next){tab=next;document.querySelectorAll('.tab').forEach(el=>{el.hidden=el.id!==next;});document.querySelectorAll('nav [data-tab]').forEach(el=>{el.classList.toggle('active',el.dataset.tab===next);el.setAttribute('aria-current',el.dataset.tab===next?'page':'false');});text('#page-title',titles[next]);if(next==='logs') loadLog();if(next==='settings'&&!advisorLoaded) loadAdvisor();}
 document.querySelectorAll('[data-tab]').forEach(el=>el.addEventListener('click',()=>showTab(el.dataset.tab)));
 const columns=[
   {key:'name',label:'Prozess',cls:'process-name',first:'asc',get:p=>p.name.toLowerCase(),show:p=>p.name},
@@ -117,10 +117,11 @@ function render(){
   text('#updated',`Messung: ${new Date(state.time).toLocaleTimeString('de-DE')}`);
   const errors=[...state.errors,...(state.monitorError?[state.monitorError]:[]),...(state.agent?.error?[state.agent.error]:[])];$('#error').hidden=!errors.length;if(errors.length)error(errors.join(' · '));
 }
-async function refresh(){if(inFlight)return;inFlight=true;try{state=await api('/api/status');render();}catch(e){text('#connection','● Verbindung unterbrochen');error(`Keine aktuellen Daten: ${e.message}. Angezeigte Messwerte können veraltet sein.`);$('#pause').disabled=true;$('#monitor').disabled=true;}finally{inFlight=false;}}
+async function refresh(){if(inFlight)return;inFlight=true;try{state=await api('/api/status');render();await loadProposal();}catch(e){text('#connection','● Verbindung unterbrochen');error(`Keine aktuellen Daten: ${e.message}. Angezeigte Messwerte können veraltet sein.`);$('#pause').disabled=true;$('#monitor').disabled=true;}finally{inFlight=false;}}
 async function loadLog(){try{text('#log-output',(await api('/api/log')).text);}catch(e){error(e.message);}}
 $('#refresh-log').addEventListener('click',loadLog);
-function confirm(title,description,details,action){pending=action;text('#confirm-title',title);text('#confirm-description',description);text('#confirm-details',details);$('#confirm-dialog').showModal();}
+function confirm(title,description,details,action,phrase=null){pending=action;phraseRequired=phrase;text('#confirm-title',title);text('#confirm-description',description);text('#confirm-details',details);$('#phrase-row').hidden=!phrase;$('#confirm-phrase').value='';if(phrase)text('#phrase-word',phrase);$('#confirm').disabled=Boolean(phrase);$('#confirm-dialog').showModal();}
+$('#confirm-phrase').addEventListener('input',()=>{$('#confirm').disabled=Boolean(phraseRequired)&&$('#confirm-phrase').value!==phraseRequired;});
 $('#cancel').addEventListener('click',()=>{$('#confirm-dialog').close();pending=null;});
 $('#confirm-dialog').addEventListener('cancel',()=>{pending=null;});
 $('#confirm').addEventListener('click',async()=>{if(!pending)return;$('#confirm').disabled=true;const action=pending;pending=null;try{await action();$('#confirm-dialog').close();await refresh();}catch(e){$('#confirm-dialog').close();error(e.message);}finally{$('#confirm').disabled=false;}});
@@ -160,5 +161,70 @@ $('#config-form').addEventListener('submit',event=>{
   const revision=configRevision;confirm('Konfiguration speichern?','Die bestehende Benutzerkonfiguration wird gesichert. Ein laufender Monitor liest Änderungen spätestens nach 30 Prüfzyklen ein. Bis dahin gelten die bisherigen Werte.',details,async()=>{await api('/api/config',{config,revision});dirty=false;configLoaded=false;success('Gespeichert und vollständig zurückgelesen. Die Übernahme durch den laufenden Monitor ist damit noch nicht bestätigt.');});
 });
 $('#export').addEventListener('click',async()=>{try{const data=await api('/api/export');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='memguard-diagnose.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){error(e.message);}});
+
+// ---- Abhilfe (MG-16) ----
+const riskText={low:'geringes Risiko',medium:'mittleres Risiko',high:'hohes Risiko'};
+const stepIds=p=>p.steps.map(s=>s.id).sort().join('|');
+async function loadProposal(){
+  if(!state||state.state==='normal'||state.state==='unknown'){proposal=null;advised=null;renderRemedy();return;}
+  try{const data=await api('/api/proposal');proposal=data.proposal;advisorInfo=data.advisor;}catch(e){proposal=null;}
+  if(advised&&(!proposal||stepIds(advised)!==stepIds(proposal)))advised=null;
+  renderRemedy();
+}
+function element(tag,className,content){const el=document.createElement(tag);if(className)el.className=className;if(content!==undefined)el.textContent=content;return el;}
+function renderRemedy(){
+  const shown=advised||proposal,panel=$('#remedy');
+  if(!shown){panel.hidden=true;return;}
+  panel.hidden=false;
+  $('#remedy-advice').hidden=!advisorInfo.enabled||!shown.steps.length;
+  text('#remedy-note',shown.notes.join(' '));
+  const list=$('#remedy-steps');list.replaceChildren();
+  for(const step of shown.steps){
+    const item=element('li','remedy-step'),body=element('div'),title=element('h4',null,step.title);
+    title.append(element('span',`remedy-risk remedy-risk-${step.risk}`,riskText[step.risk]));
+    body.append(title,element('p',null,step.why));
+    if(step.advice?.note)body.append(element('p','remedy-advice',`KI: ${step.advice.note}`));
+    if(step.advice?.caution)body.append(element('p','remedy-caution',`KI rät ab: ${step.advice.caution}`));
+    const actions=element('div','remedy-actions');
+    const run=element('button','button primary',step.kind==='restart_mac'?'Neustart vorbereiten':step.kind==='terminate_targets'?'Jetzt beenden':'Sauber beenden');run.type='button';
+    run.addEventListener('click',()=>runStep(step));actions.append(run);
+    if(step.suggestedPattern){const adopt=element('button','button secondary','Als Ziel vormerken');adopt.type='button';adopt.addEventListener('click',()=>adoptTarget(step));actions.append(adopt);}
+    item.append(body,actions);list.append(item);
+  }
+  const info=shown.advisor;
+  text('#remedy-advisor',!info?(advisorInfo.enabled?'Lokale KI aktiviert: „Mit lokaler KI prüfen“ holt eine zweite Meinung.':'Regelbasierter Vorschlag. Eine lokale KI lässt sich unter Einstellungen zuschalten.')
+    :info.status==='ok'?`Lokale KI${info.model?` (${info.model})`:''}: ${info.summary||'Reihenfolge geprüft.'}`
+    :info.status==='skipped'?info.summary
+    :`Lokale KI nicht verwendet: ${info.problem} Der regelbasierte Vorschlag gilt unverändert.`);
+}
+function runStep(step){
+  const detail=step.kind==='quit_app'?`App: ${step.name}\nAktion: Beenden per AppleScript (die App fragt bei offenen Änderungen nach)`
+    :step.kind==='terminate_targets'?`Prozesse: ${step.pids.join(', ')}\nAktion: SIGTERM, nur für Prozesse, die noch zu Ihren Zielmustern passen`
+    :'Aktion: macOS-Neustart anfordern. Alle Apps werden zum Beenden aufgefordert.';
+  confirm(`${step.title}?`,step.why,`${detail}\nRisiko: ${riskText[step.risk]}`,async()=>{
+    const result=await api('/api/remediate',{id:step.id,phrase:step.kind==='restart_mac'?'NEUSTART':undefined});success(result.message);
+  },step.kind==='restart_mac'?'NEUSTART':null);
+}
+function adoptTarget(step){
+  const field=$('#config-form').elements.namedItem('targets'),lines=field.value.split('\n').map(v=>v.trim()).filter(Boolean);
+  if(!lines.includes(step.suggestedPattern))lines.push(step.suggestedPattern);
+  field.value=lines.join('\n');dirty=true;text('#dirty-state','Ungespeicherte Änderungen');showTab('settings');
+  success(`Muster ${step.suggestedPattern} eingetragen. Mit „Treffer prüfen“ ansehen, dann speichern: Ab da beendet der Monitor ${step.name} bei kritischem Stand selbst.`);
+}
+$('#remedy-advice').addEventListener('click',async()=>{
+  const button=$('#remedy-advice');button.disabled=true;text('#remedy-advisor','Lokale KI wird befragt …');
+  try{const data=await api('/api/proposal/advice',{});advised=data.proposal.advisor?.status==='ok'?data.proposal:null;if(!advised)proposal=data.proposal;renderRemedy();}
+  catch(e){error(e.message);}finally{button.disabled=false;}
+});
+async function loadAdvisor(){
+  try{const {settings}=await api('/api/advisor');const form=$('#advisor-form');for(const [key,value] of Object.entries(settings)){const field=form.elements.namedItem(key);if(!field)continue;if(typeof value==='boolean')field.checked=value;else field.value=value;}advisorLoaded=true;advisorDirty=false;text('#advisor-state',settings.enabled?'Aktiviert':'Deaktiviert');}
+  catch(e){error(e.message);}
+}
+$('#advisor-form').addEventListener('input',()=>{advisorDirty=true;text('#advisor-state','Ungespeicherte Änderungen');});
+$('#advisor-form').addEventListener('submit',event=>{
+  event.preventDefault();const form=event.currentTarget;
+  const settings={enabled:form.elements.namedItem('enabled').checked,endpoint:form.elements.namedItem('endpoint').value.trim(),model:form.elements.namedItem('model').value.trim(),timeout_seconds:Number(form.elements.namedItem('timeout_seconds').value)};
+  confirm('KI-Einstellungen speichern?','Die Einstellungen bleiben auf diesem Mac. Bei Aktivierung gehen Programmnamen und Größen an den eingetragenen lokalen Endpunkt.',`Objekt: advisor.json im MemGuard-Ordner\nBetroffene Objekte: 1 Datei\n\nSOLL:\n${JSON.stringify(settings,null,2)}`,async()=>{await api('/api/advisor',{settings});advisorLoaded=false;await loadAdvisor();success('KI-Einstellungen gespeichert und zurückgelesen.');});
+});
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
 (async()=>{try{token=(await api('/api/session')).token;await refresh();setInterval(refresh,5000);}catch(e){error(`Start fehlgeschlagen: ${e.message}`);}})();

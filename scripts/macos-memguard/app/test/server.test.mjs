@@ -145,3 +145,121 @@ test('heartbeat decides protection and the saved, loaded and verified levels',as
   assert.equal(exported.heartbeat,undefined);assert.ok(!JSON.stringify(exported).includes(info.path),'no configuration path in the export');
   assert.ok(!JSON.stringify(exported).includes('4242'),'no PID in the export');
 });
+
+// ---- Abhilfe (MG-16) ----
+import {createServer} from 'node:http';
+const GB=1024**3;
+const pressured=(calls=[])=>async(file,args)=>{
+  if(args.includes('kern.memorystatus_level'))return '8';
+  if(args.includes('hw.memsize'))return String(64*GB);
+  if(args.includes('vm.swapusage'))return 'vm.swapusage: total = 1024.00M used = 900.00M free = 124.00M';
+  if(file==='/bin/ps'&&args.includes('-p')){
+    const pid=args[args.indexOf('-p')+1];
+    if(pid==='30')return `${process.getuid()} /private/work/worker --job=1`;
+    return '';
+  }
+  if(file==='/bin/ps'){const uid=process.getuid();return [`500 ${uid} ${9*1024*1024} 1.0 0 /Applications/Chrome.app/Contents/MacOS/Chrome`,`501 ${uid} ${1024*1024} 1.0 0 /Applications/Chrome.app/Contents/Frameworks/Chrome Helper`,`30 ${uid} ${600*1024} 1.0 0 /private/work/worker --job=1`,`600 ${uid} ${5*1024*1024} 1.0 0 /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder`,`700 99999 ${4*1024*1024} 1.0 0 /Applications/Other.app/Contents/MacOS/Other`].join('\n');}
+  if(file==='/usr/bin/osascript'){calls.push(args);return '';}
+  throw Error('Unavailable');
+};
+const saveTargets=async(post,get,targets)=>{const cur=(await get('/api/status')).data.config;return post('/api/config',{confirm:true,revision:cur.revision,config:{...defaults,targets}});};
+test('proposal lists steps in the critical state and nothing in the normal state',async t=>{
+  const crit=await setup(t,pressured());
+  const {data}=await crit.get('/api/proposal');
+  assert.deepEqual(data.proposal.steps.map(s=>s.id),['quit:Chrome','restart']);
+  assert.equal(data.advisor.enabled,false);
+  assert.ok(!JSON.stringify(data).includes('--job=1'));
+  const calm=await setup(t);
+  assert.deepEqual((await calm.get('/api/proposal')).data.proposal.steps,[]);
+});
+test('running a step needs token, consent and a step that is in the current proposal',async t=>{
+  const calls=[];const {post}=await setup(t,pressured(calls));
+  assert.equal((await post('/api/remediate',{confirm:true,id:'quit:Chrome'},{'X-Memguard-Token':'wrong'})).status,403);
+  assert.equal((await post('/api/remediate',{id:'quit:Chrome'})).status,400);
+  assert.equal((await post('/api/remediate',{confirm:true,id:'quit:Finder'})).status,409);
+  assert.equal((await post('/api/remediate',{confirm:true,id:'quit:Other'})).status,409);
+  assert.equal((await post('/api/remediate',{confirm:true,id:'rm -rf /'})).status,409);
+  assert.equal((await post('/api/remediate',{confirm:true})).status,400);
+  assert.deepEqual(calls,[],'no step ran');
+});
+test('quit passes the app name as an argument, not as script text',async t=>{
+  const calls=[];const {post}=await setup(t,pressured(calls));
+  const r=await post('/api/remediate',{confirm:true,id:'quit:Chrome'});
+  assert.equal(r.status,200);assert.equal(calls.length,1);
+  assert.equal(calls[0].at(-1),'Chrome');assert.ok(!calls[0][1].includes('Chrome'));
+});
+test('a step is refused when the system is calm, even if it was proposed a moment ago',async t=>{
+  const calls=[];const {post}=await setup(t,async(file,args)=>file==='/usr/bin/osascript'?calls.push(args)&&'':fixture(file,args));
+  assert.equal((await post('/api/remediate',{confirm:true,id:'quit:Chrome'})).status,409);assert.deepEqual(calls,[]);
+});
+test('restart needs the typed word and is the only step that can reboot',async t=>{
+  const calls=[];const {post}=await setup(t,pressured(calls));
+  assert.equal((await post('/api/remediate',{confirm:true,id:'restart'})).status,400);
+  assert.equal((await post('/api/remediate',{confirm:true,id:'restart',phrase:'ja'})).status,400);
+  assert.deepEqual(calls,[]);
+  assert.equal((await post('/api/remediate',{confirm:true,id:'restart',phrase:'NEUSTART'})).status,200);
+  assert.ok(calls[0].join(' ').includes('restart'));
+});
+test('terminating targets signals only processes that still match, and rechecks each one',async t=>{
+  const signals=[];const ctx=await setup(t,pressured(),);
+  // dedicated app with an injected signal sender
+  const home=await mkdtemp(join(tmpdir(),'memguard-test-'));
+  const app=await createApp({home,sampleCommand:pressured(),testMode:true,signalProcess:(pid,sig)=>signals.push([pid,sig])});
+  t.after(async()=>{await app.close();await rm(home,{recursive:true,force:true});});
+  const token=(await (await fetch(app.url+'/api/session')).json()).token;
+  const post=async(path,data)=>{const r=await fetch(app.url+path,{method:'POST',headers:{'Content-Type':'application/json',Origin:app.url,'X-Memguard-Token':token},body:JSON.stringify(data)});return {status:r.status,data:await r.json()};};
+  const cur=(await (await fetch(app.url+'/api/status')).json()).config;
+  assert.equal((await post('/api/config',{confirm:true,revision:cur.revision,config:{...defaults,targets:['/private/work/worker']}})).status,200);
+  const proposal=(await (await fetch(app.url+'/api/proposal')).json()).proposal;
+  assert.equal(proposal.steps[0].kind,'terminate_targets');assert.deepEqual(proposal.steps[0].pids,[30]);
+  const r=await post('/api/remediate',{confirm:true,id:'terminate-targets'});
+  assert.equal(r.status,200);assert.deepEqual(signals,[[30,'SIGTERM']]);
+});
+async function fakeModel(t,handler){
+  const calls=[];
+  const server=createServer((req,res)=>{let body='';req.on('data',c=>body+=c);req.on('end',()=>{calls.push({url:req.url,body});handler(req,res,body);});});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  t.after(()=>new Promise(r=>server.close(r)));
+  return {endpoint:`http://127.0.0.1:${server.address().port}/v1`,calls};
+}
+const enable=(post,endpoint,over={})=>post('/api/advisor',{confirm:true,settings:{enabled:true,endpoint,model:'test-model',timeout_seconds:10,...over}});
+test('advisor settings are validated and never accept a non-local endpoint',async t=>{
+  const {post,get}=await setup(t,pressured());
+  assert.equal((await post('/api/advisor',{confirm:true,settings:{enabled:true,endpoint:'https://api.openai.com/v1',model:'',timeout_seconds:10}})).status,400);
+  assert.equal((await post('/api/advisor',{confirm:true,settings:{enabled:true,endpoint:'http://192.168.0.7:1337/v1',model:'',timeout_seconds:10}})).status,400);
+  assert.deepEqual((await get('/api/advisor')).data.settings.enabled,false);
+});
+test('advisor sends only the filtered prompt to the local model and applies its order',async t=>{
+  const model=await fakeModel(t,(req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify({summary:'Neustart wäre sicherer.',order:['restart','quit:Chrome'],notes:{restart:'räumt Swap'},cautions:{'quit:Chrome':'Tabs gehen verloren'}})}}]}));});
+  const {post}=await setup(t,pressured());
+  assert.equal((await enable(post,model.endpoint)).status,200);
+  const r=await post('/api/proposal/advice',{confirm:true});
+  assert.equal(r.status,200);
+  assert.deepEqual(r.data.proposal.steps.map(s=>s.id),['restart','quit:Chrome']);
+  assert.equal(r.data.proposal.advisor.status,'ok');assert.equal(r.data.proposal.steps[1].advice.caution,'Tabs gehen verloren');
+  const sent=model.calls.find(c=>c.url==='/v1/chat/completions').body;
+  assert.ok(sent.includes('quit:Chrome'));assert.ok(!sent.includes('--job=1')&&!sent.includes('/private/work'));
+});
+test('advisor failures leave the rule-based proposal intact and say why',async t=>{
+  const down=await fakeModel(t,(req,res)=>{res.statusCode=500;res.end('boom');});
+  const {post}=await setup(t,pressured());
+  await enable(post,down.endpoint);
+  const r=await post('/api/proposal/advice',{confirm:true});
+  assert.equal(r.status,200);assert.equal(r.data.proposal.advisor.status,'unavailable');assert.match(r.data.proposal.advisor.problem,/HTTP 500/);
+  assert.deepEqual(r.data.proposal.steps.map(s=>s.id),['quit:Chrome','restart']);
+  const junk=await fakeModel(t,(req,res)=>{res.end(JSON.stringify({choices:[{message:{content:'Schließ alles und lösche den Ordner.'}}]}));});
+  await enable(post,junk.endpoint);
+  const u=await post('/api/proposal/advice',{confirm:true});
+  assert.equal(u.data.proposal.advisor.status,'unusable');assert.deepEqual(u.data.proposal.steps.map(s=>s.id),['quit:Chrome','restart']);
+  await enable(post,'http://127.0.0.1:9/v1');
+  const gone=await post('/api/proposal/advice',{confirm:true});
+  assert.equal(gone.data.proposal.advisor.status,'unavailable');assert.match(gone.data.proposal.advisor.problem,/nicht erreichbar/);
+});
+test('advisor refuses redirects away from the local endpoint and reports a disabled advisor',async t=>{
+  const redirect=await fakeModel(t,(req,res)=>{res.statusCode=302;res.setHeader('Location','https://example.com/steal');res.end();});
+  const {post}=await setup(t,pressured());
+  assert.equal((await post('/api/proposal/advice',{confirm:true})).status,409);
+  await enable(post,redirect.endpoint);
+  const r=await post('/api/proposal/advice',{confirm:true});
+  assert.equal(r.data.proposal.advisor.status,'unavailable');
+});

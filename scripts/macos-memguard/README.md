@@ -33,6 +33,33 @@ Der Start der Oberfläche aktiviert keine Prozessbeendigung und ersetzt keine In
 
 Die Prozentanzeige stammt aus `kern.memorystatus_level`. Sie ist ein Kernel-Indikator, kein RAM-Belegungswert der Aktivitätsanzeige und keine Absturzprognose. Fehlende Pflichtmesswerte erscheinen als unbekannt. Ein gesunder Zustand wird daraus nicht abgeleitet.
 
+## Abhilfe: nicht nur anzeigen, sondern lösen
+
+Bei Warnung oder kritischem Stand zeigt die Übersicht unter „Abhilfe“ eine kurze Stufenleiter, geordnet nach geringster Störung. Jeder Schritt wartet auf Ihre Bestätigung und gilt nur im aktuellen Stand; sinkt der Verbrauch, verschwindet er, und der Server führt ihn dann auch nicht mehr aus.
+
+| Schritt | Wirkung | Risiko |
+|---|---|---|
+| Zielprozesse beenden | SIGTERM für Prozesse, die zu Ihren Zielmustern passen. Vor dem Signal wird erneut geprüft: eigener Benutzer, kein MemGuard, Muster passt noch. | mittel |
+| App sauber beenden | Fragt die App per AppleScript zum Beenden (nur echte `.app`-Bundles, bis zu fünf, ab 512 MiB; der Wert ist ein Entwurfsparameter, keine Messung). Die App fragt bei offenen Änderungen nach. | mittel |
+| Als Ziel vormerken | Trägt `/<App>.app/` in die Zielliste ein. Nach „Treffer prüfen“ und Speichern beendet der Monitor diese App bei kritischem Stand selbst. So wird aus einem Vorschlag die Automatik. | – |
+| Neustart | Fordert einen macOS-Neustart an. Vorgeschlagen ab der Swap-Warnschwelle oder bei kritischem Stand. Bestätigung nur durch Eintippen von `NEUSTART`; Apps mit ungesicherten Änderungen können ihn unterbrechen. | hoch |
+
+Nicht angeboten wird `purge`: Es leert laut Handbuch nur den Platten-Cache und berührt anonymen Speicher nicht. Das ist nicht die Ursache der Watchdog-Panics (Komprimierer und Swap). Swap-Dateien lassen sich nicht von Hand freigeben; macOS baut sie langsam ab, ein Neustart räumt sie vollständig.
+
+Nie vorgeschlagen werden Prozesse anderer Benutzer, Systemdienste (Finder, Dock, WindowServer u. a.), nackte Programme ohne App-Bundle sowie MemGuard und seine Elternprozesse.
+
+### Lokale KI als zweite Meinung (optional)
+
+Unter Einstellungen lässt sich ein Modell auf diesem Mac eintragen (OpenAI-kompatibel, zum Beispiel Osaurus, Ollama oder LM Studio). Es prüft den Vorschlag, sortiert ihn nach Störung und Wirkung und kommentiert einzelne Schritte, auch mit „rät ab“.
+
+- Nur Endpunkte auf diesem Gerät (127.0.0.1, ::1, localhost). Andere Hosts, Zugangsdaten, Parameter und Weiterleitungen werden abgelehnt. Es gibt keine Verbindung in die Cloud.
+- Das Modell erhält Programmnamen, Größen und Schritt-Kennungen. Keine Pfade, keine Kommandozeilen, keine PIDs. Namen fremder Programme werden gefiltert und als Daten gekennzeichnet.
+- Die Antwort kann nur vorhandene Schritte umsortieren und kommentieren. Sie kann nichts hinzufügen, entfernen oder ausführen; Unbekanntes wird verworfen. Ausgeführt wird allein nach Ihrer Bestätigung.
+- Ohne KI, bei Ausfall, Zeitüberschreitung oder unbrauchbarer Antwort gilt der regelbasierte Vorschlag unverändert; die Oberfläche nennt den Grund.
+- Einstellungen liegen getrennt von der Monitor-Konfiguration in `advisor.json`; die Konfigurationsrevision des Monitors (Heartbeat) bleibt unberührt.
+
+Grenze: Die KI-Prüfung ist beratend und nicht reproduzierbar. Sie ersetzt nicht Ihr Urteil darüber, welche Arbeit offen ist.
+
 ## Darstellung und farpoint-CI
 
 Schwarz ist der Standard. Der Schalter oben rechts wechselt zwischen Schwarz und Hell und merkt die Auswahl im lokalen Browserspeicher für diese Adresse. Bei einem anderen Port gilt eine andere Browseradresse; für dieselbe Auswahl über Serverneustarts einen festen MEMGUARD_PORT verwenden.
@@ -89,7 +116,7 @@ Ein laufender Monitor lädt Änderungen nach 30 Prüfzyklen neu, bei zehn Sekund
 4. Eigentümer, Startzeit und Kommandozeile vor SIGTERM prüfen.
 5. Nach der Wartezeit erneut messen. SIGKILL nur bei weiterhin kritischen Werten, unveränderter Identität und aufgehobener Pause.
 
-Das Log unterscheidet gesendete Signale von bestätigtem Prozessende (`term_sent`, `kill_sent`). Rotation bei mehr als 5 MiB; eine Vorgängerversion bleibt. Eine Locksperre (`monitor.lock` mit PID im Log-Ordner) verhindert parallele Instanzen. Sie wird beim Beenden entfernt. Nach einem nicht abfangbaren Abbruch, einem Absturz oder einem Neustart bleibt sie liegen und wird beim nächsten Start übernommen, wenn die gespeicherte PID kein laufender `memguard run` ist. Gehört sie einem laufenden Monitor, startet die zweite Instanz nicht und meldet das. Ein Lock ohne PID gilt in den ersten fünf Sekunden als „wird gerade angelegt“.
+Das Log unterscheidet gesendete Signale von bestätigtem Prozessende (`term_sent`, `kill_sent`). Rotation bei mehr als 5 MiB; eine Vorgängerversion bleibt. Ein Stopp-Signal, das während eines Abspaltens (`$(...)`) eintrifft, wird vom Kindprozess an den Hauptprozess weitergereicht; sonst lief der Monitor in rund einem Drittel der gemessenen Fälle weiter (MG-17). Eine Locksperre (`monitor.lock` mit PID im Log-Ordner) verhindert parallele Instanzen. Sie wird beim Beenden entfernt. Nach einem nicht abfangbaren Abbruch, einem Absturz oder einem Neustart bleibt sie liegen und wird beim nächsten Start übernommen, wenn die gespeicherte PID kein laufender `memguard run` ist. Gehört sie einem laufenden Monitor, startet die zweite Instanz nicht und meldet das. Ein Lock ohne PID gilt in den ersten fünf Sekunden als „wird gerade angelegt“.
 
 Zwischen Identitätsprüfung und Signal bleibt ein nicht atomar ausschließbares Zeitfenster. SIGKILL kann ungespeicherte Arbeit unwiederbringlich verwerfen.
 

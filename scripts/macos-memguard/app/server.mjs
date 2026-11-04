@@ -6,18 +6,19 @@ import { homedir, platform, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { defaults, validateConfig, classify, command, parseProcesses, parsePreview, parseHeartbeat, assessMonitor, configLevels } from './core.mjs';
+import { defaults, validateConfig, classify, command, parseProcesses, parsePreview, parseHeartbeat, assessMonitor, configLevels, buildProposal, advisorDefaults, parseAdvisorEndpoint, validateAdvisor, advisorMessages, parseAdvisorReply, applyAdvice } from './core.mjs';
 import { dashboardIdentity, dashboardVersion } from './open-dashboard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const hash = text => createHash('sha256').update(text).digest('hex');
 const version = dashboardVersion;
 const errorText = error => error.message.split('\n')[0];
-export async function createApp({home=homedir(), port=0, sampleCommand=command, testMode=false}={}) {
+export async function createApp({home=homedir(), port=0, sampleCommand=command, testMode=false, signalProcess=process.kill, fetchImpl=fetch}={}) {
   const userConfig = join(home,'Library/Application Support/MemGuard/config.json');
   const systemConfig = '/Library/Application Support/MemGuard/config.json';
   const logDir = join(home,'Library/Logs/MemGuard');
   const pauseFile = join(home,'.memguard-off');
+  const advisorFile = join(home,'Library/Application Support/MemGuard/advisor.json');
   const token = randomBytes(32).toString('hex');
   let monitor=null, monitorError=null, busy=false, cache=null, sampling=null;
   const history=[];
@@ -82,6 +83,48 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
     cache={version,time:now,state,free,totalBytes,swapUsedBytes,swapfiles,processes,config,paused:existsSync(pauseFile),agent:take(5,'Monitor'),heartbeat:report.monitor,configLevels:levels,monitorError,errors,history:[...history]};
     return cache;
   }
+
+  // ---- Abhilfe (MG-16) ----
+  async function advisorSettings() {
+    try { return validateAdvisor(JSON.parse(await readFile(advisorFile,'utf8'))); }
+    catch(error) { if(error.code==='ENOENT') return {...advisorDefaults}; throw Error(`KI-Einstellungen ungültig: ${errorText(error)}`); }
+  }
+  async function currentProposal() {
+    const state=await getSample();
+    const agentPid=state.agent?.pid;
+    const protectedPids=[process.pid,process.ppid,...(Number.isInteger(agentPid)?[agentPid]:[])];
+    return {state,proposal:buildProposal({state:state.state,free:state.free,swapfiles:state.swapfiles,processes:state.processes,config:state.config.value,protectedPids})};
+  }
+  // Talks to a model on this Mac only. The endpoint is checked again here, redirects are refused,
+  // and only the filtered prompt from core.mjs is sent.
+  async function askAdvisor(settings,messages) {
+    const root=parseAdvisorEndpoint(settings.endpoint).href.replace(/\/+$/,'');
+    const signal=AbortSignal.timeout(settings.timeout_seconds*1000);
+    const readText=async response=>{const text=await response.text();if(text.length>262144) throw Error('Die Antwort der lokalen KI ist zu groß.');return text;};
+    const call=async(url,init)=>{
+      let response;
+      try { response=await fetchImpl(url,{...init,redirect:'error',signal}); }
+      catch(error) { throw Error(error.name==='TimeoutError' ? `Die lokale KI antwortete nicht innerhalb von ${settings.timeout_seconds} s.` : 'Die lokale KI ist nicht erreichbar. Läuft der Dienst unter dem eingetragenen Endpunkt?'); }
+      if(!response.ok) throw Error(`Die lokale KI antwortete mit HTTP ${response.status}.`);
+      return readText(response);
+    };
+    let model=settings.model;
+    if(!model) {
+      const listed=JSON.parse(await call(`${root}/models`,{method:'GET'}));
+      model=listed?.data?.[0]?.id;
+      if(typeof model!=='string' || !model) throw Error('Die lokale KI meldet kein Modell. Modellnamen in den Einstellungen eintragen.');
+    }
+    const reply=JSON.parse(await call(`${root}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,messages,temperature:0,max_tokens:800,stream:false})}));
+    const content=reply?.choices?.[0]?.message?.content;
+    if(typeof content!=='string') throw Error('Die Antwort der lokalen KI hatte nicht die erwartete Form.');
+    return {model,content};
+  }
+  async function stillOwnTarget(pid,targets) {
+    // Last look before a signal: still my process, still matching a configured pattern, never MemGuard itself.
+    let line; try { line=await sampleCommand('/bin/ps',['-p',String(pid),'-o','uid=,args=']); } catch { return false; }
+    const match=line.trim().match(/^(\d+)\s+(.+)$/);
+    return Boolean(match) && Number(match[1])===process.getuid() && !match[2].includes('memguard') && targets.some(t=>match[2].includes(t.replaceAll('~',home)));
+  }
   function getSample() {
     if(!sampling) sampling=sample().finally(()=>{sampling=null;});
     return sampling;
@@ -120,6 +163,11 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
         if(path==='/api/session') return send(res,200,{token,version});
         if(path==='/api/status') return send(res,200,await getSample());
         if(path==='/api/log') return send(res,200,{text:await logTail()});
+        if(path==='/api/proposal') {
+          const {proposal}=await currentProposal(); const settings=await advisorSettings();
+          return send(res,200,{proposal,advisor:{enabled:settings.enabled,configured:Boolean(settings.endpoint)}});
+        }
+        if(path==='/api/advisor') return send(res,200,{settings:await advisorSettings()});
         if(path==='/api/preview') {
           // Read-only: lists what the monitor would signal for these patterns; sends no signal.
           let targets;
@@ -174,6 +222,56 @@ export async function createApp({home=homedir(), port=0, sampleCommand=command, 
           if(data.paused) await writeFile(pauseFile,'',{mode:0o600});
           else { try { await unlink(pauseFile); } catch(error) { if(error.code!=='ENOENT') throw error; } }
           return send(res,200,{paused:existsSync(pauseFile)});
+        }
+        if(path==='/api/advisor') {
+          const next=validateAdvisor(data.settings);
+          await mkdir(dirname(advisorFile),{recursive:true});
+          const temp=`${advisorFile}.${randomBytes(8).toString('hex')}.tmp`;
+          try { await writeFile(temp,JSON.stringify(next,null,2)+'\n',{mode:0o600,flag:'wx'}); await rename(temp,advisorFile); }
+          finally { try { await unlink(temp); } catch(error) { if(error.code!=='ENOENT') throw error; } }
+          const saved=await advisorSettings();
+          if(JSON.stringify(saved)!==JSON.stringify(next)) throw Error('Rückprüfung der KI-Einstellungen fehlgeschlagen.');
+          return send(res,200,{settings:saved});
+        }
+        if(path==='/api/proposal/advice') {
+          // Optional second opinion from a model on this Mac. It can reorder and comment, nothing else.
+          const settings=await advisorSettings();
+          const {state,proposal}=await currentProposal();
+          if(!settings.enabled) return send(res,409,{error:'Die lokale KI ist nicht aktiviert.',proposal});
+          if(!proposal.steps.length) return send(res,200,{proposal:{...proposal,advisor:{status:'skipped',summary:'Keine Schritte zu bewerten.'}}});
+          try {
+            const answer=await askAdvisor(settings,advisorMessages({free:state.free,swapfiles:state.swapfiles,totalBytes:state.totalBytes,steps:proposal.steps}));
+            const advice=parseAdvisorReply(answer.content,proposal.steps);
+            if(!advice.ok) return send(res,200,{proposal:{...proposal,advisor:{status:'unusable',problem:advice.problem,model:answer.model}}});
+            const applied=applyAdvice(proposal,advice);
+            return send(res,200,{proposal:{...applied,advisor:{...applied.advisor,model:answer.model}}});
+          } catch(error) { return send(res,200,{proposal:{...proposal,advisor:{status:'unavailable',problem:errorText(error)}}}); }
+        }
+        if(path==='/api/remediate') {
+          // Runs one step of the proposal computed right now. A step that is not in it cannot be run.
+          if(typeof data.id!=='string') return send(res,400,{error:'Schritt fehlt.'});
+          const {state,proposal}=await currentProposal();
+          const step=proposal.steps.find(s=>s.id===data.id);
+          if(!step) return send(res,409,{error:'Dieser Schritt wird im aktuellen Stand nicht vorgeschlagen. Neu laden.'});
+          if(step.kind==='quit_app') {
+            await sampleCommand('/usr/bin/osascript',['-e','on run argv\ntell application (item 1 of argv) to quit\nend run',step.name],{timeout:15000});
+            return send(res,200,{message:`${step.name}: Beenden angefordert. Die App kann nachfragen, ob Änderungen gesichert werden sollen.`});
+          }
+          if(step.kind==='terminate_targets') {
+            const targets=state.config.value.targets;
+            const sent=[],skipped=[];
+            for(const pid of step.pids) {
+              if(!(await stillOwnTarget(pid,targets))) { skipped.push(pid); continue; }
+              try { signalProcess(pid,'SIGTERM'); sent.push(pid); } catch { skipped.push(pid); }
+            }
+            return send(res,200,{message:`SIGTERM an ${sent.length} Prozess${sent.length===1?'':'e'} gesendet${skipped.length?`, ${skipped.length} übersprungen (beendet oder nicht mehr passend)`:''}.`,sent,skipped});
+          }
+          if(step.kind==='restart_mac') {
+            if(data.phrase!=='NEUSTART') return send(res,400,{error:'Zur Bestätigung NEUSTART eintippen.'});
+            await sampleCommand('/usr/bin/osascript',['-e','tell application "System Events" to restart'],{timeout:15000});
+            return send(res,200,{message:'Neustart angefordert. Apps mit ungesicherten Änderungen können ihn noch unterbrechen.'});
+          }
+          return send(res,409,{error:'Unbekannte Schrittart.'});
         }
         if(path==='/api/monitor') {
           if(data.action==='start') {

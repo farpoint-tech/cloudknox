@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaults,validateConfig,classify,parseProcesses,parsePreview,parseHeartbeat,assessMonitor,configLevels,targetsDigest} from '../core.mjs';
+import {defaults,validateConfig,classify,parseProcesses,parsePreview,parseHeartbeat,assessMonitor,configLevels,targetsDigest,buildProposal,advisorDefaults,parseAdvisorEndpoint,validateAdvisor,advisorMessages,parseAdvisorReply,applyAdvice,cleanLabel} from '../core.mjs';
 
 test('threshold boundaries and unknown measurement fail closed',()=>{
   assert.equal(classify(50,0,defaults),'normal');
@@ -107,4 +107,83 @@ test('configuration levels: no file means the monitor must report "none"; invali
   assert.equal(levels({config:fileless}).loaded.ok,false,'a monitor that read a file does not match "no file"');
   const broken=levels({config:{error:'kaputt',revision:null,exists:false,path:'/c',value:defaults}});
   assert.equal(broken.saved.ok,false);assert.equal(broken.loaded.ok,false);assert.equal(broken.verified.ok,false);
+});
+
+// ---- Abhilfe (MG-16) ----
+const GB=1024**3;
+const proc=(pid,name,gb,extra={})=>({pid,name,own:true,isApp:true,rssBytes:Math.round(gb*GB),target:false,...extra});
+const sample=(state,processes,over={})=>({state,free:8,swapfiles:20,processes,config:defaults,...over});
+test('normal and unknown states propose nothing, so nothing can be run in them',()=>{
+  assert.deepEqual(buildProposal(sample('normal',[proc(1000,'Chrome',9)])).steps,[]);
+  assert.deepEqual(buildProposal(sample('unknown',[proc(1000,'Chrome',9)])).steps,[]);
+});
+test('critical proposes the biggest own apps, least disruptive first, with the restart last',()=>{
+  const p=buildProposal(sample('critical',[proc(10,'Chrome',9),proc(11,'Chrome',1),proc(12,'Slack',1.2),proc(13,'Tiny',0.1),proc(14,'Other',2,{own:false}),proc(15,'Finder',3)]));
+  assert.deepEqual(p.steps.map(s=>s.id),['quit:Chrome','quit:Slack','restart']);
+  assert.equal(p.steps[0].rssBytes,10*GB);assert.equal(p.steps[0].suggestedPattern,'/Chrome.app/');
+  assert.equal(p.steps[2].risk,'high');
+});
+test('protected names, other users and the dashboard itself are never proposed',()=>{
+  const p=buildProposal(sample('critical',[proc(1,'WindowServer',4),proc(2,'node',4),proc(3,'MemGuard',4),proc(4,'Secret',4,{own:false}),proc(5,'Own',4)]));
+  assert.deepEqual(p.steps.map(s=>s.id),['quit:Own','restart']);
+  const guarded=buildProposal({...sample('critical',[proc(5,'Own',4)]),protectedPids:[5]});
+  assert.deepEqual(guarded.steps.map(s=>s.id),['restart']);
+});
+test('a pre-approved target step comes before a larger app of the same risk',()=>{
+  const p=buildProposal(sample('critical',[proc(50,'worker',0.6,{target:true,isApp:false}),proc(51,'Chrome',9)]));
+  assert.deepEqual(p.steps.map(s=>s.id),['terminate-targets','quit:Chrome','restart']);
+});
+test('configured targets get their own step; targets are not offered a second time as quit',()=>{
+  const p=buildProposal(sample('critical',[proc(20,'worker',2,{target:true}),proc(21,'worker',2,{target:true}),proc(22,'Slack',1)]));
+  assert.equal(p.steps[0].kind,'terminate_targets');assert.deepEqual(p.steps[0].pids,[20,21]);
+  assert.ok(!p.steps.some(s=>s.id==='quit:worker'));assert.ok(p.steps.some(s=>s.id==='quit:Slack'));
+});
+test('swap files alone recommend a restart only from the warning threshold',()=>{
+  assert.ok(!buildProposal(sample('warning',[],{swapfiles:49,free:60})).steps.some(s=>s.kind==='restart_mac'));
+  assert.ok(buildProposal(sample('warning',[],{swapfiles:50,free:60})).steps.some(s=>s.kind==='restart_mac'));
+  assert.ok(!buildProposal(sample('warning',[proc(1,'Slack',3)],{swapfiles:null,free:15})).steps.some(s=>s.kind==='restart_mac'));
+});
+test('a bare executable is never offered as an app to quit, however large',()=>{
+  const p=buildProposal(sample('critical',[proc(40,'worker',4,{isApp:false}),proc(41,'Slack',2)]));
+  assert.deepEqual(p.steps.map(s=>s.id),['quit:Slack','restart']);
+  const uid=process.getuid(),parsed=parseProcesses(`7 ${uid} 1024 /usr/bin/thing --x\n8 ${uid} 1024 /Applications/Foo.app/Contents/MacOS/Foo`,[],uid);
+  assert.deepEqual(Object.fromEntries(parsed.map(x=>[x.pid,x.isApp])),{7:false,8:true});
+});
+test('labels from foreign processes cannot carry markup or prompt text into steps',()=>{
+  assert.equal(cleanLabel('Evil"; do shell script "x" <b>'),'Evil do shell script x b');
+  const p=buildProposal(sample('critical',[proc(9,'<img onerror=1>',4)]));
+  assert.ok(p.steps.every(s=>!/[<>"]/.test(s.id+s.title)));
+});
+test('advisor endpoint must be loopback; cloud hosts, credentials and odd forms are refused',()=>{
+  for(const ok of ['http://127.0.0.1:1337/v1','http://localhost:11434/v1','http://[::1]:8080/v1','http://127.0.0.2/v1'])assert.doesNotThrow(()=>parseAdvisorEndpoint(ok),ok);
+  for(const bad of ['https://api.openai.com/v1','http://192.168.1.5:1337/v1','http://127.0.0.1.evil.example/v1','http://127.0.0.999/v1','http://user:pw@127.0.0.1/v1','http://127.0.0.1/v1?key=1','ftp://127.0.0.1/v1','127.0.0.1','http://0.0.0.0:1337/v1','http://[::ffff:8.8.8.8]/v1'])assert.throws(()=>parseAdvisorEndpoint(bad),Error,bad);
+});
+test('advisor settings: disabled with no endpoint is valid; enabled needs a loopback endpoint',()=>{
+  assert.doesNotThrow(()=>validateAdvisor({...advisorDefaults}));
+  assert.throws(()=>validateAdvisor({...advisorDefaults,enabled:true}));
+  assert.throws(()=>validateAdvisor({...advisorDefaults,enabled:true,endpoint:'https://api.example.com/v1'}));
+  assert.doesNotThrow(()=>validateAdvisor({...advisorDefaults,enabled:true,endpoint:'http://127.0.0.1:1337/v1',model:'m',timeout_seconds:30}));
+  assert.throws(()=>validateAdvisor({...advisorDefaults,extra:1}));
+  assert.throws(()=>validateAdvisor({...advisorDefaults,timeout_seconds:2}));
+});
+test('the prompt carries names and sizes but no command lines or paths',()=>{
+  const p=buildProposal(sample('critical',[proc(10,'Chrome',9,{cmd:'/Users/x/secret --token=SECRET'})]));
+  const text=JSON.stringify(advisorMessages({free:8,swapfiles:20,totalBytes:64*GB,steps:p.steps}));
+  assert.ok(text.includes('quit:Chrome'));assert.ok(!text.includes('SECRET')&&!text.includes('/Users/'));
+});
+test('advisor reply can only reorder and comment on existing steps',()=>{
+  const p=buildProposal(sample('critical',[proc(10,'Chrome',9),proc(12,'Slack',2)]));
+  const reply=parseAdvisorReply('```json\n'+JSON.stringify({summary:'Chrome zuerst.',order:['quit:Slack','quit:Chrome','rm -rf','quit:Slack'],notes:{'quit:Slack':'klein','delete:all':'x'},cautions:{restart:'noch nicht nötig'}})+'\n```',p.steps);
+  assert.equal(reply.ok,true);assert.deepEqual(reply.order,['quit:Slack','quit:Chrome']);
+  assert.deepEqual(Object.keys(reply.notes),['quit:Slack']);assert.deepEqual(Object.keys(reply.cautions),['restart']);
+  const applied=applyAdvice(p,reply);
+  assert.deepEqual(applied.steps.map(s=>s.id),['quit:Slack','quit:Chrome','restart']);
+  assert.equal(applied.steps.length,p.steps.length,'nothing is added or removed');
+  assert.equal(applied.steps[2].advice.caution,'noch nicht nötig');assert.equal(applied.advisor.status,'ok');
+});
+test('unusable advisor replies are reported, never guessed at',()=>{
+  const p=buildProposal(sample('critical',[proc(10,'Chrome',9)]));
+  for(const bad of ['','Ich empfehle Chrome.','[1,2]','{kaputt'])assert.equal(parseAdvisorReply(bad,p.steps).ok,false,bad);
+  const empty=parseAdvisorReply('{"order":["nope"]}',p.steps);assert.equal(empty.ok,true);assert.deepEqual(empty.order,[]);
+  assert.deepEqual(applyAdvice(p,empty).steps.map(s=>s.id),p.steps.map(s=>s.id));
 });

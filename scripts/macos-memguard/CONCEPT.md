@@ -67,6 +67,10 @@ Die Konfiguration besteht ausschließlich aus den in `app/core.mjs` definierten 
 - Mitteilungsinhalte werden als Daten transportiert, niemals in Skriptcode interpoliert. Die native App nimmt ausschließlich ihren eigenen Nutzlastpfad an.
 - Logs benennen gesendete Signale, nicht einen ungeprüften erfolgreichen Prozessabbruch. Keine Telemetrie/Cloud-Abhängigkeit.
 
+## Abhilfe und lokale KI
+
+Der Monitor beendet selbstständig nur eingetragene Ziele. Alles darüber hinaus ist ein Vorschlag mit Bestätigung: `buildProposal` (core.mjs) macht aus Messung und Prozessliste eine geordnete Stufenleiter, der Server führt einen Schritt nur aus, wenn er im jetzt berechneten Vorschlag steht (`POST /api/remediate`). Die lokale KI (`/api/proposal/advice`) ist ein optionaler Prüfer: Sie bekommt gefilterte Namen und Größen, antwortet mit Reihenfolge und Kommentaren, und `parseAdvisorReply` lässt nur bekannte Schritt-Kennungen durch. Hinzufügen, Entfernen und Ausführen sind der KI nicht möglich. Der Endpunkt ist auf Loopback beschränkt, Weiterleitungen sind gesperrt. Neustart verlangt zusätzlich das Eintippen von `NEUSTART`.
+
 ## Bereitstellung und Nachweisgrenzen
 
 Source-/PR-Stand, gebaute App und installierter Dienst sind unterschiedliche Zustände. Stand der ersten Bestandsprüfung am 25.10.2026: PR #39/#40 offen; installierte Binärdatei meldet 1.0.0. Die neue App und das Konzept ändern diese Installation nicht automatisch.
