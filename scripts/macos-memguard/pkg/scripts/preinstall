@@ -1,4 +1,8 @@
 #!/bin/zsh
+# KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+#   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+#   userImpact: low        Stoppt kurz den laufenden Dienst des angemeldeten Benutzers.
+#   adminInterference: medium Reversibilität: ändert nur den launchd-Zustand; postinstall startet den Dienst neu.
 LABEL="tech.farpoint.memguard"
 CU=$(stat -f %Su /dev/console)
 [[ "$CU" == root || "$CU" == loginwindow ]] && exit 0

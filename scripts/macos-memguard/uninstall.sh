@@ -1,4 +1,8 @@
 #!/bin/zsh
+# KLASSIFIKATION (Nexus.365-Klassifikationsstandard, sinngemäß für lokale macOS-Werkzeuge)
+#   tier: 2                Endgerät des Benutzers (User Plane), kein Tenant-Zugriff
+#   userImpact: low        Entfernt den Schutz; danach keine Warnungen mehr.
+#   adminInterference: medium Reversibilität: entfernt Agent und Programm, auch systemweit mit sudo; Neuinstallation stellt es wieder her. Konfiguration und Protokolle bleiben.
 # Removes MemGuard (per-user and, with sudo, system-wide). Logs are kept.
 set -u
 LABEL="tech.farpoint.memguard"
