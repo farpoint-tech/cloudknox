@@ -3,12 +3,15 @@ import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 const exec = promisify(execFile);
-export const defaults = Object.freeze({language:'en', notifications:true, interval:10, warn_free_percent:20, critical_free_percent:10, warn_swapfiles:50, critical_swapfiles:65, warn_repeat_seconds:600, terminate_grace_seconds:8, targets:[]});
+export const defaults = Object.freeze({language:'en', notifications:true, interval:10, warn_free_percent:20, critical_free_percent:10, warn_swapfiles:50, critical_swapfiles:65, warn_repeat_seconds:600, terminate_grace_seconds:8, cpu_warn_load_percent:70, cpu_warn_process_percent:90, cpu_warn_minutes:10, targets:[]});
+// CPU fields came later; configurations written before them stay valid and receive the defaults.
+export const cpuKeys = Object.freeze(['cpu_warn_load_percent','cpu_warn_process_percent','cpu_warn_minutes']);
 export function validateConfig(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Konfiguration muss ein Objekt sein.');
   const keys = Object.keys(defaults);
+  value = {...Object.fromEntries(cpuKeys.map(k => [k, defaults[k]])), ...value};
   if (Object.keys(value).some(k => !keys.includes(k)) || keys.some(k => !(k in value))) throw Error('Unbekannte oder fehlende Konfigurationsfelder.');
-  for (const [key, min, max] of [['interval',2,300],['warn_free_percent',1,100],['critical_free_percent',0,99],['warn_swapfiles',1,999],['critical_swapfiles',2,1000],['warn_repeat_seconds',30,86400],['terminate_grace_seconds',1,60]]) {
+  for (const [key, min, max] of [['interval',2,300],['warn_free_percent',1,100],['critical_free_percent',0,99],['warn_swapfiles',1,999],['critical_swapfiles',2,1000],['warn_repeat_seconds',30,86400],['terminate_grace_seconds',1,60],['cpu_warn_load_percent',10,400],['cpu_warn_process_percent',10,2000],['cpu_warn_minutes',1,240]]) {
     if (!Number.isInteger(value[key]) || value[key] < min || value[key] > max) throw Error(`${key}: ganze Zahl zwischen ${min} und ${max} erforderlich.`);
   }
   if (value.critical_free_percent >= value.warn_free_percent || value.warn_swapfiles >= value.critical_swapfiles) throw Error('Warnschwelle muss vor der kritischen Schwelle liegen.');

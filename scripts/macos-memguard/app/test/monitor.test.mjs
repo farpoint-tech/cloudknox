@@ -312,3 +312,55 @@ test('monitor reports a failed measurement instead of looking healthy',async t=>
   assert.equal(beat.measurement,'failed');
   monitor.child.kill('SIGTERM');await monitor.exited;
 });
+// CPU watch (MG-20). Warn only: it names the cause and never sends a signal.
+const memlog=root=>readFile(join(root,'logs/memguard.log'),'utf8').catch(()=>'');
+test('CPU watch warns on sustained high load and names the largest users',async t=>{
+  const {run,env,root}=await setup(t,{cpu_warn_process_percent:2000});
+  await exec('/bin/zsh',[script,'once'],{env:{...env,MEMGUARD_FAKE_FREE:'100',MEMGUARD_FAKE_LOAD:'95',MEMGUARD_TEST_CPU_SECONDS:'0'},timeout:10000});
+  assert.match(await memlog(root),/CPU-WARN load=95% since=0min top=\[.+\] spawner=\[/);
+});
+test('CPU watch stays silent below the load threshold',async t=>{
+  const {env,root}=await setup(t,{cpu_warn_process_percent:2000});
+  await exec('/bin/zsh',[script,'once'],{env:{...env,MEMGUARD_FAKE_FREE:'100',MEMGUARD_FAKE_LOAD:'69',MEMGUARD_TEST_CPU_SECONDS:'0'},timeout:10000});
+  assert.doesNotMatch(await memlog(root),/CPU-WARN/);
+});
+test('CPU watch waits for the whole observation window before warning',async t=>{
+  const {root,env}=await setup(t,{interval:2,cpu_warn_process_percent:2000});
+  const m=await startMonitor(t,env,{MEMGUARD_FAKE_LOAD:'95',MEMGUARD_TEST_CPU_SECONDS:'4'});
+  await monitorReady(root,m.child);
+  assert.doesNotMatch(await memlog(root),/CPU-WARN/,'no warning at the first high sample');
+  await until(async()=>/CPU-WARN load=95%/.test(await memlog(root)),15000);
+  m.child.kill('SIGTERM');await m.exited;
+});
+test('CPU watch names a parent that starts processes continuously and signals nothing',async t=>{
+  const marker='mg-spawn-'+Math.random().toString(36).slice(2);
+  const loop=spawn('/bin/zsh',['-c','while :; do /bin/sleep 3 & /bin/sleep 3 & sleep 0.3; done'],{argv0:marker,stdio:'ignore'});
+  const loopExit=new Promise(resolve=>loop.once('exit',resolve));
+  t.after(async()=>{if(loop.exitCode===null&&loop.signalCode===null)loop.kill('SIGKILL');await loopExit;await exec('/usr/bin/pkill',['-f',marker]).catch(()=>{});});
+  await new Promise(resolve=>setTimeout(resolve,2500));
+  const {env,root}=await setup(t,{cpu_warn_process_percent:2000});
+  await exec('/bin/zsh',[script,'once'],{env:{...env,MEMGUARD_FAKE_FREE:'100',MEMGUARD_FAKE_LOAD:'95',MEMGUARD_TEST_CPU_SECONDS:'0'},timeout:10000});
+  assert.match(await memlog(root),new RegExp(`spawner=\\[${marker} \\(\\d+\\)\\]`));
+  assert.equal(loop.exitCode,null);assert.equal(loop.signalCode,null,'watched process untouched');
+});
+test('CPU watch warns about a single busy process without signalling it',async t=>{
+  const marker='mg-busy-'+Math.random().toString(36).slice(2);
+  const busy=spawn('/usr/bin/yes',[],{argv0:marker,stdio:'ignore'});
+  const busyExit=new Promise(resolve=>busy.once('exit',resolve));
+  t.after(async()=>{if(busy.exitCode===null&&busy.signalCode===null)busy.kill('SIGKILL');await busyExit;});
+  await new Promise(resolve=>setTimeout(resolve,3000));
+  const {env,root}=await setup(t,{cpu_warn_process_percent:10});
+  await exec('/bin/zsh',[script,'once'],{env:{...env,MEMGUARD_FAKE_FREE:'100',MEMGUARD_FAKE_LOAD:'1',MEMGUARD_TEST_CPU_SECONDS:'0'},timeout:10000});
+  assert.match(await memlog(root),new RegExp(`CPU-WARN process pid=${busy.pid} cpu=[0-9.]+% since=0min name=`));
+  assert.equal(busy.exitCode,null);assert.equal(busy.signalCode,null,'busy process untouched');
+});
+test('configuration without CPU fields stays valid; wrong CPU types and ranges are rejected',async t=>{
+  const legacy={...defaults};for(const k of ['cpu_warn_load_percent','cpu_warn_process_percent','cpu_warn_minutes'])delete legacy[k];
+  const {run,config}=await setup(t);
+  await writeFile(config,JSON.stringify({...legacy,notifications:false}));
+  await run(['once']);
+  await writeFile(config,JSON.stringify({...defaults,notifications:false,cpu_warn_minutes:'10'}));
+  await assert.rejects(run(['once']),/Invalid configuration type: cpu_warn_minutes/);
+  await writeFile(config,JSON.stringify({...defaults,notifications:false,cpu_warn_load_percent:5}));
+  await assert.rejects(run(['once']),/out of range/);
+});

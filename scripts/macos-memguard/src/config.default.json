@@ -8,5 +8,8 @@
   "critical_swapfiles": 65,
   "warn_repeat_seconds": 600,
   "terminate_grace_seconds": 8,
+  "cpu_warn_load_percent": 70,
+  "cpu_warn_process_percent": 90,
+  "cpu_warn_minutes": 10,
   "targets": []
 }
