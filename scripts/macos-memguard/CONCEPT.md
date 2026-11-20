@@ -1,6 +1,6 @@
 # MemGuard – Produkt- und Architekturkonzept
 
-Stand: 25. Oktober 2026. Gilt für `scripts/macos-memguard` im Repository `farpoint-tech/cloudknox`. Einstieg für Entwicklung: [DEVELOPMENT.md](DEVELOPMENT.md); verbindliche Arbeitspakete: [BACKLOG.md](BACKLOG.md). Dieses Dokument beschreibt implementiertes Verhalten und offene Grenzen getrennt.
+Stand: 25. Oktober 2026, Installationsstand ergänzt am 20. November 2026. Gilt für `scripts/macos-memguard` im Repository `farpoint-tech/cloudknox`. Einstieg für Entwicklung: [DEVELOPMENT.md](DEVELOPMENT.md); verbindliche Arbeitspakete: [BACKLOG.md](BACKLOG.md). Dieses Dokument beschreibt implementiertes Verhalten und offene Grenzen getrennt.
 
 ## Problem und Ziel
 
@@ -73,7 +73,7 @@ Der Monitor beendet selbstständig nur eingetragene Ziele. Alles darüber hinaus
 
 ## Bereitstellung und Nachweisgrenzen
 
-Source-/PR-Stand, gebaute App und installierter Dienst sind unterschiedliche Zustände. Stand der ersten Bestandsprüfung am 25.10.2026: PR #39/#40 offen; installierte Binärdatei meldet 1.0.0. Die neue App und das Konzept ändern diese Installation nicht automatisch.
+Source-/PR-Stand, gebaute App und installierter Dienst sind unterschiedliche Zustände. Stand der ersten Bestandsprüfung am 25.10.2026: PR #39/#40 offen; installierte Binärdatei meldet 1.0.0. Die neue App und das Konzept ändern diese Installation nicht automatisch. Stand 20.11.2026: Der Benutzer-LaunchAgent `tech.farpoint.memguard` startet `~/Library/Application Support/MemGuard/memguard run`; diese Datei meldet 1.2.0 und ist byte-gleich mit `src/memguard` auf Commit 1592c25 (Branch `codex/memguard-cpu-watch`). Das belegt den installierten Monitor, nicht die native App oder eine Mitteilungsabnahme.
 
 Die Click-to-open-Kette ist technisch implementiert. Unit-/API-Tests, realer App-Direktstart und Browser-Liveansicht können automatisiert nachgewiesen werden. Sichtbare macOS-Mitteilungszustellung und tatsächlicher Klick bei den Benutzer-/Fokus-/Mitteilungseinstellungen erfordern zusätzlich den nativen Akzeptanztest in DEVELOPMENT.md. Ein erfolgreicher `open`-Aufruf allein reicht dafür nicht.
 
