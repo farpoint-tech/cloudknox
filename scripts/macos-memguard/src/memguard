@@ -278,8 +278,8 @@ cpu_spawner() { # parent with the most processes younger than 30 s (launchd and 
     [[ -n "$name" ]] && print -r -- "$name ($count)"
   done
 }
-typeset -g CPU_HIGH_SINCE=0 LAST_CPU_WARN=0
-typeset -gA HOT_SINCE HOT_ID HOT_WARNED
+typeset -g CPU_HIGH_SINCE=0 LAST_CPU_WARN=0 CPU_TEST_I=0
+typeset -gA HOT_SINCE HOT_ID HOT_WARNED HOT_SUM HOT_N
 cpu_step() {
   local now=$(date +%s) window load top spawner
   window=$(cpu_seconds)
@@ -296,24 +296,39 @@ cpu_step() {
   else
     CPU_HIGH_SINCE=0
   fi
-  # Single process above the per-process threshold for the whole window.
-  local line pid pcpu args id
+  # Single process: average CPU over the window, so short dips below the threshold do not restart it.
+  # A process enters at or above the threshold, stays watched until a window ends with it below.
+  local line pid pcpu args id avg listing
   local -A seen
-  for line in ${(f)"$(ps -Axo pid=,pcpu=,comm= 2>/dev/null | awk -v t=$CPU_PROC '$2 >= t { p=$1; c=$2; $1=""; $2=""; sub(/^ +/,""); print p "\t" c "\t" $0 }')"}; do
+  if [[ -n "${MEMGUARD_TEST_PCPU:-}" ]]; then # test hook: one real PID with CPU values cycling from a list
+    local -a fake=(${(s:,:)MEMGUARD_TEST_PCPU})
+    listing="$MEMGUARD_TEST_PCPU_PID ${fake[$(( CPU_TEST_I % ${#fake} + 1 ))]} /usr/bin/mg-fake"; (( CPU_TEST_I++ ))
+  else
+    listing=$(ps -Axo pid=,pcpu=,comm= 2>/dev/null)
+  fi
+  for line in ${(f)"$(print -r -- "$listing" | awk -v t=$CPU_PROC -v keep=" ${(k)HOT_SINCE} " '$2 >= t || index(keep, " " $1 " ") { p=$1; c=$2; $1=""; $2=""; sub(/^ +/,""); print p "\t" c "\t" $0 }')"}; do
     IFS=$'\t' read -r pid pcpu args <<< "$line"; args=$(proc_label "$args")
-    [[ "$pid" == <-> && "$pid" != $$ ]] || continue
+    [[ "$pid" == <-> && "$pid" != $$ && "$pcpu" == [0-9]* ]] || continue
     id=$(ps -p "$pid" -o lstart= 2>/dev/null); [[ -n "$id" ]] || continue
+    if [[ "${HOT_ID[$pid]:-}" != "$id" ]]; then
+      (( pcpu >= CPU_PROC )) || continue
+      HOT_ID[$pid]=$id; HOT_SINCE[$pid]=$now; HOT_WARNED[$pid]=0; HOT_SUM[$pid]=0; HOT_N[$pid]=0
+    fi
+    (( HOT_SUM[$pid] += pcpu, HOT_N[$pid] += 1 ))
     seen[$pid]=1
-    if [[ "${HOT_ID[$pid]:-}" != "$id" ]]; then HOT_ID[$pid]=$id; HOT_SINCE[$pid]=$now; HOT_WARNED[$pid]=0; fi
-    if (( now - HOT_SINCE[$pid] >= window && now - HOT_WARNED[$pid] > WARN_REPEAT )); then
-      log "CPU-WARN process pid=$pid cpu=${pcpu}% since=$(( (now - HOT_SINCE[$pid]) / 60 ))min name=$args"
+    (( now - HOT_SINCE[$pid] >= window )) || continue
+    printf -v avg '%.0f' $(( HOT_SUM[$pid] / HOT_N[$pid] ))
+    if (( avg >= CPU_PROC && now - HOT_WARNED[$pid] > WARN_REPEAT )); then
+      log "CPU-WARN process pid=$pid cpu=${avg}% avg since=$(( (now - HOT_SINCE[$pid]) / 60 ))min name=$args"
       notify "MemGuard: $(t 'process busy' 'Prozess dauerhaft ausgelastet')" \
-        "$(t "$args uses ${pcpu}% CPU for $(( (now - HOT_SINCE[$pid]) / 60 )) min (PID $pid)" "$args nutzt ${pcpu} % CPU seit $(( (now - HOT_SINCE[$pid]) / 60 )) Min. (PID $pid)")"
+        "$(t "$args averages ${avg}% CPU over $(( (now - HOT_SINCE[$pid]) / 60 )) min (PID $pid)" "$args nutzt im Schnitt ${avg} % CPU seit $(( (now - HOT_SINCE[$pid]) / 60 )) Min. (PID $pid)")"
       HOT_WARNED[$pid]=$now
     fi
+    # Window over: start the next one, or stop watching a process that has cooled down.
+    if (( pcpu >= CPU_PROC )); then HOT_SINCE[$pid]=$now; HOT_SUM[$pid]=0; HOT_N[$pid]=0; else unset "seen[$pid]"; fi
   done
   for pid in ${(k)HOT_SINCE}; do
-    (( ${+seen[$pid]} )) || { unset "HOT_SINCE[$pid]" "HOT_ID[$pid]" "HOT_WARNED[$pid]"; }
+    (( ${+seen[$pid]} )) || { unset "HOT_SINCE[$pid]" "HOT_ID[$pid]" "HOT_WARNED[$pid]" "HOT_SUM[$pid]" "HOT_N[$pid]"; }
   done
   return 0
 }

@@ -119,7 +119,7 @@ Der Lüfter folgt der CPU, nicht dem Speicher. Am 06.11.2026 lief er dauerhaft, 
 
 1. **Gesamtlast.** Liegt die 1-Minuten-Last für `cpu_warn_minutes` ununterbrochen über `cpu_warn_load_percent` aller Kerne, meldet MemGuard „CPU-Last hoch“ mit den drei größten Verbrauchern (nach .app-Bundle zusammengefasst).
 2. **Dauerstarter.** In derselben Meldung nennt er den Elternprozess mit den meisten Kindprozessen, die jünger als 30 Sekunden sind (ab drei; launchd und MemGuard selbst ausgenommen). So wird eine Schleife sichtbar, die laufend kurzlebige Prozesse startet und in keiner Verbrauchsliste lange auftaucht.
-3. **Einzelprozess.** Nutzt ein Prozess über das ganze Fenster mindestens `cpu_warn_process_percent`, meldet MemGuard „Prozess dauerhaft ausgelastet“ mit Name und PID. Ein Neustart des Prozesses (andere Startzeit) beginnt das Fenster neu.
+3. **Einzelprozess.** Erreicht ein Prozess `cpu_warn_process_percent`, beobachtet MemGuard ihn ein Fenster lang (`cpu_warn_minutes`) und bildet den Durchschnitt aller Messungen. Liegt der Durchschnitt bei oder über der Schwelle, meldet er „Prozess dauerhaft ausgelastet“ mit Name, PID und Durchschnitt. Kurze Ausreißer darunter setzen das Fenster nicht zurück. Am Fensterende beginnt ein neues, wenn der Prozess noch über der Schwelle liegt, sonst endet die Beobachtung. Ein Neustart des Prozesses (andere Startzeit) beginnt neu. Anlass: Am 11.11.2026 pendelte ein Safari-Hilfsprozess 15 Minuten lang zwischen 74 und 94 % und blieb mit der früheren Regel „jede Messung über der Schwelle“ unerkannt.
 
 Wiederholt wird jede Meldung frühestens nach `warn_repeat_seconds`. Der CPU-Wächter sendet **nie** ein Signal, auch nicht an Zielmuster; Pause und Zielliste betreffen ihn nicht. Logzeilen beginnen mit `CPU-WARN`.
 

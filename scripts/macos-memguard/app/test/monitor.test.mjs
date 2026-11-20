@@ -351,9 +351,22 @@ test('CPU watch warns about a single busy process without signalling it',async t
   await new Promise(resolve=>setTimeout(resolve,3000));
   const {env,root}=await setup(t,{cpu_warn_process_percent:10});
   await exec('/bin/zsh',[script,'once'],{env:{...env,MEMGUARD_FAKE_FREE:'100',MEMGUARD_FAKE_LOAD:'1',MEMGUARD_TEST_CPU_SECONDS:'0'},timeout:10000});
-  assert.match(await memlog(root),new RegExp(`CPU-WARN process pid=${busy.pid} cpu=[0-9.]+% since=0min name=`));
+  assert.match(await memlog(root),new RegExp(`CPU-WARN process pid=${busy.pid} cpu=\\d+% avg since=0min name=`));
   assert.equal(busy.exitCode,null);assert.equal(busy.signalCode,null,'busy process untouched');
 });
+for(const [values,warns] of [['95,80',true],['95,70',false]]){
+  test(`CPU watch averages a single process over the window (${values} ${warns?'warns':'stays silent'})`,async t=>{
+    const sleeper=spawn('/bin/sleep',['60'],{stdio:'ignore'});const gone=new Promise(r=>sleeper.once('exit',r));
+    t.after(async()=>{sleeper.kill('SIGKILL');await gone;});
+    const {root,env}=await setup(t,{interval:2,cpu_warn_process_percent:90});
+    const m=await startMonitor(t,env,{MEMGUARD_FAKE_LOAD:'1',MEMGUARD_TEST_CPU_SECONDS:'4',MEMGUARD_TEST_PCPU:values,MEMGUARD_TEST_PCPU_PID:String(sleeper.pid)});
+    await monitorReady(root,m.child);
+    if(warns)await until(async()=>new RegExp(`CPU-WARN process pid=${sleeper.pid} cpu=90% avg`).test(await memlog(root)),15000);
+    else{await new Promise(r=>setTimeout(r,11000));assert.doesNotMatch(await memlog(root),/CPU-WARN process/,'average 86/82 % stays below 90 %');}
+    m.child.kill('SIGTERM');await m.exited;
+    assert.equal(sleeper.exitCode,null,'watched process untouched');
+  });
+}
 test('configuration without CPU fields stays valid; wrong CPU types and ranges are rejected',async t=>{
   const legacy={...defaults};for(const k of ['cpu_warn_load_percent','cpu_warn_process_percent','cpu_warn_minutes'])delete legacy[k];
   const {run,config}=await setup(t);
