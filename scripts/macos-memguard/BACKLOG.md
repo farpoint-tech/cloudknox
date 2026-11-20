@@ -1,6 +1,6 @@
 # MemGuard – Arbeitsvorrat und Abnahme
 
-Stand: 29. Oktober 2026. „Implementiert“ ist keine Produktionsfreigabe. Zu jedem Paket gehören Code, sinnvoller ausführbarer Nachweis, aktualisierte Dokumentation und die ausdrücklich benannten Grenzen. Einstieg: [DEVELOPMENT.md](DEVELOPMENT.md), Architektur: [CONCEPT.md](CONCEPT.md).
+Stand: 20. November 2026. „Implementiert“ ist keine Produktionsfreigabe. Zu jedem Paket gehören Code, sinnvoller ausführbarer Nachweis, aktualisierte Dokumentation und die ausdrücklich benannten Grenzen. Einstieg: [DEVELOPMENT.md](DEVELOPMENT.md), Architektur: [CONCEPT.md](CONCEPT.md).
 
 | ID / Priorität | Status / Verantwortlich | Aufgabe und Abnahmekriterien |
 |---|---|---|
@@ -30,7 +30,7 @@ Ein Paket pro klar beschriebenem PR. Zuerst die passende Datei und bestehenden T
 
 ## Offene Punkte
 
-- [ ] P1 · Betreiber: MG-20 auf dem Zielgerät ausrollen und eine Woche `CPU-WARN`-Zeilen gegen Fehlalarme prüfen.
+- [ ] P1 · Betreiber: MG-20 läuft seit 11.11.2026 auf dem Zielgerät (Stand 4555c4d seit 20.11.2026); eine Woche `CPU-WARN`-Zeilen gegen Fehlalarme prüfen.
 - [ ] P2 · Entwicklung: CPU-Werte in den Heartbeat aufnehmen, damit „wirksam geprüft“ sie mit abdeckt.
 - [ ] P1 · Maintainer: Verantwortliche Personen für MG-02 bis MG-05 benennen und Abnahmen terminieren.
 - [ ] P1 · QA: MG-02 und MG-03 als erste Release-Gates abarbeiten.
