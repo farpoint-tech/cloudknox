@@ -165,6 +165,7 @@ Browserprüfung: Playwright als Testwerkzeug bereitstellen. MEMGUARD_PLAYWRIGHT_
 
 ## Offene Punkte
 
-- [ ] P1 · Betreiber: Austausch einer bestehenden Installation freigeben und anschließend live prüfen.
+- [ ] P1 · Betreiber/QA: Installation auf dem Zielgerät läuft seit 26.10.2026 (1.2.0, zuletzt aktualisiert 20.11.2026); offen sind der sichtbare Mitteilungsklick (MG-02) und der Rückkehrtest auf einem Testgerät (MG-03).
+- [ ] P1 · Betreiber: Eine Woche `CPU-WARN`-Zeilen gegen Fehlalarme prüfen (MG-20).
 - [ ] P1 · Betreiber: Repräsentativen Workload pilotieren und Zielmuster/Schwellenwerte anhand echter Messungen freigeben.
 - [ ] P2 · Release-Verantwortlicher: Bei Bedarf Apple-Signierung und Notarisierung für native Distribution ergänzen.
