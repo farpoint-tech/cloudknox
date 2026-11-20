@@ -80,6 +80,6 @@ Die Click-to-open-Kette ist technisch implementiert. Unit-/API-Tests, realer App
 ## Offene Punkte
 
 - [ ] P1 · Betreiber/QA: Sichtbaren Mitteilungsklick inklusive geschlossenem Dashboard nach Installation abnehmen (MG-02).
-- [ ] P1 · Betreiber: Upgrade und Rückkehr zur gesicherten Version für das konkrete Zielgerät freigeben und verifizieren (MG-03).
+- [ ] P1 · Betreiber: Rückkehr zur gesicherten Version auf einem Testgerät verifizieren (MG-03; Upgrade selbst am 26.10.2026 durchgeführt).
 - [x] P1 · Entwicklung: Vollständige Prozessvorschau für neue Zielmuster umgesetzt am 29.10.2026 (MG-04).
 - [ ] P2 · Entwicklung/Release: Weitere Arbeitspakete mit Abnahmekriterien siehe BACKLOG.md.

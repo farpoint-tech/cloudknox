@@ -68,7 +68,7 @@ Native Mitteilungen: Nutzlastverarbeitung und App-Aktivierung sind implementiert
 ## Offene Punkte 1.2.0
 
 - [ ] P1 · QA/Betreiber: MG-02 mit sichtbarem Testbanner und tatsächlichem Klick am endgültigen Installationspfad abnehmen.
-- [ ] P1 · Betreiber: MG-03 – Benutzerinstallation gesondert freigeben und vollständig zurückprüfen.
+- [x] P1 · Betreiber: MG-03 – Benutzerinstallation am 26.10.2026 freigegeben und aktualisiert; Rückkehrtest auf Testgerät weiterhin offen (BACKLOG.md).
 - [ ] P2 · Entwicklung: Weitere Aufgaben gemäß BACKLOG.md; keine Vollständigkeit des Pilot-/Rolloutnachweises behaupten.
 
 ## Nachprüfung MG-20 – 20. November 2026

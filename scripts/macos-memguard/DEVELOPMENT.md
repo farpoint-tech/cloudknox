@@ -74,5 +74,5 @@ Problem und Trigger beschrieben; Änderung auf ein Arbeitspaket begrenzt; passen
 ## Offene Punkte
 
 - [ ] P1 · QA/Betreiber: Nativen Test MG-02 am endgültigen Installationspfad durchführen.
-- [ ] P1 · Betreiber: Konkretes Upgrade freigeben und Rückprüfung gemäß MG-03 durchführen.
+- [ ] P1 · Betreiber: Upgrade am 26.10.2026 durchgeführt; Rückkehr zur Sicherung auf einem Testgerät gemäß MG-03 offen.
 - [ ] P2 · Maintainer: Nächstes Paket aus BACKLOG.md einem Verantwortlichen zuweisen.
