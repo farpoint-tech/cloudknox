@@ -187,3 +187,11 @@ test('unusable advisor replies are reported, never guessed at',()=>{
   const empty=parseAdvisorReply('{"order":["nope"]}',p.steps);assert.equal(empty.ok,true);assert.deepEqual(empty.order,[]);
   assert.deepEqual(applyAdvice(p,empty).steps.map(s=>s.id),p.steps.map(s=>s.id));
 });
+test('CPU fields: legacy configuration receives defaults, ranges are enforced (MG-20)',()=>{
+  const legacy={...defaults};for(const k of ['cpu_warn_load_percent','cpu_warn_process_percent','cpu_warn_minutes'])delete legacy[k];
+  const v=validateConfig(legacy);
+  assert.equal(v.cpu_warn_load_percent,70);assert.equal(v.cpu_warn_process_percent,90);assert.equal(v.cpu_warn_minutes,10);
+  assert.throws(()=>validateConfig({...defaults,cpu_warn_load_percent:9}),/cpu_warn_load_percent/);
+  assert.throws(()=>validateConfig({...defaults,cpu_warn_minutes:241}),/cpu_warn_minutes/);
+  assert.throws(()=>validateConfig({...defaults,cpu_warn_process_percent:'90'}),/cpu_warn_process_percent/);
+});

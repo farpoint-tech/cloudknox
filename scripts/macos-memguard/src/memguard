@@ -52,6 +52,10 @@ load_cfg() {
       [[ "$key" == targets ]] && expected=array
       [[ "$(plutil -type "$key" "$f" 2>/dev/null)" == "$expected" ]] || { print -u2 "Invalid configuration type: $key"; return 1; }
     done
+    # CPU keys are optional so configurations written before the CPU watch stay valid.
+    for key in cpu_warn_load_percent cpu_warn_process_percent cpu_warn_minutes; do
+      [[ -z "$(plutil -type "$key" "$f" 2>/dev/null)" || "$(plutil -type "$key" "$f" 2>/dev/null)" == integer ]] || { print -u2 "Invalid configuration type: $key"; return 1; }
+    done
     count=$(plutil -extract targets raw -o - "$f")
     (( count <= 50 )) || { print -u2 'Too many targets'; return 1; }
     for (( i=0; i<count; i++ )); do
@@ -65,14 +69,17 @@ load_cfg() {
   CRIT_SWAP=$(cfg critical_swapfiles 65)
   WARN_REPEAT=$(cfg warn_repeat_seconds 600)
   GRACE=$(cfg terminate_grace_seconds 8)
+  CPU_LOAD=$(cfg cpu_warn_load_percent 70)
+  CPU_PROC=$(cfg cpu_warn_process_percent 90)
+  CPU_MIN=$(cfg cpu_warn_minutes 10)
   LANG_UI=$(cfg language en)
   NOTIFY=$(cfg notifications true)
   if [[ -n "${MEMGUARD_TARGETS:-}" ]]; then TARGETS=(${(s:|:)MEMGUARD_TARGETS}); else TARGETS=(${(f)"$(cfg_targets)"}); fi
   local val
-  for val in "$INTERVAL" "$WARN_FREE" "$CRIT_FREE" "$WARN_SWAP" "$CRIT_SWAP" "$WARN_REPEAT" "$GRACE"; do
+  for val in "$INTERVAL" "$WARN_FREE" "$CRIT_FREE" "$WARN_SWAP" "$CRIT_SWAP" "$WARN_REPEAT" "$GRACE" "$CPU_LOAD" "$CPU_PROC" "$CPU_MIN"; do
     [[ "$val" == <-> && ${#val} -le 6 ]] || { print -u2 'Configuration requires bounded non-negative integers'; return 1; }
   done
-  (( INTERVAL >= 2 && INTERVAL <= 300 && CRIT_FREE < WARN_FREE && WARN_FREE <= 100 && WARN_SWAP >= 1 && WARN_SWAP < CRIT_SWAP && CRIT_SWAP <= 1000 && WARN_REPEAT >= 30 && WARN_REPEAT <= 86400 && GRACE >= 1 && GRACE <= 60 )) || { print -u2 'Configuration thresholds out of range'; return 1; }
+  (( INTERVAL >= 2 && INTERVAL <= 300 && CRIT_FREE < WARN_FREE && WARN_FREE <= 100 && WARN_SWAP >= 1 && WARN_SWAP < CRIT_SWAP && CRIT_SWAP <= 1000 && WARN_REPEAT >= 30 && WARN_REPEAT <= 86400 && GRACE >= 1 && GRACE <= 60 && CPU_LOAD >= 10 && CPU_LOAD <= 400 && CPU_PROC >= 10 && CPU_PROC <= 2000 && CPU_MIN >= 1 && CPU_MIN <= 240 )) || { print -u2 'Configuration thresholds out of range'; return 1; }
   [[ "$NOTIFY" == true || "$NOTIFY" == false ]] || return 1
   [[ "$LANG_UI" == en || "$LANG_UI" == de ]] || return 1
   for val in "${TARGETS[@]}"; do
@@ -235,6 +242,96 @@ load_cfg_tracked() {
   CFG_LOADED_AT=$(date +%s)
   CFG_TARGETS_DIGEST=$(print -r -- "${(F)TARGETS}" | /usr/bin/shasum -a 256 | /usr/bin/cut -d' ' -f1)
 }
+# ---------- CPU watch (warn only) ----------
+# Fans follow CPU load, not memory. The memory indicator can stay normal while short-lived
+# processes are started in a tight loop (measured 06.11.2026: a menu-bar app started four CLI
+# probes every 2 s, load average 20 on 18 cores, 38 % memory free). This part only warns and
+# names the cause; it never sends a signal.
+cpu_load_percent() { # 1-minute load average relative to logical cores, integer percent
+  if [[ -n "${MEMGUARD_FAKE_LOAD:-}" ]]; then print -r -- "$MEMGUARD_FAKE_LOAD"; return; fi
+  local cores load; cores=$(sysctl -n hw.ncpu 2>/dev/null); load=$(sysctl -n vm.loadavg 2>/dev/null)
+  load=${${load#\{ }%% *}
+  [[ "$cores" == <-> && "$load" == [0-9]*.[0-9]* ]] && (( cores > 0 )) || return 1
+  local pct=$(( load * 100.0 / cores + 0.5 )); print -r -- ${pct%%.*}
+}
+cpu_seconds() { # observation window; test hook allows seconds instead of minutes
+  [[ "${MEMGUARD_TEST_CPU_SECONDS:-}" == <-> ]] && { print -r -- "$MEMGUARD_TEST_CPU_SECONDS"; return; }
+  print -r -- $(( CPU_MIN * 60 ))
+}
+proc_label() { # readable name from an executable path: the .app bundle if there is one
+  if [[ "$1" == *.app/* ]]; then print -r -- "${${1%%.app/*}:t}"; else print -r -- "${1:t}"; fi
+}
+cpu_top() { # biggest CPU users grouped by .app bundle, in percent of one core
+  ps -Axo pcpu=,comm= | awk '
+    { c=$1; $1=""; sub(/^ /,""); n=$0
+      if (match(n,/\/[^\/]+\.app\//)) { n=substr(n,RSTART+1,RLENGTH-6) } else { k=split(n,a,"/"); n=a[k] }
+      s[n]+=c }
+    END { for (k in s) if (s[k] >= 1) printf "%d\t%s\n", s[k]+0.5, k }' | sort -rn | head -${1:-3} |
+    awk -F'\t' '{printf "%s%s %s %%", (NR>1?", ":""), $2, $1}'
+}
+cpu_spawner() { # parent with the most processes younger than 30 s (launchd and MemGuard excluded)
+  ps -Axo pid=,ppid=,etime= | awk -v self=$$ '
+    $2 > 1 && $2 != self && $3 ~ /^00:[0-2][0-9]$/ { n[$2]++ }
+    END { best=0; for (p in n) if (n[p] > best) { best=n[p]; bp=p }; if (best >= 3) print bp "\t" best }' |
+  while IFS=$'\t' read -r ppid count; do
+    local name; name=$(proc_label "$(ps -p "$ppid" -o comm= 2>/dev/null)")
+    [[ -n "$name" ]] && print -r -- "$name ($count)"
+  done
+}
+typeset -g CPU_HIGH_SINCE=0 LAST_CPU_WARN=0 CPU_TEST_I=0
+typeset -gA HOT_SINCE HOT_ID HOT_WARNED HOT_SUM HOT_N
+cpu_step() {
+  local now=$(date +%s) window load top spawner
+  window=$(cpu_seconds)
+  if ! load=$(cpu_load_percent); then log 'ERROR CPU load unavailable'; return 0; fi
+  if (( load >= CPU_LOAD )); then
+    (( CPU_HIGH_SINCE )) || CPU_HIGH_SINCE=$now
+    if (( now - CPU_HIGH_SINCE >= window && now - LAST_CPU_WARN > WARN_REPEAT )); then
+      top=$(cpu_top 3); spawner=$(cpu_spawner)
+      log "CPU-WARN load=${load}% since=$(( (now - CPU_HIGH_SINCE) / 60 ))min top=[$top] spawner=[${spawner:-none}]"
+      notify "MemGuard: $(t 'CPU load high' 'CPU-Last hoch')" \
+        "$(t "Load ${load}% of all cores for $(( (now - CPU_HIGH_SINCE) / 60 )) min. Largest: $top${spawner:+. Starts processes continuously: $spawner}" "Last ${load} % aller Kerne seit $(( (now - CPU_HIGH_SINCE) / 60 )) Min. Größte: $top${spawner:+. Startet laufend Prozesse: $spawner}")"
+      LAST_CPU_WARN=$now
+    fi
+  else
+    CPU_HIGH_SINCE=0
+  fi
+  # Single process: average CPU over the window, so short dips below the threshold do not restart it.
+  # A process enters at or above the threshold, stays watched until a window ends with it below.
+  local line pid pcpu args id avg listing
+  local -A seen
+  if [[ -n "${MEMGUARD_TEST_PCPU:-}" ]]; then # test hook: one real PID with CPU values cycling from a list
+    local -a fake=(${(s:,:)MEMGUARD_TEST_PCPU})
+    listing="$MEMGUARD_TEST_PCPU_PID ${fake[$(( CPU_TEST_I % ${#fake} + 1 ))]} /usr/bin/mg-fake"; (( CPU_TEST_I++ ))
+  else
+    listing=$(ps -Axo pid=,pcpu=,comm= 2>/dev/null)
+  fi
+  for line in ${(f)"$(print -r -- "$listing" | awk -v t=$CPU_PROC -v keep=" ${(k)HOT_SINCE} " '$2 >= t || index(keep, " " $1 " ") { p=$1; c=$2; $1=""; $2=""; sub(/^ +/,""); print p "\t" c "\t" $0 }')"}; do
+    IFS=$'\t' read -r pid pcpu args <<< "$line"; args=$(proc_label "$args")
+    [[ "$pid" == <-> && "$pid" != $$ && "$pcpu" == [0-9]* ]] || continue
+    id=$(ps -p "$pid" -o lstart= 2>/dev/null); [[ -n "$id" ]] || continue
+    if [[ "${HOT_ID[$pid]:-}" != "$id" ]]; then
+      (( pcpu >= CPU_PROC )) || continue
+      HOT_ID[$pid]=$id; HOT_SINCE[$pid]=$now; HOT_WARNED[$pid]=0; HOT_SUM[$pid]=0; HOT_N[$pid]=0
+    fi
+    (( HOT_SUM[$pid] += pcpu, HOT_N[$pid] += 1 ))
+    seen[$pid]=1
+    (( now - HOT_SINCE[$pid] >= window )) || continue
+    printf -v avg '%.0f' $(( HOT_SUM[$pid] / HOT_N[$pid] ))
+    if (( avg >= CPU_PROC && now - HOT_WARNED[$pid] > WARN_REPEAT )); then
+      log "CPU-WARN process pid=$pid cpu=${avg}% avg since=$(( (now - HOT_SINCE[$pid]) / 60 ))min name=$args"
+      notify "MemGuard: $(t 'process busy' 'Prozess dauerhaft ausgelastet')" \
+        "$(t "$args averages ${avg}% CPU over $(( (now - HOT_SINCE[$pid]) / 60 )) min (PID $pid)" "$args nutzt im Schnitt ${avg} % CPU seit $(( (now - HOT_SINCE[$pid]) / 60 )) Min. (PID $pid)")"
+      HOT_WARNED[$pid]=$now
+    fi
+    # Window over: start the next one, or stop watching a process that has cooled down.
+    if (( pcpu >= CPU_PROC )); then HOT_SINCE[$pid]=$now; HOT_SUM[$pid]=0; HOT_N[$pid]=0; else unset "seen[$pid]"; fi
+  done
+  for pid in ${(k)HOT_SINCE}; do
+    (( ${+seen[$pid]} )) || { unset "HOT_SINCE[$pid]" "HOT_ID[$pid]" "HOT_WARNED[$pid]" "HOT_SUM[$pid]" "HOT_N[$pid]"; }
+  done
+  return 0
+}
 write_heartbeat() {
   local now valid tmp ok=0
   now=$(date +%s); valid=$(( 3 * INTERVAL + GRACE + 5 ))
@@ -340,6 +437,7 @@ cmd_run() {
   write_heartbeat
   while true; do
     step
+    cpu_step
     write_heartbeat
     sleep $INTERVAL
     (( ++n % reload_every == 0 )) && { load_cfg_tracked || return 1; write_heartbeat; }
@@ -420,13 +518,13 @@ cmd_preview() {
     pid=${row%%$'\t'*}; row=${row#*$'\t'}; uid=${row%%$'\t'*}; row=${row#*$'\t'}
     hit=${row%%$'\t'*}; args=${row#*$'\t'}
     if (( ${+alive[$pid]} )); then reason=$(target_reason "$pid" "$root" "$uid" "$args"); else reason=gone; fi
-    if [[ "$args" =~ '/([^/]+)\.app/' ]]; then name=$match[1]; else name=${${args%% *}:t}; fi
+    if [[ "$args" =~ '/([^/]+)\.app/' ]]; then name=$match[1]; else name=$args; fi
     print -r -- "${reason%%$'\t'*}	$pid	${name//[[:cntrl:]]/ }	${hit//[[:cntrl:]]/ }"
   done
 }
 case "${1:-status}" in
   run) cmd_run ;;
-  once) load_cfg && step ;;
+  once) load_cfg && { step; cpu_step; } ;;
   status) cmd_status ;;
   pause) touch "$PAUSE_FILE"; print "paused: MemGuard keeps measuring but will not terminate anything" ;;
   resume) rm -f "$PAUSE_FILE"; print "resumed" ;;

@@ -4,7 +4,7 @@ Lokale Speicherüberwachung für macOS mit Weboberfläche. MemGuard kann Speiche
 
 ## Konzept und Weiterentwicklung
 
-[CONCEPT.md](CONCEPT.md) beschreibt Produkt, Architektur und Sicherheitsregeln. [DEVELOPMENT.md](DEVELOPMENT.md) enthält Einstieg, Dateizuständigkeiten, Tests, Build und native Abnahme. [BACKLOG.md](BACKLOG.md) enthält priorisierte Aufgaben MG-01 bis MG-14 mit Verantwortlichkeiten und Abnahmekriterien. Eine neue Entwicklung kann diese Dokumente ohne Chatverlauf übernehmen.
+[CONCEPT.md](CONCEPT.md) beschreibt Produkt, Architektur und Sicherheitsregeln. [DEVELOPMENT.md](DEVELOPMENT.md) enthält Einstieg, Dateizuständigkeiten, Tests, Build und native Abnahme. [BACKLOG.md](BACKLOG.md) enthält priorisierte Aufgaben MG-01 bis MG-20 mit Verantwortlichkeiten und Abnahmekriterien. Eine neue Entwicklung kann diese Dokumente ohne Chatverlauf übernehmen.
 
 ## Mitteilung anklicken → Statistik
 
@@ -102,11 +102,28 @@ Der Monitor berücksichtigt zuerst MEMGUARD_CONFIG, dann die Benutzerdatei unter
 | terminate_grace_seconds | 8 | Wartezeit nach SIGTERM |
 | language | en | Sprache der macOS-Mitteilungen: en/de |
 | notifications | true | macOS-Mitteilungen aktiv |
+| cpu_warn_load_percent | 70 | CPU-Warnung, wenn die 1-Minuten-Last diesen Anteil aller logischen Kerne erreicht; 10–400. Auf dem Zielgerät mit 18 Kernen lag der Normalbetrieb bei 26–30 %, der Vorfall vom 06.11.2026 bei rund 111 %. |
+| cpu_warn_process_percent | 90 | Warnung, wenn ein einzelner Prozess so viel CPU nutzt (100 = ein Kern); 10–2000 |
+| cpu_warn_minutes | 10 | So lange muss die Last ununterbrochen anliegen, bevor gewarnt wird; 1–240 |
 | targets | [] | Leere Liste: ausschließlich warnen |
+
+Die drei CPU-Felder sind optional. Eine Konfiguration ohne sie bleibt gültig und erhält die Standardwerte; beim ersten Speichern in der Oberfläche werden sie geschrieben.
 
 Die Standards sind Ausgangswerte, keine anhand deines Workloads kalibrierten Grenzen. Zielmuster sind einfache Teilstrings vollständiger Kommandozeilen; keine regulären Ausdrücke. Tilde wird zum Benutzerverzeichnis. Verwende eindeutige Projektpfade mit 4–300 Zeichen; höchstens 50 Muster. Ein Muster kann mehrere Prozesse treffen. Die Prozessübersicht zeigt nur die 100 größten Prozesse. Vollständig ist die Treffer-Vorschau: in den Einstellungen „Treffer prüfen“ oder im Terminal `memguard preview [config] [monitor-pid]`. Sie nutzt dieselbe Entscheidungsfunktion wie der Signalpfad. Elternprozesse werden gegen den laufenden Monitor geprüft; läuft keiner, ist nur PID 1 als Elternprozess ausgeschlossen.
 
 Ein laufender Monitor lädt Änderungen nach 30 Prüfzyklen neu, bei zehn Sekunden Intervall ungefähr fünf Minuten, bei Signal-Wartezeiten länger. Speichern und Rücklesen beweist noch keine Übernahme durch den laufenden Monitor. Ab dieser Fassung schreibt der Monitor in jedem Zyklus einen Heartbeat (`heartbeat.json` im Protokollordner) mit Version, geladener Konfigurationsrevision (SHA-256 über Pfad und Dateiinhalt), wirksamen Werten und Zeitpunkt. Die Oberfläche unterscheidet daraus drei Stufen: **gespeichert** (Datei gelesen), **geladen** (Heartbeat nennt dieselbe Revision) und **wirksam geprüft** (zusätzlich dieselben Zielmuster und Schwellen, Prozess lebt, Messung zuletzt erfolgreich). Ein veralteter, ungültiger oder fehlender Heartbeat, ein toter Prozess oder ein Prozess ohne `memguard run` gilt nie als aktiver Schutz. „Wirksam geprüft“ beweist nicht, dass der Monitor unter Last die richtigen Prozesse beendet. Ein älterer Monitor (z. B. 1.0.0) schreibt keinen Heartbeat und erscheint als „Ohne Rückmeldung“, bis er aktualisiert wird.
+
+## CPU-Wächter (nur Warnung)
+
+Der Lüfter folgt der CPU, nicht dem Speicher. Am 06.11.2026 lief er dauerhaft, während der Speicherindikator bei 38 % frei lag: Eine Menüleisten-App startete alle zwei Sekunden vier Kommandozeilenprogramme neu, die Last stand bei rund 20 auf 18 Kernen. Darum prüft derselbe Monitor in jedem Zyklus zusätzlich:
+
+1. **Gesamtlast.** Liegt die 1-Minuten-Last für `cpu_warn_minutes` ununterbrochen über `cpu_warn_load_percent` aller Kerne, meldet MemGuard „CPU-Last hoch“ mit den drei größten Verbrauchern (nach .app-Bundle zusammengefasst).
+2. **Dauerstarter.** In derselben Meldung nennt er den Elternprozess mit den meisten Kindprozessen, die jünger als 30 Sekunden sind (ab drei; launchd und MemGuard selbst ausgenommen). So wird eine Schleife sichtbar, die laufend kurzlebige Prozesse startet und in keiner Verbrauchsliste lange auftaucht.
+3. **Einzelprozess.** Erreicht ein Prozess `cpu_warn_process_percent`, beobachtet MemGuard ihn ein Fenster lang (`cpu_warn_minutes`) und bildet den Durchschnitt aller Messungen. Liegt der Durchschnitt bei oder über der Schwelle, meldet er „Prozess dauerhaft ausgelastet“ mit Name, PID und Durchschnitt. Kurze Ausreißer darunter setzen das Fenster nicht zurück. Am Fensterende beginnt ein neues, wenn der Prozess noch über der Schwelle liegt, sonst endet die Beobachtung. Ein Neustart des Prozesses (andere Startzeit) beginnt neu. Anlass: Am 11.11.2026 pendelte ein Safari-Hilfsprozess 15 Minuten lang zwischen 74 und 94 % und blieb mit der früheren Regel „jede Messung über der Schwelle“ unerkannt.
+
+Wiederholt wird jede Meldung frühestens nach `warn_repeat_seconds`. Der CPU-Wächter sendet **nie** ein Signal, auch nicht an Zielmuster; Pause und Zielliste betreffen ihn nicht. Logzeilen beginnen mit `CPU-WARN`.
+
+Grenzen: `%CPU` von `ps` ist unter macOS ein gleitender Mittelwert, ein kurzer Spitzenwert wird geglättet. Die Dauerstarter-Erkennung ist eine Stichprobe je Zyklus und kann Prozesse übersehen, die kürzer als das Intervall leben; sie nennt den wahrscheinlichsten Verursacher, keinen Beweis. Der Heartbeat enthält die CPU-Werte noch nicht, „wirksam geprüft“ bezieht sich weiter nur auf Speicherschwellen und Ziele.
 
 ## Signalverhalten
 
@@ -148,6 +165,7 @@ Browserprüfung: Playwright als Testwerkzeug bereitstellen. MEMGUARD_PLAYWRIGHT_
 
 ## Offene Punkte
 
-- [ ] P1 · Betreiber: Austausch einer bestehenden Installation freigeben und anschließend live prüfen.
+- [ ] P1 · Betreiber/QA: Installation auf dem Zielgerät läuft seit 26.10.2026 (1.2.0, zuletzt aktualisiert 20.11.2026); offen sind der sichtbare Mitteilungsklick (MG-02) und der Rückkehrtest auf einem Testgerät (MG-03).
+- [ ] P1 · Betreiber: Eine Woche `CPU-WARN`-Zeilen gegen Fehlalarme prüfen (MG-20).
 - [ ] P1 · Betreiber: Repräsentativen Workload pilotieren und Zielmuster/Schwellenwerte anhand echter Messungen freigeben.
 - [ ] P2 · Release-Verantwortlicher: Bei Bedarf Apple-Signierung und Notarisierung für native Distribution ergänzen.

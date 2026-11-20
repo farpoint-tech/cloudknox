@@ -68,5 +68,20 @@ Native Mitteilungen: Nutzlastverarbeitung und App-Aktivierung sind implementiert
 ## Offene Punkte 1.2.0
 
 - [ ] P1 · QA/Betreiber: MG-02 mit sichtbarem Testbanner und tatsächlichem Klick am endgültigen Installationspfad abnehmen.
-- [ ] P1 · Betreiber: MG-03 – Benutzerinstallation gesondert freigeben und vollständig zurückprüfen.
+- [x] P1 · Betreiber: MG-03 – Benutzerinstallation am 26.10.2026 freigegeben und aktualisiert; Rückkehrtest auf Testgerät weiterhin offen (BACKLOG.md).
 - [ ] P2 · Entwicklung: Weitere Aufgaben gemäß BACKLOG.md; keine Vollständigkeit des Pilot-/Rolloutnachweises behaupten.
+
+## Nachprüfung MG-20 – 20. November 2026
+
+Branch `codex/memguard-cpu-watch`, Draft PR #58 auf `codex/mem-panic-app`. Version bleibt 1.2.0. Neu: CPU-Wächter im selben Monitor, nur Warnung, kein Signal an beobachtete Prozesse (Einzelheiten in BACKLOG.md, MG-20). Am 20.11.2026 geändert: Einzelprozess wird über das Fenster gemittelt; Dauerstarter-Test hängt nicht mehr von der Last des Testrechners ab.
+
+Lokal nachgewiesen am 20.11.2026: 81/81 automatisierte Tests bestanden, keine übersprungenen Tests (`npm --prefix app test`, rund 64 s). GitHub-Checks auf Commit 1592c25 erfolgreich: macos-tests, Aikido Security, Vercel, Vercel Preview Comments.
+
+Installationsstand: Der Benutzer-LaunchAgent `tech.farpoint.memguard` startet `~/Library/Application Support/MemGuard/memguard run`. Die Datei meldet 1.2.0 und ist byte-gleich mit `src/memguard` auf 1592c25. Das belegt den laufenden Monitor. Native Mitteilungsabnahme (MG-02) und Browserdurchlauf der neuen Einstellungsfelder sind damit nicht belegt.
+
+## Offene Punkte MG-20
+
+- [ ] P1 · Betreiber: Eine Woche `CPU-WARN`-Zeilen auf dem Zielgerät gegen Fehlalarme prüfen.
+- [ ] P2 · QA: Browserdurchlauf der Einstellungsseite mit den drei CPU-Feldern.
+- [ ] P2 · Entwicklung: CPU-Werte in den Heartbeat aufnehmen.
+- [ ] P2 · Product Owner: Merge-Entscheidung PR #58.

@@ -4,7 +4,7 @@ Dieses Verzeichnis ist ein eigenständiges Unterprojekt im Cloudknox-Repository.
 
 ## Arbeitsstand übernehmen
 
-Das Projekt lag bei Erstellung dieser Übergabe auf `codex/mem-panic-app`; PR #40 baut auf `claude/macos-memguard` / PR #39 auf. Vor Beginn GitHub-Status und aktuellen Commit neu lesen. Offen/entworfen bedeutet nicht gemergt. Die Website im Repository und die lokale Mac-App sind getrennte Produkte; ein Vercel-Websitecheck liefert keinen Laufnachweis für macOS-Mitteilungen.
+Das Projekt lag bei Erstellung dieser Übergabe auf `codex/mem-panic-app`; PR #40 baut auf `claude/macos-memguard` auf (PR #39 ist geschlossen, nicht gemergt). Stand 20.11.2026: Auf PR #40 setzen die Entwürfe PR #57 (`codex/memguard-diagnostic-export`, MG-19) und PR #58 (`codex/memguard-cpu-watch`, MG-20) auf; keiner davon ist gemergt. Vor Beginn GitHub-Status und aktuellen Commit neu lesen. Offen/entworfen bedeutet nicht gemergt. Die Website im Repository und die lokale Mac-App sind getrennte Produkte; ein Vercel-Websitecheck liefert keinen Laufnachweis für macOS-Mitteilungen.
 
 ```sh
 git clone https://github.com/farpoint-tech/cloudknox.git
@@ -74,5 +74,5 @@ Problem und Trigger beschrieben; Änderung auf ein Arbeitspaket begrenzt; passen
 ## Offene Punkte
 
 - [ ] P1 · QA/Betreiber: Nativen Test MG-02 am endgültigen Installationspfad durchführen.
-- [ ] P1 · Betreiber: Konkretes Upgrade freigeben und Rückprüfung gemäß MG-03 durchführen.
+- [ ] P1 · Betreiber: Upgrade am 26.10.2026 durchgeführt; Rückkehr zur Sicherung auf einem Testgerät gemäß MG-03 offen.
 - [ ] P2 · Maintainer: Nächstes Paket aus BACKLOG.md einem Verantwortlichen zuweisen.
