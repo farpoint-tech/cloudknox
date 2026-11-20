@@ -334,7 +334,8 @@ test('CPU watch waits for the whole observation window before warning',async t=>
 });
 test('CPU watch names a parent that starts processes continuously and signals nothing',async t=>{
   const marker='mg-spawn-'+Math.random().toString(36).slice(2);
-  const loop=spawn('/bin/zsh',['-c','while :; do /bin/sleep 3 & /bin/sleep 3 & sleep 0.3; done'],{argv0:marker,stdio:'ignore'});
+  // Real apps on a busy Mac can hold dozens of fresh children (ChatGPT: 36 on 20.11.2026), so the loop must clearly outnumber them: ~240 at once.
+  const loop=spawn('/bin/zsh',['-c','while :; do for i in {1..40}; do /bin/sleep 3 & done; sleep 0.5; done'],{argv0:marker,stdio:'ignore'});
   const loopExit=new Promise(resolve=>loop.once('exit',resolve));
   t.after(async()=>{if(loop.exitCode===null&&loop.signalCode===null)loop.kill('SIGKILL');await loopExit;await exec('/usr/bin/pkill',['-f',marker]).catch(()=>{});});
   await new Promise(resolve=>setTimeout(resolve,2500));
